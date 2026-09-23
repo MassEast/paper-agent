@@ -87,7 +87,7 @@ Abstract: {abstract}
 Return JSON only: {"relevant": true} or {"relevant": false}
 ```
 
-`{ref_text}` is up to `REFERENCE_PAPERS_LIMIT` papers (default 15, configurable) from your "My Collection" for that project — each as its title plus the first 400 characters of its abstract — included so the LLM has concrete calibration examples of what "relevant" means to you beyond the free-text description. Selected by tag priority (`important` → `to_discuss` → `to_read` → untagged), then filled with an even mix of your newest and oldest additions once a tier runs out of room. The same selection feeds keyword extraction and research-interest generation/refinement too. All prompt templates live in that one file — tune them there, nowhere else. Direct links to each, mapped to the diagram above:
+`{ref_text}` is up to `REFERENCE_PAPERS_LIMIT` papers (default 15, configurable) from your "My Collection" for that project — each as its title plus the first 400 characters of its abstract — included so the LLM has concrete calibration examples of what "relevant" means to you beyond the free-text description. Selected by tag priority (`important` → `to_discuss` → `to_read` → untagged), then filled with an even mix of your newest and oldest additions once a tier runs out of room. The same selection feeds keyword extraction and research-interest generation/refinement too. Direct links to all prompt templates, mapped to the diagram above:
 
 | Diagram step                                                   | Prompt                                                                                                 |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -168,9 +168,7 @@ kubectl apply -f k8s/backup-cronjob.yaml
 
 ### Backups
 
-`related-work-db-backup` is a separate daily CronJob (`k8s/backup-cronjob.yaml.example`, `scripts/backup_db.py`) that snapshots the live database onto its own PVC (`k8s/backup-pvc.yaml`, 10Gi by default) — a separate volume so a lost or corrupted main volume doesn't take the backups down with it too. It uses SQLite's own [online backup API](https://www.sqlite.org/backup.html) rather than a plain file copy, which matters because the app runs in WAL mode (`PRAGMA journal_mode=WAL`): a raw `cp` of the `.db` file can miss recently-committed data that's still sitting in the `-wal` file, or catch the file mid-checkpoint. Each snapshot is verified (`PRAGMA integrity_check` + a row count) immediately after it's written, and old snapshots are pruned once they exceed `BACKUP_RETENTION_DAYS` (default 30). Re-running on the same day is a no-op, so the job schedule doesn't need to be exactly once/day to stay correct.
-
-To restore: stop writes to the app (scale the Deployment to 0 replicas and suspend the crawl CronJob), copy the desired dated snapshot from the backups PVC over the live DB file via the toolpod, then scale back up. This is a manual, deliberate action — not scripted — since restoring is destructive to whatever's currently in the live DB.
+`related-work-db-backup` is a separate daily CronJob (`k8s/backup-cronjob.yaml.example`, `scripts/backup_db.py`) that snapshots the live database onto its own PVC (`k8s/backup-pvc.yaml`). It uses SQLite's own [online backup API](https://www.sqlite.org/backup.html) rather than a plain file copy, which matters because the app runs in WAL mode (`PRAGMA journal_mode=WAL`): a raw `cp` of the `.db` file can miss recently-committed data that's still sitting in the `-wal` file, or catch the file mid-checkpoint. Each snapshot is verified (`PRAGMA integrity_check` + a row count) immediately after it's written, and old snapshots are pruned once they exceed `BACKUP_RETENTION_DAYS` (default 30).
 
 Schema migrations run automatically on startup (plain `ALTER TABLE` statements, no Alembic — see `AGENTS.md`). To redeploy after a code change:
 
