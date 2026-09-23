@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block nav %}{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center" style="background-color: var(--paper-1); padding: 0 16px;">
+    <div class="w-full max-w-lg">
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold" style="color: var(--accent); margin-bottom: 12px; display: inline-flex; align-items: center; gap: 10px;">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color: var(--accent); flex-shrink: 0;"><use href="/static/icons.svg#icon-sparkles"></use></svg>
+                Related Work Agent
+            </h1>
+            <p style="color: var(--ink-3);">AI-powered literature review for research projects</p>
+        </div>
+
+        <div
+            style="background-color: var(--paper-2); border-radius: var(--radius-lg); padding: var(--space-lg); border: 1px solid var(--border-default); margin-bottom: 24px;">
+            <h2
+                style="font-size: 1rem; font-weight: 600; color: var(--ink-1); margin-bottom: 12px; text-align: center;">
+                How it works</h2>
+            <ul class="space-y-3" style="font-size: 0.875rem; color: var(--ink-2);">
+                <li class="flex items-start gap-3">
+                    <span style="color: var(--accent); font-weight: 700;">1.</span>
+                    <span>Create projects for your research topics</span>
+                </li>
+                <li class="flex items-start gap-3">
+                    <span style="color: var(--accent); font-weight: 700;">2.</span>
+                    <span>Add papers to your collection & describe your research interests</span>
+                </li>
+                <li class="flex items-start gap-3">
+                    <span style="color: var(--accent); font-weight: 700;">3.</span>
+                    <span>AI crawls arXiv and Semantic Scholar daily and can send email notifications for relevant papers</span>
+                </li>
+                <li class="flex items-start gap-3">
+                    <span style="color: var(--accent); font-weight: 700;">4.</span>
+                    <span>Tag, annotate and organize papers for your literature review</span>
+                </li>
+            </ul>
+        </div>
+
+        <form method="POST"
+            style="background-color: var(--paper-2); border-radius: var(--radius-lg); padding: var(--space-lg); border: 1px solid var(--border-default);">
+            <label
+                style="display: block; font-size: 0.875rem; color: var(--ink-3); margin-bottom: 8px;">Password</label>
+            <input type="password" name="password" placeholder="Enter password" class="focus-ring"
+                style="width: 100%; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 16px; color: var(--ink-1);"
+                autofocus required>
+
+            {% if error %}
+            <p style="color: var(--error); font-size: 0.875rem; margin-top: 12px;">{{ error }}</p>
+            {% endif %}
+
+            <button type="submit" class="focus-ring"
+                style="width: 100%; margin-top: 24px; height: var(--button-height); background-color: var(--accent); color: var(--accent-ink); font-weight: 600; border-radius: var(--radius-md); border: none;">
+                Sign in
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}

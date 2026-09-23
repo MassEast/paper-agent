@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: related-work
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: related-work
+  template:
+    metadata:
+      labels:
+        app: related-work
+    spec:
+      containers:
+      - name: related-work
+        image: <YOUR_REGISTRY>/<YOUR_IMAGE>:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: DATABASE_URL
+          value: "sqlite:////data/related_work.db"
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: related-work-secret
+              key: SECRET_KEY
+        - name: SITE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: related-work-secret
+              key: SITE_PASSWORD
+        - name: LLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: related-work-secret
+              key: LLM_API_KEY
+        - name: LLM_API_BASE
+          value: "https://api.openai.com/v1"
+        - name: LLM_MODELS
+          value: "gpt-4o,gpt-4o-mini"
+        - name: SCHOLAR_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: related-work-secret
+              key: SCHOLAR_API_KEY
+        - name: RESEND_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: related-work-secret
+              key: RESEND_API_KEY
+        - name: RESEND_FROM
+          valueFrom:
+            secretKeyRef:
+              name: related-work-secret
+              key: RESEND_FROM
+        - name: NOTIFIER_TYPE
+          valueFrom:
+            secretKeyRef:
+              name: related-work-secret
+              key: NOTIFIER_TYPE
+        - name: SERVER_URL
+          value: "https://your-domain.example.com"
+        - name: LOGS_DIR
+          value: "/data/logs"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: related-work-pvc
+      # Optional: pin/exclude specific nodes (e.g. to target a node with a particular
+      # GPU, or avoid a known-bad one). Example shape — replace or remove entirely:
+      # affinity:
+      #   nodeAffinity:
+      #     requiredDuringSchedulingIgnoredDuringExecution:
+      #       nodeSelectorTerms:
+      #       - matchExpressions:
+      #         - key: kubernetes.io/hostname
+      #           operator: NotIn
+      #           values:
+      #           - some-bad-node
+      #     preferredDuringSchedulingIgnoredDuringExecution:
+      #     - weight: 100
+      #       preference:
+      #         matchExpressions:
+      #         - key: kubernetes.io/hostname
+      #           operator: In
+      #           values:
+      #           - preferred-node
+      imagePullSecrets:
+      - name: private-registry-auth

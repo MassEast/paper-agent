@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-full mx-auto px-4 py-6">
+
+    <!-- Service status bar -->
+    <div id="service-bar"
+        style="display: flex; align-items: center; gap: 12px; padding: 8px 14px; margin-bottom: 20px; background-color: var(--paper-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); font-size: 0.72rem; color: var(--ink-3);">
+        <span style="font-weight: 600; color: var(--ink-4);">Services</span>
+        <button type="button" id="svc-test-btn"
+            style="font-size:0.72rem;color:var(--accent-ink);background:var(--accent);border:none;cursor:pointer;padding:2px 10px;border-radius:var(--radius-md);font-weight:600;line-height:1.6;"
+            onclick="runServiceCheck()">Test</button>
+        <span id="svc-llm" title="LLM ({{ llm_model }})" style="display:inline-flex;align-items:center;gap:4px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--ink-4);display:inline-block;" id="dot-llm"></span>{{ llm_model }}
+        </span>
+        <span id="svc-arxiv" title="arXiv search" style="display:inline-flex;align-items:center;gap:4px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--ink-4);display:inline-block;" id="dot-arxiv"></span>arXiv
+        </span>
+        <span id="svc-ss" title="Semantic Scholar recommendations" style="display:inline-flex;align-items:center;gap:4px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--ink-4);display:inline-block;" id="dot-scholar"></span>Semantic Scholar
+        </span>
+        <span id="svc-fig" title="arXiv figure fetch" style="display:inline-flex;align-items:center;gap:4px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--ink-4);display:inline-block;" id="dot-fig"></span>Figures
+        </span>
+        <span style="flex:1;"></span>
+        <span id="svc-error-summary" style="color:var(--error);display:none;font-size:0.72rem;"></span>
+        <span id="svc-progress" style="display:none;font-size:0.72rem;color:var(--ink-3);"></span>
+    </div>
+    <div id="svc-detail" style="display:none;margin-bottom:16px;padding:10px 14px;background-color:var(--paper-2);border:1px solid var(--border-subtle);border-radius:var(--radius-md);font-size:0.72rem;color:var(--ink-3);"></div>
+
+    <script>
+    var _SVC_ORDER = ['llm','arxiv','semantic_scholar','figure_fetch'];
+    var _SVC_DOTS  = {llm:'dot-llm', arxiv:'dot-arxiv', semantic_scholar:'dot-scholar', figure_fetch:'dot-fig'};
+    var _SVC_NAMES = {llm:'{{ llm_model }}', arxiv:'arXiv', semantic_scholar:'Semantic Scholar', figure_fetch:'Figures'};
+
+    function _setDot(id, state) {
+        var dot = document.getElementById(id);
+        if (!dot) return;
+        var colors = {ok:'var(--success)', fail:'var(--error)', loading:'var(--warning)', unknown:'var(--ink-4)'};
+        dot.style.background = colors[state] || colors.unknown;
+    }
+
+    function runServiceCheck() {
+        var btn = document.getElementById('svc-test-btn');
+        var progress = document.getElementById('svc-progress');
+        var detail = document.getElementById('svc-detail');
+        var errSummary = document.getElementById('svc-error-summary');
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        errSummary.style.display = 'none';
+        detail.style.display = 'none';
+        _SVC_ORDER.forEach(function(k){ _setDot(_SVC_DOTS[k], 'loading'); });
+
+        // Elapsed timer while waiting
+        var t0 = Date.now();
+        progress.style.display = '';
+        var ticker = setInterval(function(){
+            var secs = Math.floor((Date.now() - t0) / 1000);
+            progress.textContent = 'Testing... (' + secs + 's / ~5s)';
+        }, 1000);
+        progress.textContent = 'Testing... (0s / ~5s)';
+
+        fetch('/projects/health-check').then(function(r){ return r.json(); }).then(function(d){
+            clearInterval(ticker);
+            progress.style.display = 'none';
+            var rows = [];
+            var failures = [];
+            _SVC_ORDER.forEach(function(k){
+                var s = d.services[k];
+                if (!s) return;
+                _setDot(_SVC_DOTS[k], s.ok ? 'ok' : 'fail');
+                if (!s.ok) failures.push(_SVC_NAMES[k]);
+                var extra = [];
+                if (s.papers_returned !== undefined) extra.push(s.papers_returned + ' paper');
+                if (s.model) extra.push(s.model);
+                if (s.elapsed_ms) extra.push(s.elapsed_ms + 'ms');
+                if (s.url) extra.push('<a href="'+s.url+'" target="_blank" style="color:var(--accent);">sample figure</a>');
+                if (s.error) extra.push('<span style="color:var(--error);">'+s.error+'</span>');
+                var icon = s.ok ? '<span style="color:var(--success);">✓</span>' : '<span style="color:var(--error);">✗</span>';
+                rows.push('<div style="display:flex;align-items:center;gap:8px;padding:2px 0;">'+icon+'<span style="min-width:130px;color:var(--ink-2);">'+_SVC_NAMES[k]+'</span><span>'+extra.join(' · ')+'</span></div>');
+            });
+            detail.innerHTML = rows.join('');
+            detail.style.display = 'block';
+            if (failures.length) {
+                errSummary.textContent = failures.join(', ') + ' failed';
+                errSummary.style.display = '';
+            }
+            btn.disabled = false;
+            btn.style.opacity = '';
+        }).catch(function(e){
+            clearInterval(ticker);
+            progress.style.display = 'none';
+            _SVC_ORDER.forEach(function(k){ _setDot(_SVC_DOTS[k], 'fail'); });
+            errSummary.textContent = 'Request failed';
+            errSummary.style.display = '';
+            btn.disabled = false;
+            btn.style.opacity = '';
+        });
+    }
+    </script>
+
+    <div id="onboarding-projects"
+         style="display:flex;align-items:flex-start;gap:12px;padding:12px 16px;margin-bottom:20px;background-color:color-mix(in oklch,var(--accent) 10%,var(--paper-2));border:1px solid color-mix(in oklch,var(--accent) 30%,transparent);border-radius:var(--radius-md);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color:var(--accent);flex-shrink:0;margin-top:2px;">
+            <use href="/static/icons.svg#icon-info"></use>
+        </svg>
+        <div style="flex:1;font-size:0.8rem;color:var(--ink-2);line-height:1.6;">
+            <span style="font-weight:600;color:var(--ink-1);">New here?</span>
+            Create a project, add some papers to "My Collection" as reference material, write a research interest, and run a crawl — the agent will find relevant new papers for you every night.
+        </div>
+        <button onclick="document.getElementById('onboarding-projects').style.display='none';localStorage.setItem('ob-projects','1');"
+                style="background:none;border:none;cursor:pointer;color:var(--ink-4);padding:0;flex-shrink:0;line-height:1;"
+                title="Dismiss">✕</button>
+    </div>
+    <script>(function(){if(localStorage.getItem('ob-projects'))document.getElementById('onboarding-projects').style.display='none';})();</script>
+
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-2xl font-bold" style="color: var(--ink-1);">Your Projects</h1>
+        <form action="/projects" method="POST" class="flex gap-3">
+            <input type="text" name="name" placeholder="New project name..." class="focus-ring"
+                style="flex: 1; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 16px; color: var(--ink-1);">
+            <button type="submit" class="focus-ring"
+                style="height: var(--button-height); padding: 0 24px; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; font-weight: 600;">
+                Create Project
+            </button>
+        </form>
+    </div>
+
+    {% if projects %}
+    <div class="grid gap-4">
+        {% for project in projects %}
+        <div style="position: relative;"
+             onmouseenter="this.querySelector('.project-trash-btn').style.opacity='1'"
+             onmouseleave="this.querySelector('.project-trash-btn').style.opacity='0'">
+            <a href="/projects/{{ project.slug }}" class="block"
+                style="background-color: var(--paper-2); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: var(--space-lg);">
+                <div class="flex items-start justify-between">
+                    <div style="flex: 1; min-width: 0; padding-right: 32px;">
+                        <h2 class="text-xl font-semibold" style="color: var(--ink-1);">{{ project.name }}</h2>
+                        {% if project.research_interest %}
+                        <p style="color: var(--ink-3); margin-top: 8px;" class="line-clamp-2">{{ project.research_interest }}</p>
+                        {% endif %}
+                        <div class="flex gap-6 mt-3 text-sm" style="color: var(--ink-4);">
+                            <span>{{ project.papers|length }} papers</span>
+                            {% if project.crawl_logs %}
+                            <span>Last crawl: {{ project.crawl_logs[0].started_at.strftime('%b %d') if project.crawl_logs[0] else 'Never' }}</span>
+                            {% endif %}
+                            <span style="display:inline-flex;align-items:center;gap:5px;"
+                                  title="{% if project.crawl_hour %}Nightly crawl on — {{ '%02d:00'|format(project.crawl_hour) }} UTC{% else %}Nightly crawl off{% endif %}">
+                                <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background-color:{% if project.crawl_hour %}var(--success, #16a34a){% else %}var(--error){% endif %};{% if not project.crawl_hour %}opacity:0.7;{% endif %}"></span>
+                                {% if project.crawl_hour %}Nightly crawl{% else %}No nightly crawl{% endif %}
+                            </span>
+                            {% set ns = namespace(total_tokens=0, total_cost=0.0) %}
+                            {% for log in project.crawl_logs %}{% if log.total_tokens %}{% set ns.total_tokens = ns.total_tokens + log.total_tokens %}{% set ns.total_cost = ns.total_cost + log.estimated_cost %}{% endif %}{% endfor %}
+                            {% if ns.total_tokens > 0 %}
+                            <span title="Total LLM tokens used across all crawls (estimated Sonnet 4.6 pricing)">~{% if ns.total_tokens >= 1000000000 %}{{ (ns.total_tokens / 1000000000)|round(2) }}B{% elif ns.total_tokens >= 1000000 %}{{ (ns.total_tokens / 1000000)|round(2) }}M{% else %}{{ (ns.total_tokens / 1000)|round(1) }}k{% endif %} tokens · ~${{ "%.2f"|format(ns.total_cost) }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <span style="color: var(--ink-4); font-size: 1.25rem; flex-shrink: 0;">→</span>
+                </div>
+            </a>
+            <form action="/projects/{{ project.slug }}/trash" method="POST"
+                class="project-trash-btn"
+                style="position: absolute; bottom: 10px; right: 14px; opacity: 0; transition: opacity 150ms;"
+                onsubmit="return confirm('Move \'{{ project.name }}\' to trash?');"
+                onclick="event.stopPropagation();">
+                <button type="submit" title="Move to trash"
+                    style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: none; border: none; cursor: pointer; color: var(--ink-4); border-radius: var(--radius-md);"
+                    onmouseover="this.style.color='var(--error)'"
+                    onmouseout="this.style.color='var(--ink-4)'">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <use href="/static/icons.svg#icon-trash-2"></use>
+                    </svg>
+                </button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-20">
+        <div class="mb-4"
+            style="display: inline-flex; align-items: center; justify-content: center; width: 64px; height: 64px; border-radius: 9999px; background-color: var(--paper-3);">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color: var(--ink-2);">
+                <use href="/static/icons.svg#icon-book"></use>
+            </svg>
+        </div>
+        <p class="text-xl" style="color: var(--ink-2);">No projects yet</p>
+        <p style="color: var(--ink-4); margin-top: 8px;">Create your first project to start tracking research papers</p>
+    </div>
+    {% endif %}
+
+    {% if trashed_projects %}
+    <div style="margin-top: 32px; background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid color-mix(in oklch, var(--error) 30%, transparent); padding: var(--space-md);">
+        <h3 style="font-size: 1rem; font-weight: 600; color: var(--error); margin-bottom: 0; display: flex; align-items: center; justify-content: space-between; cursor: pointer;"
+            onclick="document.getElementById('project-trash-list').classList.toggle('hidden')">
+            <span style="display: inline-flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-trash-2"></use>
+                </svg>
+                Trash ({{ trashed_projects|length }})
+            </span>
+            <span style="font-size: 0.75rem; color: var(--ink-4);">Click to expand</span>
+        </h3>
+        <div id="project-trash-list" class="hidden" style="margin-top: 12px;">
+            <div class="space-y-2">
+                {% for project in trashed_projects %}
+                <div style="display: flex; align-items: center; justify-content: space-between; background-color: var(--paper-3); border-radius: var(--radius-md); padding: 12px 16px; opacity: 0.7;">
+                    <div class="flex-1 min-w-0">
+                        <span style="font-size: 0.875rem; color: var(--ink-3);" class="line-clamp-1">{{ project.name }}</span>
+                        <span style="font-size: 0.75rem; color: var(--ink-4); margin-left: 8px;">Trashed {{ project.trashed_at.strftime('%b %d') }}</span>
+                    </div>
+                    <form action="/projects/{{ project.slug }}/restore" method="POST" style="margin-left: 12px;">
+                        <button type="submit"
+                            style="height: 32px; padding: 0 12px; font-size: 0.75rem; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; outline: none;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <use href="/static/icons.svg#icon-rotate-ccw"></use>
+                            </svg>
+                            Restore
+                        </button>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

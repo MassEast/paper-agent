@@ -1,0 +1,155 @@
+{% if crawl %}
+<div id="crawl-status-panel" class="mt-4 p-4 rounded-lg" style="
+    {% if crawl.status == 'running' %}background-color: var(--warning-bg); border: 1px solid color-mix(in oklch, var(--warning) 40%, transparent);
+    {% elif crawl.status == 'success' %}background-color: color-mix(in oklch, var(--accent) 15%, var(--paper-1)); border: 1px solid var(--border-default);
+    {% elif crawl.status == 'cancelled' %}background-color: var(--paper-3); border: 1px solid var(--border-default);
+    {% elif crawl.status == 'error' %}background-color: var(--error-bg); border: 1px solid color-mix(in oklch, var(--error) 40%, transparent);
+    {% else %}background-color: var(--paper-3); border: 1px solid var(--border-default);
+    {% endif %}">
+    <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+            {% if crawl.status == 'running' %}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                style="color: var(--warning); animation: spin 1s linear infinite; flex-shrink: 0;">
+                <use href="/static/icons.svg#icon-loader"></use>
+            </svg>
+            <span class="text-sm font-medium" style="color: var(--ink-1);">Crawling in progress...</span>
+            {% elif crawl.status == 'success' %}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                style="color: var(--success); flex-shrink: 0;">
+                <use href="/static/icons.svg#icon-check"></use>
+            </svg>
+            <span class="text-sm font-medium" style="color: var(--ink-1);">Crawl complete</span>
+            {% elif crawl.status == 'cancelled' %}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                style="color: var(--warning); flex-shrink: 0;">
+                <use href="/static/icons.svg#icon-pause"></use>
+            </svg>
+            <span class="text-sm font-medium" style="color: var(--ink-1);">Crawl stopped</span>
+            {% elif crawl.status == 'error' %}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color: var(--error); flex-shrink: 0;">
+                <use href="/static/icons.svg#icon-x"></use>
+            </svg>
+            <span class="text-sm font-medium" style="color: var(--ink-1);">Crawl failed</span>
+            {% else %}
+            <span style="color: var(--ink-3);">{{ crawl.status|title }}</span>
+            {% endif %}
+        </div>
+        {% if crawl.status == 'running' %}
+        <button type="button" class="focus-ring" hx-post="/projects/{{ project.slug }}/stop-crawl"
+            hx-target="#crawl-status-panel" hx-swap="outerHTML"
+            style="flex-shrink: 0; height: 32px; padding: 0 12px; font-size: 0.75rem; font-weight: 600; color: var(--error); background-color: var(--error-bg); border-radius: var(--radius-md); border: 1px solid color-mix(in oklch, var(--error) 40%, transparent); display: inline-flex; align-items: center; gap: 6px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-pause"></use>
+            </svg>
+            Stop
+        </button>
+        {% endif %}
+    </div>
+    {% if crawl.status == 'running' %}
+    <div class="mt-1 text-xs" style="color: var(--ink-4);">You can close this page, the crawl keeps running</div>
+    {% endif %}
+    <div class="mt-1 text-xs" style="color: var(--ink-3);">
+        {{ crawl.papers_found }} found
+        {% if crawl.papers_checked > 0 %}
+        · {{ crawl.papers_checked }} screened
+        {% endif %}
+        → {{ crawl.papers_added }} added
+        {% if crawl.papers_checked > crawl.papers_added %}
+        ({{ crawl.papers_checked - crawl.papers_added }} skipped)
+        {% endif %}
+    </div>
+
+    {% if crawl.status != 'running' and crawl.keywords_list and crawl.keywords_list|length > 0 %}
+    <div class="mt-2 flex items-center gap-2 flex-wrap">
+        <span class="text-xs" style="color: var(--ink-4); font-weight: 600;">Keywords:</span>
+        <div class="flex gap-1 flex-wrap">
+            {% for kw in crawl.keywords_list[:6] %}
+            <span
+                style="padding: 2px 8px; font-size: 0.75rem; background-color: color-mix(in oklch, var(--accent) 20%, var(--paper-2)); color: var(--ink-2); border-radius: 9999px;">{{
+                kw }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if crawl.started_at %}
+    <div class="mt-2 text-xs" style="color: var(--ink-4);">
+        {% if crawl.status == 'running' %}
+        <span style="display: inline-flex; align-items: center; gap: 6px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-clock"></use>
+            </svg>
+            Started <span id="crawl-start-{{ crawl.id }}" data-utc="{{ crawl.started_at.isoformat() }}">{{ crawl.started_at.strftime('%H:%M') }}</span>
+        </span>
+        {% if crawl.papers_found == 0 %}
+            {% if crawl.keywords_list %}
+            <span class="ml-2" style="color: var(--warning);">Searching arXiv...</span>
+            {% else %}
+            <span class="ml-2" style="color: var(--warning);">Extracting keywords...</span>
+            {% endif %}
+        {% else %}
+            {% set limit = crawl.paper_limit if crawl.paper_limit and crawl.paper_limit > 0 else crawl.papers_found %}
+            {% set to_screen = [limit, crawl.papers_found]|min %}
+            {% if crawl.papers_checked < to_screen %}
+            <span class="ml-2">{{ crawl.papers_checked }} / {{ to_screen }} done ({{ ((crawl.papers_checked / to_screen * 100) if to_screen > 0 else 0)|round|int }}%){% if in_flight > 0 %} · {{ in_flight }} processing{% endif %}</span>
+            {% else %}
+            <span class="ml-2" style="color: var(--success);">All papers analyzed.</span>
+            {% endif %}
+        {% endif %}
+        {% else %}
+        {% if not crawl.finished_at %}
+        <span>Started: <span id="crawl-start-{{ crawl.id }}" data-utc="{{ crawl.started_at.isoformat() }}">{{ crawl.started_at.strftime('%Y-%m-%d %H:%M') }}</span></span>
+        {% endif %}
+        {% endif %}
+    </div>
+    <script>
+    (function(){var el=document.getElementById('crawl-start-{{ crawl.id }}');if(el&&el.dataset.utc){var d=new Date(el.dataset.utc+'Z');el.textContent=d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}})();
+    </script>
+    {% endif %}
+
+    {% if crawl.status == 'running' %}
+    {% set _limit = crawl.paper_limit if crawl.paper_limit and crawl.paper_limit > 0 else crawl.papers_found %}
+    {% set _to_screen = [_limit, crawl.papers_found]|min if crawl.papers_found > 0 else 0 %}
+    <div class="mt-2 h-1 rounded overflow-hidden" style="background-color: var(--paper-3);">
+        <div class="h-full"
+            style="background-color: var(--accent); transition: width 500ms ease; width: {% if _to_screen > 0 %}{{ ((crawl.papers_checked / _to_screen * 100) if _to_screen > 0 else 0)|round|int }}{% else %}0{% endif %}%;">
+        </div>
+    </div>
+    {% if current_paper %}
+    <p class="mt-1 text-xs truncate" style="color: var(--ink-4);">Screening: {{ current_paper[:100] }}</p>
+    {% endif %}
+    {% elif crawl.status in ['success', 'cancelled'] and crawl.duration_minutes %}
+    <div class="mt-2 flex items-center gap-4 text-xs" style="color: var(--ink-4);">
+        <span style="display: inline-flex; align-items: center; gap: 6px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-timer"></use>
+            </svg>
+            {{ crawl.duration_minutes|round(1) }} min
+        </span>
+        {% if crawl.total_tokens %}
+        <span style="display: inline-flex; align-items: center; gap: 6px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-hash"></use>
+            </svg>
+            {% if crawl.total_tokens >= 1000000 %}{{ (crawl.total_tokens / 1000000)|round(2) }}M{% else %}{{ (crawl.total_tokens / 1000)|round(1) }}k{% endif %} tokens
+        </span>
+        <span style="display: inline-flex; align-items: center; gap: 6px;">
+            ${{ "%.2f"|format(crawl.estimated_cost) }}
+        </span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if crawl.error_message %}
+    <p class="mt-2 text-xs"
+        style="color: var(--error); background-color: var(--error-bg); border-radius: var(--radius-sm); padding: 6px 8px;">
+        {{ crawl.error_message[:200] }}</p>
+    {% endif %}
+</div>
+{% else %}
+<div class="mt-4 p-4 rounded-lg text-center"
+    style="background-color: var(--paper-2); border: 1px solid var(--border-default);">
+    <p class="text-sm" style="color: var(--ink-4);">Start a crawl to discover papers</p>
+</div>
+{% endif %}

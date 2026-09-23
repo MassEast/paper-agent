@@ -1,0 +1,1410 @@
+{% extends "base.html" %}
+
+{% block nav_project %}
+<span style="color: var(--ink-4); flex-shrink: 0;">/</span>
+<span style="font-size: 0.9rem; font-weight: 600; color: var(--ink-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ project.name }}</span>
+<a href="/projects"
+    style="color: var(--ink-3); text-decoration: none; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;"
+    onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--ink-3)'">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <use href="/static/icons.svg#icon-arrow-left"></use>
+    </svg>
+    Back
+</a>
+{% endblock %}
+
+{% block content %}
+<style>
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    @keyframes crawl-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(180, 83, 9, 0); background-color: transparent; }
+        50%       { box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.25); background-color: rgba(180, 83, 9, 0.06); }
+    }
+
+    .detail-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 24px;
+    }
+
+    @media (min-width: 1024px) {
+        .detail-grid {
+            grid-template-columns: 1fr 360px;
+        }
+    }
+
+    .sidebar-col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .sidebar-col>div {
+        min-width: 0;
+    }
+</style>
+<div style="max-width: 1600px; margin: 0 auto; padding: 10px 16px;">
+    {% if not project.crawl_hour %}
+    {% set _missing = [] %}
+    {% if not project.research_interest %}{% set _missing = _missing + ['a research interest'] %}{% endif %}
+    {% if not project.saved_keywords %}{% set _missing = _missing + ['search keywords'] %}{% endif %}
+    <div id="crawl-off-banner" style="display:flex;align-items:flex-start;gap:12px;padding:12px 16px;margin-bottom:16px;background-color:color-mix(in oklch,var(--error) 8%,var(--paper-2));border:1px solid color-mix(in oklch,var(--error) 30%,transparent);border-radius:var(--radius-md);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color:var(--error);flex-shrink:0;margin-top:2px;">
+            <use href="/static/icons.svg#icon-bell-off"></use>
+        </svg>
+        <div style="font-size:0.78rem;color:var(--ink-2);line-height:1.6;">
+            <span style="font-weight:600;color:var(--error);">Nightly crawl is off.</span>
+            {% if _missing %}
+            To enable it, set {{ _missing | join(' and ') }} first — then toggle it on in the sidebar.
+            {% else %}
+            Turn it on in the sidebar under "Notifications and Nightly Crawl".
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if not project.research_interest and not project.saved_keywords and not curated_papers %}
+    <div id="onboarding-project"
+        style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;margin-bottom:20px;background-color:color-mix(in oklch,var(--accent) 10%,var(--paper-2));border:1px solid color-mix(in oklch,var(--accent) 30%,transparent);border-radius:var(--radius-md);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+            style="color:var(--accent);flex-shrink:0;margin-top:3px;">
+            <use href="/static/icons.svg#icon-info"></use>
+        </svg>
+        <div style="flex:1;font-size:0.8rem;color:var(--ink-2);line-height:1.8;">
+            <div style="font-weight:600;color:var(--ink-1);margin-bottom:6px;">Getting started — here's what to do:
+            </div>
+            <ol style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px;">
+                <li><strong>Add papers to My Collection</strong> — use the "Add" button below. These become reference
+                    examples for the AI screener.</li>
+                <li><strong>Write or generate a Research Interest</strong> — describe what you're working on (or click
+                    <em>Generate</em> to derive it from your collection).</li>
+                <li><strong>Generate Keywords</strong> — click <em>Generate keywords</em> in the sidebar; these drive
+                    the arXiv search.</li>
+                <li><strong>Set a notification email</strong> — so you get crawl results by email.</li>
+                <li><strong>Run a manual crawl</strong> — hit <em>Crawl now</em> to see it in action before the nightly
+                    schedule kicks in.</li>
+            </ol>
+        </div>
+        <button
+            onclick="document.getElementById('onboarding-project').style.display='none';localStorage.setItem('ob-proj-{{ project.slug }}','1');"
+            style="background:none;border:none;cursor:pointer;color:var(--ink-4);padding:0;flex-shrink:0;line-height:1;"
+            title="Dismiss">✕</button>
+    </div>
+    <script>(function () { if (localStorage.getItem('ob-proj-{{ project.slug }}')) document.getElementById('onboarding-project').style.display = 'none'; })();</script>
+    {% endif %}
+
+    <div class="detail-grid">
+        <div>
+            <div
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;"
+                    class="sm:flex-row sm:items-center justify-between mb-4 gap-2">
+                    <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--ink-1);">Research Interest</h2>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <button type="button" id="toggle-ri-help"
+                            style="font-size: 0.75rem; color: var(--ink-3); background: none; border: none; cursor: pointer; padding: 0 4px; display: inline-flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <use href="/static/icons.svg#icon-info"></use>
+                            </svg>
+                            How it works</button>
+                        <button class="focus-ring" type="button" id="generate-btn"
+                            style="font-size: 0.75rem; color: var(--accent); height: var(--button-height); padding: 0 12px; border-radius: var(--radius-md); background-color: color-mix(in oklch, var(--accent) 12%, var(--paper-2)); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent); cursor: pointer; width: fit-content; display: inline-flex; align-items: center; gap: 6px; transition: background-color 150ms ease, color 150ms ease;"
+                            title="Let AI generate or improve the research interest from My Collection papers"
+                            onmouseover="if(!this.disabled) { this.style.backgroundColor='color-mix(in oklch, var(--accent) 22%, var(--paper-2))'; }"
+                            onmouseout="if(!this.disabled) { this.style.backgroundColor='color-mix(in oklch, var(--accent) 12%, var(--paper-2))'; }"
+                            onclick="generateResearchInterest()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <use href="/static/icons.svg#icon-sparkles"></use>
+                            </svg>
+                            Generate
+                        </button>
+                    </div>
+                </div>
+                <form action="/projects/{{ project.slug }}/research-interest" method="POST" id="research-form">
+                    <textarea class="focus-ring" name="research_interest" id="research-interest-field" rows="7"
+                        placeholder="Describe what you're working on. The AI will use this to find relevant papers."
+                        style="width: 100%; background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 12px 16px; color: var(--ink-1); outline: none; min-height: 140px; resize: vertical;"
+                        oninput="checkDirty()">{{ project.research_interest or "" }}</textarea>
+                    <div class="flex justify-between items-center mt-3">
+                        <p class="text-xs" style="color: var(--ink-4); min-height: 1lh;">This helps the AI find relevant
+                            papers on arXiv</p>
+                        <button class="focus-ring" type="submit" id="save-btn"
+                            style="height: var(--button-height); padding: 0 24px; min-width: 90px; white-space: nowrap; background-color: var(--paper-3); color: var(--ink-4); border-radius: var(--radius-md); border: 1px solid var(--border-default); display: inline-flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.55; cursor: not-allowed;"
+                            disabled aria-disabled="true">
+                            Save
+                        </button>
+                    </div>
+                </form>
+                <script>
+                    let _riSavedValue = {{ (project.research_interest or '') | tojson }};
+                    const saveBtn = document.getElementById('save-btn');
+                    const riField = document.getElementById('research-interest-field');
+                    const riForm = document.getElementById('research-form');
+
+                    function _setSaveBtnState(dirty) {
+                        saveBtn.disabled = !dirty;
+                        saveBtn.setAttribute('aria-disabled', dirty ? 'false' : 'true');
+                        saveBtn.style.backgroundColor = dirty ? 'var(--accent)' : 'var(--paper-3)';
+                        saveBtn.style.color = dirty ? 'var(--accent-ink)' : 'var(--ink-4)';
+                        saveBtn.style.opacity = dirty ? '1' : '0.55';
+                        saveBtn.style.cursor = dirty ? 'pointer' : 'not-allowed';
+                        if (!dirty) saveBtn.textContent = 'Save';
+                    }
+
+                    function checkDirty() {
+                        _setSaveBtnState(riField.value !== _riSavedValue);
+                    }
+                    checkDirty();
+
+                    function saveResearchInterest(value, onDone) {
+                        const fd = new FormData();
+                        fd.append('research_interest', value);
+                        fetch(riForm.action, {
+                            method: 'POST',
+                            headers: { 'X-Requested-With': 'fetch' },
+                            body: fd,
+                        }).then(r => {
+                            if (r.ok || r.status === 204) {
+                                _riSavedValue = value;
+                                _setSaveBtnState(false);
+                                saveBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
+                                setTimeout(() => { saveBtn.textContent = 'Save'; }, 2000);
+                                if (onDone) onDone();
+                            }
+                        }).catch(() => { });
+                    }
+
+                    riForm.addEventListener('submit', function (e) {
+                        e.preventDefault();
+                        saveResearchInterest(riField.value);
+                    });
+
+                    const _genOrigHtml = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-sparkles"></use></svg> Generate';
+                    const _checkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg>';
+                    const _xSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-x"></use></svg>';
+
+                    // Shared animated loading helper. Returns a stop() function.
+                    function startGeneratingAnim(btnEl, opts) {
+                        opts = opts || {};
+                        const label = opts.label || 'Generating';
+                        const estimate = opts.estimate || '10–15s';
+                        const spinner = '<div style="width:12px;height:12px;border-radius:50%;border:2px solid rgba(128,128,128,0.25);border-top-color:currentColor;animation:spin 0.75s linear infinite;flex-shrink:0;display:inline-block;vertical-align:middle;"></div>';
+                        const t0 = Date.now();
+                        function render() {
+                            const secs = Math.floor((Date.now() - t0) / 1000);
+                            const timer = ' <span style="opacity:0.5;font-size:0.82em;">(' + secs + 's / ~' + estimate + ')</span>';
+                            btnEl.innerHTML = spinner + ' ' + label + '...' + timer;
+                        }
+                        render();
+                        const iv = setInterval(render, 1000);
+                        return function () { clearInterval(iv); };
+                    }
+
+                    function generateResearchInterest() {
+                        const btn = document.getElementById('generate-btn');
+                        btn.disabled = true;
+                        btn.style.opacity = '0.7';
+                        const stopAnim = startGeneratingAnim(btn, { estimate: '10–15s' });
+
+                        const existingText = riField.value.trim();
+                        fetch('/projects/{{ project.slug }}/generate-research-interest', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ existing_text: existingText })
+                        })
+                            .then(r => r.json())
+                            .then(d => {
+                                stopAnim();
+                                if (d.research_interest) {
+                                    riField.value = d.research_interest;
+                                    btn.innerHTML = _checkSvg + ' Saving...';
+                                    saveResearchInterest(d.research_interest, () => {
+                                        btn.innerHTML = _checkSvg + ' Generated & saved';
+                                        setTimeout(() => {
+                                            btn.innerHTML = _genOrigHtml;
+                                            btn.disabled = false;
+                                            btn.style.opacity = '1';
+                                        }, 2000);
+                                    });
+                                } else {
+                                    btn.innerHTML = _xSvg + ' ' + (d.error || 'Error');
+                                    btn.disabled = false;
+                                    btn.style.opacity = '1';
+                                    setTimeout(() => { btn.innerHTML = _genOrigHtml; }, 3000);
+                                }
+                            })
+                            .catch(() => {
+                                stopAnim();
+                                btn.innerHTML = _xSvg + ' Error';
+                                btn.disabled = false;
+                                btn.style.opacity = '1';
+                                setTimeout(() => { btn.innerHTML = _genOrigHtml; }, 2000);
+                            });
+                    }
+                </script>
+
+                <div id="ri-help" class="hidden"
+                    style="margin-top: 10px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
+                    <p style="font-weight: 600; margin-bottom: 6px; color: var(--ink-1);">How research interest
+                        generation works</p>
+                    <p>If you already have text in the box, Generate <strong>refines and expands your existing
+                            description</strong>, using papers in My Collection as silent background context — the
+                        output will not mention specific papers or authors, only ideas, problems, methods, and goals.
+                    </p>
+                    <p style="margin-top: 6px;">If the box is empty, the LLM reads <strong>titles and abstracts of all
+                            papers in My Collection</strong> (up to 15, priority-ordered by tag) and synthesises a
+                        first-person research interest from scratch.</p>
+                    <p style="margin-top: 6px; color: var(--ink-4);">Tip: the more diverse and well-tagged your
+                        collection, the more precise the generated description.</p>
+                    <button type="button" onclick="document.getElementById('prompt-ri').classList.toggle('hidden')"
+                        style="margin-top: 6px; font-size: 0.7rem; color: var(--accent-muted); text-decoration: underline; background: none; border: none; cursor: pointer; padding: 0;">show
+                        prompt</button>
+                    <pre id="prompt-ri" class="hidden"
+                        style="margin-top: 6px; white-space: pre-wrap; font-size: 0.68rem; background-color: var(--paper-2); border-radius: 4px; padding: 8px; color: var(--ink-3); font-family: monospace; line-height: 1.4;">{{ prompt_research_interest }}</pre>
+                </div>
+                <script>
+                    document.getElementById('toggle-ri-help').addEventListener('click', function () {
+                        const h = document.getElementById('ri-help');
+                        h.classList.toggle('hidden');
+                        this.style.color = h.classList.contains('hidden') ? 'var(--ink-3)' : 'var(--ink-1)';
+                    });
+                </script>
+            </div>
+
+            <div
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2">
+                    <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--ink-1);">Add to My Collection</h2>
+                    <button type="button" id="toggle-add-help"
+                        style="font-size: 0.75rem; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; background: none; border: none; cursor: pointer; padding: 0;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <use href="/static/icons.svg#icon-info"></use>
+                        </svg>
+                        How it works
+                    </button>
+                </div>
+                <div id="add-help" class="hidden"
+                    style="margin-bottom: 12px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
+                    <p style="font-weight: 600; margin-bottom: 8px; color: var(--ink-1);">What happens when you paste a
+                        URL</p>
+                    <ol
+                        style="list-style: decimal; padding-left: 16px; display: flex; flex-direction: column; gap: 6px;">
+                        <li><strong>arXiv URL</strong> — fetched directly from arXiv. Full enrichment: figure, citation
+                            count, page count, LLM summary &amp; contributions, author institutions.</li>
+                        <li><strong>Any other URL (PDF, ACL, NeurIPS, blog…)</strong>
+                            <ol
+                                style="list-style: lower-alpha; padding-left: 14px; margin-top: 4px; display: flex; flex-direction: column; gap: 4px;">
+                                <li>HTML page is fetched. If it has an arXiv link that matches the title → treated as
+                                    arXiv paper (full enrichment above).</li>
+                                <li>If no arXiv link but a DOI is present (<code>citation_doi</code> meta tag) →
+                                    Semantic Scholar is queried. If Scholar knows an arXiv preprint for that DOI → full
+                                    arXiv enrichment.</li>
+                                <li>If no arXiv match → stored as a web paper. Title, authors, abstract (from
+                                    <code>citation_abstract</code> only — not site taglines), and the stripped page body
+                                    are extracted. LLM generates a summary from the full page text. No figure, no
+                                    citation count.</li>
+                            </ol>
+                        </li>
+                    </ol>
+                    <p style="margin-top: 8px; color: var(--ink-3);">All papers are tagged <em>Important</em> on add and
+                        skip LLM screening.</p>
+                </div>
+                <script>
+                    document.getElementById('toggle-add-help').addEventListener('click', function () {
+                        const h = document.getElementById('add-help');
+                        h.classList.toggle('hidden');
+                        this.style.color = h.classList.contains('hidden') ? 'var(--ink-3)' : 'var(--ink-1)';
+                    });
+                </script>
+                <form action="/projects/{{ project.slug }}/collection-add" method="POST">
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <input type="url" name="url" placeholder="Paste any URL — arXiv, ACL, NeurIPS, blog…"
+                            style="flex: 1; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 16px; color: var(--ink-1); outline: none;">
+                        <button class="focus-ring" type="submit"
+                            style="height: var(--button-height); padding: 0 24px; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; white-space: nowrap;">
+                            Add
+                        </button>
+                    </div>
+                </form>
+                {% if request.args.get('add_info') == 'already_exists' %}
+                <p
+                    style="font-size: 0.8rem; color: var(--warning); margin-top: 8px; padding: 8px 12px; background-color: color-mix(in oklch, var(--warning) 12%, var(--paper-2)); border: 1px solid color-mix(in oklch, var(--warning) 40%, transparent); border-radius: var(--radius-md); font-weight: 500;">
+                    ⚠ This paper is already in My Collection.</p>
+                {% elif request.args.get('add_info') == 'non_arxiv' %}
+                <p
+                    style="font-size: 0.8rem; color: var(--ink-2); margin-top: 8px; padding: 8px 12px; background-color: var(--paper-3); border-radius: var(--radius-md);">
+                    Non-arXiv URL added — fetching metadata in background.</p>
+                {% endif %}
+            </div>
+
+            <div
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
+                    <h2
+                        style="font-size: 1.125rem; font-weight: 600; color: var(--ink-1); display: inline-flex; align-items: center; gap: 8px;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <use href="/static/icons.svg#icon-book"></use>
+                        </svg>
+                        All Papers ({{ new_papers|length + curated_papers|length }})
+                    </h2>
+                    <div class="flex items-center gap-2" style="flex-shrink: 0;">
+                        <a href="/project/{{ project.slug }}/export.csv" download title="Download papers as CSV"
+                            class="focus-ring"
+                            style="height: var(--input-height); padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 600; color: var(--ink-2); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); text-decoration: none; white-space: nowrap;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <use href="/static/icons.svg#icon-download"></use>
+                            </svg>
+                            CSV
+                        </a>
+                        <input type="text" name="search" placeholder="Search..." value="{{ search_query or '' }}"
+                            hx-get="/projects/{{ project.slug }}/papers" hx-target="#paper-list"
+                            hx-trigger="keyup changed delay:300ms"
+                            style="height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 12px; color: var(--ink-1); font-size: 0.875rem; width: 200px; outline: none;">
+                    </div>
+                </div>
+
+                <div id="paper-list">
+                    {% include "partials/paper_list.html" %}
+                </div>
+                <script>
+                (function() {
+                    function initNotesResize(textarea) {
+                        if (textarea.dataset.resizeInit) return;
+                        textarea.dataset.resizeInit = '1';
+                        var arxivId = textarea.dataset.arxivId;
+                        var projectId = textarea.dataset.projectId;
+                        var first = true;
+                        var ro = new ResizeObserver(function() {
+                            if (first) { first = false; return; }
+                            var height = Math.round(textarea.getBoundingClientRect().height);
+                            var body = new URLSearchParams();
+                            body.append('project_id', projectId);
+                            body.append('notes', textarea.value);
+                            body.append('notes_height', height);
+                            fetch('/paper/' + arxivId + '/notes', { method: 'POST', body: body });
+                        });
+                        ro.observe(textarea);
+                    }
+                    function scanNotes(root) {
+                        root.querySelectorAll('textarea[data-arxiv-id]').forEach(initNotesResize);
+                    }
+                    var paperList = document.getElementById('paper-list');
+                    if (paperList) {
+                        scanNotes(paperList);
+                        new MutationObserver(function() { scanNotes(paperList); })
+                            .observe(paperList, { childList: true, subtree: true });
+                    }
+
+                    // Full swaps of #paper-list (5s pending-abstract poll, search, restore/trash/move)
+                    // replace #new-papers-list / #curated-list with brand-new DOM nodes, resetting their
+                    // internal scroll (overflow-y: auto) back to 0. Preserve it across the swap.
+                    var savedScroll = {};
+                    document.body.addEventListener('htmx:beforeSwap', function(evt) {
+                        if (evt.detail.target !== paperList) return;
+                        ['new-papers-list', 'curated-list'].forEach(function(id) {
+                            var el = document.getElementById(id);
+                            if (el) savedScroll[id] = el.scrollTop;
+                        });
+                    });
+                    document.body.addEventListener('htmx:afterSwap', function(evt) {
+                        if (evt.detail.target !== paperList) return;
+                        ['new-papers-list', 'curated-list'].forEach(function(id) {
+                            var el = document.getElementById(id);
+                            if (el && savedScroll[id]) el.scrollTop = savedScroll[id];
+                        });
+                    });
+                })();
+                </script>
+            </div>
+        </div>
+
+        <div class="sidebar-col">
+            <div
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
+                <h2
+                    style="font-size: 1rem; font-weight: 600; color: var(--ink-1); display: inline-flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                        style="color: var(--accent);">
+                        <use href="/static/icons.svg#icon-mail"></use>
+                    </svg>
+                    Notifications and Nightly Crawl
+                </h2>
+
+                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: 8px;">Email when new papers are found
+                </p>
+                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: 8px;">Sender: <span
+                        style="color: var(--accent-muted);">{{ notification_sender }}</span></p>
+                <div>
+                    <input type="text" id="notification-emails-{{ project.id }}" placeholder="your@email.com"
+                        value="{{ project.notification_emails or '' }}" oninput="setEmailDirty('{{ project.id }}')"
+                        style="width: 100%; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 12px; color: var(--ink-1); margin-bottom: 8px; outline: none;">
+                    <div id="notification-emails-tags-{{ project.id }}" class="flex flex-wrap gap-1"
+                        style="margin-bottom: 8px;">
+                        {% for _email in (project.notification_emails or '').split(',') %}
+                        {% if _email.strip() %}
+                        <span
+                            style="padding: 2px 8px; font-size: 0.75rem; background-color: color-mix(in oklch, var(--accent) 20%, var(--paper-2)); color: var(--ink-2); border-radius: 9999px;">{{
+                            _email.strip() }}</span>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span id="email-save-status-{{ project.id }}"
+                            style="font-size: 0.75rem; color: var(--ink-4); min-height: 1lh;">Separate multiple with
+                            commas</span>
+                        <button type="button" id="email-save-btn-{{ project.id }}" class="focus-ring" disabled
+                            onclick="saveNotificationEmails('{{ project.slug }}', '{{ project.id }}')"
+                            style="height: var(--button-height); padding: 0 20px; min-width: 90px; white-space: nowrap; background-color: var(--paper-3); color: var(--ink-4); border-radius: var(--radius-md); border: 1px solid var(--border-default); font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.55; cursor: not-allowed;">
+                            Save
+                        </button>
+                    </div>
+                </div>
+                <script>
+                    (function () {
+                        let _emailSaved = {{ (project.notification_emails or '') | tojson
+                    }};
+                    function setEmailDirty(pid) {
+                        const input = document.getElementById('notification-emails-' + pid);
+                        const btn = document.getElementById('email-save-btn-' + pid);
+                        const dirty = input.value !== _emailSaved;
+                        btn.disabled = !dirty;
+                        btn.style.backgroundColor = dirty ? 'var(--accent)' : 'var(--paper-3)';
+                        btn.style.color = dirty ? 'var(--accent-ink)' : 'var(--ink-4)';
+                        btn.style.opacity = dirty ? '1' : '0.55';
+                        btn.style.cursor = dirty ? 'pointer' : 'not-allowed';
+                    }
+                    window.setEmailDirty = setEmailDirty;
+                    function renderEmailTags(pid, emailsCsv) {
+                        const wrap = document.getElementById('notification-emails-tags-' + pid);
+                        const parsed = (emailsCsv || '').split(',').map(s => s.trim()).filter(Boolean);
+                        wrap.innerHTML = parsed.map(e =>
+                            '<span style="padding: 2px 8px; font-size: 0.75rem; background-color: color-mix(in oklch, var(--accent) 20%, var(--paper-2)); color: var(--ink-2); border-radius: 9999px;">'
+                            + e.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>'
+                        ).join('');
+                    }
+                    function saveNotificationEmails(slug, pid) {
+                        const input = document.getElementById('notification-emails-' + pid);
+                        const btn = document.getElementById('email-save-btn-' + pid);
+                        const status = document.getElementById('email-save-status-' + pid);
+                        btn.disabled = true;
+                        const body = new URLSearchParams({ notification_emails: input.value });
+                        fetch('/projects/' + slug + '/notification-emails', { method: 'POST', body, headers: { 'HX-Request': 'true' } })
+                            .then(r => r.text()).then(msg => {
+                                if (msg.toLowerCase().includes('invalid')) {
+                                    status.innerHTML = '<span style="color:var(--error);font-size:0.75rem;">' + msg.replace(/<[^>]+>/g, '') + '</span>';
+                                    btn.disabled = false;
+                                    btn.style.backgroundColor = 'var(--accent)'; btn.style.color = 'var(--accent-ink)';
+                                    btn.style.opacity = '1'; btn.style.cursor = 'pointer';
+                                } else {
+                                    _emailSaved = input.value;
+                                    status.innerHTML = '';
+                                    renderEmailTags(pid, input.value);
+                                    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
+                                    btn.style.opacity = '0.55'; btn.style.cursor = 'not-allowed';
+                                    setTimeout(() => { btn.textContent = 'Save'; setEmailDirty(pid); }, 2000);
+                                }
+                            }).catch(() => { status.textContent = 'Save failed'; setEmailDirty(pid); });
+                    }
+                    window.saveNotificationEmails = saveNotificationEmails;
+                    }) ();
+                </script>
+
+                <hr style="border-color: var(--border-subtle); margin: 12px 0;">
+
+                {# Hint shown at initial page-load when RI or keywords are missing.
+                   The toggle is always clickable — server enforces the same check. #}
+                {% set _crawl_initially_blocked = (not project.research_interest or not project.saved_keywords) and not project.crawl_hour %}
+                <div id="crawl-section-{{ project.id }}"
+                     style="{% if _crawl_initially_blocked %}animation: crawl-pulse 2s ease-in-out infinite; border-radius: var(--radius-md); padding: 6px 8px; margin: -6px -8px 0;{% endif %}">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="font-size: 0.75rem; color: var(--ink-3);">Nightly crawl</span>
+                    <button type="button" id="crawl-toggle-btn-{{ project.id }}"
+                        hx-post="/projects/{{ project.slug }}/toggle-nightly-crawl" hx-target="#crawl-schedule-text"
+                        hx-swap="outerHTML"
+                        hx-on::after-request="onCrawlToggle(event, '{{ project.id }}')"
+                        style="position: relative; width: 40px; height: 22px; border-radius: 22px; border: none; cursor: pointer; padding: 0;
+                            background-color: {% if project.crawl_hour %}var(--accent){% else %}var(--border-default){% endif %}; transition: background-color 0.2s;"
+                        data-on="{{ 'true' if project.crawl_hour else 'false' }}">
+                        <span style="position: absolute; height: 16px; width: 16px; background-color: white; border-radius: 50%;
+                            top: 3px; transition: left 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                            left: {% if project.crawl_hour %}21px{% else %}3px{% endif %};"
+                            id="crawl-toggle-knob-{{ project.id }}"></span>
+                    </button>
+                </div>
+                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: {% if _crawl_initially_blocked %}6px{% else %}0{% endif %};">
+                    {% if project.crawl_hour %}
+                    <span id="crawl-schedule-text">Daily at {{ "%02d:00"|format(project.crawl_hour) }} UTC</span>
+                    {% else %}
+                    <span id="crawl-schedule-text" style="color:var(--ink-4);">Off</span>
+                    {% endif %}
+                    <span style="color: var(--ink-5);">&nbsp;· spread across 01–04 UTC</span>
+                </p>
+                {% if _crawl_initially_blocked %}
+                <p id="crawl-prereq-hint-{{ project.id }}" style="font-size: 0.7rem; color: var(--warning, #b45309); line-height: 1.5; margin: 0;">
+                    To enable:{% if not project.research_interest %} <span style="font-weight:600;">set a research interest</span>{% endif %}{% if not project.research_interest and not project.saved_keywords %} and{% endif %}{% if not project.saved_keywords %} <span style="font-weight:600;">generate keywords</span>{% endif %} first.
+                </p>
+                {% endif %}
+                </div>
+                <script>
+                    function onCrawlToggle(event, pid) {
+                        // Only flip the visual toggle if the server accepted the request.
+                        // On error the server returns a data-error span — leave the knob alone.
+                        var el = document.getElementById('crawl-schedule-text');
+                        if (el && el.dataset.error) return;
+                        var btn = document.getElementById('crawl-toggle-btn-' + pid);
+                        var knob = document.getElementById('crawl-toggle-knob-' + pid);
+                        if (!btn || !knob) return;
+                        var nowOn = btn.dataset.on !== 'true';
+                        btn.dataset.on = nowOn ? 'true' : 'false';
+                        btn.style.backgroundColor = nowOn ? 'var(--accent)' : 'var(--border-default)';
+                        knob.style.left = nowOn ? '21px' : '3px';
+                        // Hide the initial-load hint + pulse when turning on
+                        if (nowOn) {
+                            var hint = document.getElementById('crawl-prereq-hint-' + pid);
+                            var section = document.getElementById('crawl-section-' + pid);
+                            if (hint) hint.remove();
+                            if (section) section.style.animation = 'none';
+                        }
+                        // Show/hide the top-of-page "crawl is off" banner
+                        var banner = document.getElementById('crawl-off-banner');
+                        if (banner) banner.style.display = nowOn ? 'none' : 'flex';
+                    }
+                </script>
+            </div>
+
+            <!-- Keywords widget — always visible, auto-populated from saved keywords -->
+            <div
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
+                <div class="flex items-center justify-between mb-3">
+                    <h2
+                        style="font-size: 1.05rem; font-weight: 700; color: var(--ink-1); display: inline-flex; align-items: center; gap: 8px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                            style="color: var(--accent);">
+                            <use href="/static/icons.svg#icon-tag"></use>
+                        </svg>
+                        Search Keywords
+                    </h2>
+                    <button type="button" id="toggle-kw-help"
+                        style="font-size: 0.75rem; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <use href="/static/icons.svg#icon-info"></use>
+                        </svg>
+                        How it works
+                    </button>
+                </div>
+
+                <div id="kw-help" class="hidden"
+                    style="margin-bottom: 12px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
+                    <p style="font-weight: 600; color: var(--ink-1); margin-bottom: 6px;">How keywords work</p>
+                    <p>An LLM reads your <strong>research interest</strong> + <strong>titles and abstracts of all papers
+                            in My Collection</strong> (up to 10, priority-ordered by tag), then outputs 3–6 short arXiv
+                        search phrases. The more papers you have tagged, the better the vocabulary.</p>
+                    <p style="margin-top: 6px; color: var(--ink-3);">Keywords are saved and reused by the nightly crawl
+                        automatically. Regenerate only when your research focus changes significantly.</p>
+                    <button type="button" onclick="document.getElementById('prompt-kw').classList.toggle('hidden')"
+                        style="margin-top: 6px; font-size: 0.7rem; color: var(--accent-muted); text-decoration: underline; background: none; border: none; cursor: pointer; padding: 0;">show
+                        prompt</button>
+                    <pre id="prompt-kw" class="hidden"
+                        style="margin-top: 6px; white-space: pre-wrap; font-size: 0.68rem; background-color: var(--paper-2); border-radius: 4px; padding: 8px; color: var(--ink-3); font-family: monospace; line-height: 1.4;">{{ prompt_keyword_extraction }}</pre>
+                </div>
+
+                <div
+                    style="padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                    <p id="kw-panel-label" style="font-size: 0.75rem; color: var(--ink-3); margin-bottom: 8px;">
+                        {% if project.saved_keywords_list %}Saved keywords — check/uncheck to include:{% else %}No
+                        keywords yet — generate via AI or add manually:{% endif %}
+                    </p>
+                    <div id="keyword-list" class="flex flex-col gap-2"></div>
+                    <div style="display: flex; gap: 8px; margin-top: 10px;">
+                        <input type="text" id="keyword-input" placeholder="Add keyword"
+                            style="flex: 1; height: var(--input-height); background-color: var(--paper-2); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 12px; color: var(--ink-1); font-size: 0.875rem; outline: none;"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();addKeyword();}">
+                        <button type="button" onclick="addKeyword()"
+                            style="height: var(--button-height); padding: 0 14px; background-color: var(--paper-2); color: var(--ink-2); border-radius: var(--radius-md); border: 1px solid var(--border-default); display: inline-flex; align-items: center; gap: 6px; outline: none;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <use href="/static/icons.svg#icon-plus"></use>
+                            </svg>
+                            Add
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex gap-2 mt-3">
+                    <button type="button" id="regenerate-kw-btn" class="focus-ring" onclick="handleKeywordRegenerate()"
+                        style="flex: 1; height: var(--button-height); background-color: color-mix(in oklch, var(--accent) 15%, var(--paper-2)); color: var(--accent); border-radius: var(--radius-md); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent); font-size: 0.8rem; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <use href="/static/icons.svg#icon-sparkles"></use>
+                        </svg>
+                        Regenerate via AI
+                    </button>
+                    <button type="button" id="save-kw-btn" class="focus-ring" onclick="saveKeywords()" disabled
+                        style="height: var(--button-height); padding: 0 20px; min-width: 90px; white-space: nowrap; background-color: var(--paper-3); color: var(--ink-4); border-radius: var(--radius-md); border: 1px solid var(--border-default); font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.55; cursor: not-allowed;">
+                        Save
+                    </button>
+                </div>
+                <div id="kw-status" style="margin-top: 8px; font-size: 0.75rem;"></div>
+
+                <script>
+                    document.getElementById('toggle-kw-help').addEventListener('click', function () {
+                        const h = document.getElementById('kw-help');
+                        h.classList.toggle('hidden');
+                        this.style.color = h.classList.contains('hidden') ? 'var(--ink-3)' : 'var(--ink-1)';
+                    });
+                </script>
+            </div>
+
+            <!-- Paper Crawler: date range + search + status -->
+            <div
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
+                <div class="flex items-center justify-between mb-3">
+                    <h2
+                        style="font-size: 1.05rem; font-weight: 700; color: var(--ink-1); display: inline-flex; align-items: center; gap: 8px;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                            style="color: var(--accent);">
+                            <use href="/static/icons.svg#icon-search"></use>
+                        </svg>
+                        Paper Crawler
+                    </h2>
+                    <button type="button" id="toggle-help"
+                        style="font-size: 0.75rem; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <use href="/static/icons.svg#icon-info"></use>
+                        </svg>
+                        How it works
+                    </button>
+                </div>
+                <div id="crawl-help" class="hidden"
+                    style="margin-bottom: 16px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
+                    <p style="font-weight: 600; margin-bottom: 8px; color: var(--ink-1);">How crawling works</p>
+                    <ol
+                        style="list-style: decimal; padding-left: 16px; color: var(--ink-2); display: flex; flex-direction: column; gap: 8px;">
+                        <li>
+                            <strong>arXiv keyword search:</strong> Queries arXiv for each keyword phrase from the
+                            Keywords
+                            widget above; deduplicates results by ID. Results are returned newest-first, so the search
+                            stops
+                            as soon as papers fall before your start date — no unnecessary pagination. A global lock
+                            ensures only one arXiv session runs at a time (rate limit: 1 request / 3 s, single
+                            connection).
+                            If another crawl or search is active you'll see "Waiting for arXiv…" below.
+                        </li>
+                        <li>
+                            <strong>Semantic Scholar recommendations</strong> (if you have papers in My
+                            Collection papers):
+                            Fetches papers similar to your existing collection via the SemanticScholar recommendations
+                            API.
+                            Results are merged and deduplicated with the arXiv search results.
+                        </li>
+                        <li>
+                            <strong>Quick relevance filter:</strong> LLM receives your research interest + My Collection
+                            paper titles/abstracts + the candidate paper's title and abstract. Returns <code
+                                style="font-family:monospace">{"relevant": true/false}</code>.
+                            <button type="button"
+                                onclick="document.getElementById('prompt-quick').classList.toggle('hidden')"
+                                style="margin-left: 4px; font-size: 0.7rem; color: var(--accent-muted); text-decoration: underline; background: none; border: none; cursor: pointer; padding: 0;">show
+                                prompt</button>
+                            <pre id="prompt-quick" class="hidden"
+                                style="margin-top: 6px; white-space: pre-wrap; font-size: 0.68rem; background-color: var(--paper-2); border-radius: 4px; padding: 8px; color: var(--ink-3); font-family: monospace; line-height: 1.4;">{{ prompt_relevance_quick }}</pre>
+                        </li>
+                        <li>
+                            <strong>Deep relevance check</strong> (papers that pass quick filter): same prompt but adds
+                            the full paper content (intro, methods, conclusion).
+                            <button type="button"
+                                onclick="document.getElementById('prompt-deep').classList.toggle('hidden')"
+                                style="margin-left: 4px; font-size: 0.7rem; color: var(--accent-muted); text-decoration: underline; background: none; border: none; cursor: pointer; padding: 0;">show
+                                prompt</button>
+                            <pre id="prompt-deep" class="hidden"
+                                style="margin-top: 6px; white-space: pre-wrap; font-size: 0.68rem; background-color: var(--paper-2); border-radius: 4px; padding: 8px; color: var(--ink-3); font-family: monospace; line-height: 1.4;">{{ prompt_relevance_deep }}</pre>
+                        </li>
+                        <li><strong>Screening cache:</strong> Before calling the LLM, each crawl computes a
+                            short hash of your research interest + My Collection titles.
+                            Papers already screened with the same hash are skipped instantly — no LLM call needed.
+                            The hash changes (and screening reruns) only when you edit the research interest
+                            or tag/untag a paper in My Collection.</li>
+                        <li><strong>Summary:</strong> For papers that pass both filters, LLM generates a 3-sentence
+                            summary, key findings, and main contributions.</li>
+                        <li><strong>Institutions:</strong> A single batch call to the Semantic Scholar graph API
+                            fetches author affiliations for all newly added papers. Falls back to LLM extraction from
+                            page 1 of the PDF (which contains author/affiliation headers and footnotes) if Semantic
+                            Scholar returns nothing.</li>
+                        <li><strong>Featured paper:</strong> LLM picks the single most relevant paper from all newly
+                            added ones — considering your research interest — to highlight in the crawl-complete
+                            email.</li>
+                        <li><strong>Email:</strong> If any new papers were added, a crawl-complete notification is
+                            sent with stats and the featured paper. You can also manually notify for any paper using the
+                            bell icon.</li>
+                    </ol>
+                    <div
+                        style="margin-top: 10px; padding: 10px; background-color: color-mix(in oklch, var(--accent) 15%, var(--paper-1)); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                        <p style="font-weight: 600; color: var(--accent);">How tagging improves future crawls</p>
+                        <p style="margin-top: 4px; color: var(--ink-3);">Papers in My Collection are used as reference
+                            context in the relevance check prompts. The more you curate, the more precisely the LLM
+                            understands your research scope. They also seed the Semantic Scholar recommendations
+                            — more tagged papers means better discovery of related work.</p>
+                    </div>
+                </div>
+
+                <script>
+                    document.getElementById('toggle-help').addEventListener('click', function () {
+                        const help = document.getElementById('crawl-help');
+                        help.classList.toggle('hidden');
+                        this.style.color = help.classList.contains('hidden') ? 'var(--ink-3)' : 'var(--ink-1)';
+                    });
+                </script>
+
+                <style>
+                    /* Native date-input calendar-picker icon renders black by default (WebKit/Blink),
+                       invisible against this app's dark background — invert it to match the light ink tokens. */
+                    input[type="date"]::-webkit-calendar-picker-indicator {
+                        filter: invert(1);
+                    }
+                </style>
+                <div class="flex flex-col gap-3">
+                    <div class="space-y-2">
+                        <div>
+                            <label
+                                style="display: block; font-size: 0.75rem; color: var(--ink-2); margin-bottom: 4px;">From</label>
+                            <input type="date" id="crawl-date-from"
+                                value="{{ (date.today() - timedelta(days=7)).isoformat() }}"
+                                style="width: 100%; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 12px; color: var(--ink-1); outline: none;">
+                        </div>
+                        <div>
+                            <label
+                                style="display: block; font-size: 0.75rem; color: var(--ink-2); margin-bottom: 4px;">To</label>
+                            <input type="date" id="crawl-date-to" value="{{ date.today().isoformat() }}"
+                                style="width: 100%; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 12px; color: var(--ink-1); outline: none;">
+                        </div>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--ink-3);">
+                        <label
+                            style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="use-arxiv-checkbox" checked
+                                style="width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;">
+                            arXiv <span style="color: var(--ink-4);">(slower)</span>
+                        </label>
+                        <label
+                            style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="use-scholar-checkbox" checked
+                                style="width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;">
+                            Semantic Scholar <span style="color: var(--ink-4);">(fast)</span>
+                        </label>
+                    </div>
+                    <button class="focus-ring" type="button" id="arxiv-search-btn" onclick="handleArxivSearch()"
+                        style="height: var(--button-height); background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; font-size: 0.875rem; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <use href="/static/icons.svg#icon-search"></use>
+                        </svg>
+                        Find Papers
+                    </button>
+
+                    <div id="arxiv-count-panel" class="hidden" style="margin-top: 8px;">
+                        <div id="arxiv-count-content"
+                            style="padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                        </div>
+                    </div>
+
+                    <div id="crawl-status-container" style="margin-top: 12px;"></div>
+                </div>
+            </div>
+
+            <div
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-subtle); padding: var(--space-lg);">
+                <h2
+                    style="font-size: 0.9rem; font-weight: 600; margin-bottom: 12px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                        style="color: var(--ink-3);">
+                        <use href="/static/icons.svg#icon-calendar"></use>
+                    </svg>
+                    Crawl Calendar
+                    <span style="position: relative; display: inline-flex; align-items: center;"
+                        onmouseenter="this.querySelector('.cal-tip').style.display='block'"
+                        onmouseleave="this.querySelector('.cal-tip').style.display='none'">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                            style="color: var(--ink-4); cursor: help; margin-left: 2px;">
+                            <use href="/static/icons.svg#icon-info"></use>
+                        </svg>
+                        <div class="cal-tip"
+                            style="display: none; position: absolute; left: 0; top: 100%; z-index: 50; width: 260px; background-color: var(--paper-1); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 10px 12px; font-size: 0.75rem; font-weight: 400; color: var(--ink-2); line-height: 1.5; margin-top: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                            <strong style="color: var(--ink-1); display: block; margin-bottom: 4px;">Crawl
+                                Calendar</strong>
+                            <span
+                                style="display: inline-block; width: 10px; height: 10px; background-color: color-mix(in oklch, var(--success) 60%, transparent); border: 1px solid var(--success); border-radius: 2px; vertical-align: middle;"></span>
+                            = arXiv + Semantic Scholar were searched up to this date by a crawl. <span
+                                style="display: inline-block; width: 8px; height: 8px; background-color: var(--accent); border-radius: 9999px; vertical-align: middle;"></span>
+                            = paper in your collection published that day. Click any day to see crawl details.
+                        </div>
+                    </span>
+                </h2>
+                <div id="calendar-nav" class="flex items-center justify-between mb-3">
+                    <button type="button" style="color: var(--ink-3);" onclick="changeMonth(-1)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <use href="/static/icons.svg#icon-arrow-left"></use>
+                        </svg>
+                    </button>
+                    <span id="calendar-month" style="color: var(--ink-2); font-weight: 600; font-size: 0.85rem;"></span>
+                    <button type="button" style="color: var(--ink-3);" onclick="changeMonth(1)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                            style="transform: rotate(180deg);">
+                            <use href="/static/icons.svg#icon-arrow-left"></use>
+                        </svg>
+                    </button>
+                </div>
+                <div id="crawl-calendar" class="grid grid-cols-7 gap-0.5 text-center text-xs mb-3"></div>
+                <div class="flex flex-wrap gap-2 text-xs mb-3" style="color: var(--ink-3);">
+                    <span class="flex items-center gap-1"><span class="w-3 h-3"
+                            style="background-color: color-mix(in oklch, var(--success) 60%, transparent); border: 1px solid var(--success); border-radius: 3px;"></span>
+                        Crawled</span>
+                    <span class="flex items-center gap-1"><span class="w-2 h-2"
+                            style="background-color: var(--accent); border-radius: 9999px;"></span> Paper</span>
+                </div>
+                <div id="calendar-details" class="hidden">
+                    <h3 style="font-size: 0.85rem; font-weight: 600; color: var(--ink-2); margin-bottom: 8px;">Crawls:
+                    </h3>
+                    <div id="calendar-details-list" class="space-y-2 max-h-40 overflow-y-auto"></div>
+                </div>
+
+                <script>
+                    let crawlPollInterval = null;
+                    const projectSlug = "{{ project.slug }}";
+                    let keywordData = { keywords: [] };
+                    const savedKeywords = {{ project.saved_keywords_list | tojson }};
+                    let uncheckedKeywords = new Set();
+                    let currentArxivTaskId = null;
+
+                    function renderKeywordList(keywords) {
+                        const list = document.getElementById('keyword-list');
+                        list.innerHTML = '';
+                        keywords.forEach((kw) => {
+                            const label = document.createElement('label');
+                            label.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-2);cursor:pointer;';
+                            const cb = document.createElement('input');
+                            cb.type = 'checkbox';
+                            cb.name = 'keyword_item';
+                            cb.value = kw;
+                            cb.checked = !uncheckedKeywords.has(kw);
+                            cb.style.accentColor = 'var(--accent)';
+                            cb.addEventListener('change', () => {
+                                if (cb.checked) uncheckedKeywords.delete(kw);
+                                else uncheckedKeywords.add(kw);
+                                setKwDirty();
+                            });
+                            const span = document.createElement('span');
+                            span.textContent = kw;
+                            label.appendChild(cb);
+                            label.appendChild(span);
+                            list.appendChild(label);
+                        });
+                    }
+
+                    function addKeyword() {
+                        const input = document.getElementById('keyword-input');
+                        const value = (input.value || '').trim();
+                        if (!value) return;
+                        if (!keywordData.keywords.includes(value)) {
+                            keywordData.keywords.push(value);
+                        }
+                        input.value = '';
+                        renderKeywordList(keywordData.keywords);
+                        setKwDirty();
+                    }
+
+                    function handleKeywordRegenerate() {
+                        const btn = document.getElementById('regenerate-kw-btn');
+                        const status = document.getElementById('kw-status');
+                        const origHtml = btn.innerHTML;
+                        btn.disabled = true;
+                        btn.style.opacity = '0.7';
+                        status.innerHTML = '';
+                        const stopAnim = startGeneratingAnim(btn, { estimate: '30–120s' });
+
+                        fetch('/projects/' + projectSlug + '/generate-keywords', { method: 'POST' })
+                            .then(r => r.json())
+                            .then(data => {
+                                stopAnim();
+                                btn.disabled = false;
+                                btn.style.opacity = '1';
+                                btn.innerHTML = origHtml;
+                                if (data.error) {
+                                    status.innerHTML = '<div style="color: var(--error);">' + data.error + '</div>';
+                                } else if (!data.keywords || data.keywords.length === 0) {
+                                    status.innerHTML = '<div style="color: var(--error);">No keywords generated — add a research interest or papers to My Collection first.</div>';
+                                } else {
+                                    keywordData.keywords = data.keywords;
+                                    uncheckedKeywords = new Set();
+                                    currentArxivTaskId = null;
+                                    renderKeywordList(keywordData.keywords);
+                                    setKwDirty();
+                                    status.innerHTML = '<div style="color: var(--success);">Generated ' + data.keywords.length + ' keywords.</div>';
+                                    setTimeout(() => { status.innerHTML = ''; }, 3000);
+                                }
+                            })
+                            .catch(() => {
+                                stopAnim();
+                                status.innerHTML = '<div style="color: var(--error);">Failed to reach server</div>';
+                                btn.disabled = false;
+                                btn.style.opacity = '1';
+                                btn.innerHTML = origHtml;
+                            });
+                    }
+
+                    function _setKwBtnState(btn, dirty) {
+                        btn.disabled = !dirty;
+                        btn.style.backgroundColor = dirty ? 'var(--accent)' : 'var(--paper-3)';
+                        btn.style.color = dirty ? 'var(--accent-ink)' : 'var(--ink-4)';
+                        btn.style.opacity = dirty ? '1' : '0.55';
+                        btn.style.cursor = dirty ? 'pointer' : 'not-allowed';
+                    }
+                    function setKwDirty() {
+                        _setKwBtnState(document.getElementById('save-kw-btn'), true);
+                    }
+                    function saveKeywords() {
+                        const all = Array.from(document.querySelectorAll('input[name="keyword_item"]')).map(el => el.value);
+                        if (all.length === 0) return;
+                        const btn = document.getElementById('save-kw-btn');
+                        const status = document.getElementById('kw-status');
+                        btn.disabled = true;
+                        fetch('/projects/' + projectSlug + '/save-keywords', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: 'keywords_json=' + encodeURIComponent(JSON.stringify(all))
+                        }).then(r => r.json()).then(() => {
+                            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
+                            btn.style.opacity = '0.55'; btn.style.cursor = 'not-allowed';
+                            setTimeout(() => { btn.textContent = 'Save'; _setKwBtnState(btn, false); }, 2000);
+                        }).catch(() => {
+                            status.innerHTML = '<div style="color: var(--error);">Save failed</div>';
+                            _setKwBtnState(btn, true);
+                        });
+                    }
+
+                    const _spinnerHtml = '<div style="width:13px;height:13px;border-radius:50%;border:2px solid color-mix(in oklch,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:spin 0.75s linear infinite;flex-shrink:0;"></div>';
+                    const _searchBtnOrigHtml = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-search"></use></svg>Find Papers';
+
+                    function handleArxivSearch() {
+                        const searchBtn = document.getElementById('arxiv-search-btn');
+                        const countPanel = document.getElementById('arxiv-count-panel');
+                        const countContent = document.getElementById('arxiv-count-content');
+
+                        const selected = Array.from(document.querySelectorAll('input[name="keyword_item"]:checked')).map(el => el.value);
+                        if (selected.length === 0) { alert('Select at least one keyword.'); return; }
+
+                        const useArxiv = document.getElementById('use-arxiv-checkbox').checked;
+                        const useScholar = document.getElementById('use-scholar-checkbox').checked;
+                        if (!useArxiv && !useScholar) { alert('Enable at least one source.'); return; }
+
+                        searchBtn.disabled = true;
+                        searchBtn.innerHTML = _spinnerHtml + ' Searching...';
+                        countPanel.classList.remove('hidden');
+
+                        const startTime = Date.now();
+                        let elapsedInterval = null;
+                        const sourceLabel = useArxiv ? (useScholar ? 'arXiv + Semantic Scholar' : 'arXiv') : 'Semantic Scholar';
+                        const typicalTime = useArxiv ? '20–60s typical' : '~3s typical';
+
+                        function updateElapsed() {
+                            const s = Math.round((Date.now() - startTime) / 1000);
+                            countContent.innerHTML =
+                                '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
+                                _spinnerHtml + ' Searching ' + sourceLabel + '&hellip; ' + s + 's elapsed (' + typicalTime + ')</div>';
+                        }
+                        updateElapsed();
+                        elapsedInterval = setInterval(updateElapsed, 1000);
+
+                        const formData = new FormData();
+                        formData.append('keywords_json', JSON.stringify(selected));
+                        formData.append('date_from', document.getElementById('crawl-date-from').value);
+                        formData.append('date_to', document.getElementById('crawl-date-to').value);
+                        formData.append('use_arxiv', useArxiv ? '1' : '0');
+                        formData.append('use_scholar', useScholar ? '1' : '0');
+
+                        function showCountResult(count, arxivCount, ssCount, alreadyKnown) {
+                            clearInterval(elapsedInterval);
+                            searchBtn.disabled = false;
+                            searchBtn.innerHTML = _searchBtnOrigHtml;
+                            const opts = _buildLimitOpts(count);
+                            const dflt = _defaultLimit(count, opts);
+                            const optHtml = opts.map(n => {
+                                const label = n === -1 ? 'All (' + count + ' papers)' : n + ' papers';
+                                const sel = (n === dflt) ? ' selected' : '';
+                                return '<option value="' + n + '"' + sel + '>' + label + '</option>';
+                            }).join('');
+                            let sourceNote = '';
+                            if (arxivCount !== undefined) {
+                                const parts = ['arXiv: ' + arxivCount];
+                                if (ssCount > 0) parts.push('Semantic Scholar: ' + ssCount);
+                                if (alreadyKnown > 0) parts.push(alreadyKnown + ' already in project (skipped)');
+                                sourceNote = '<p style="font-size:0.7rem;color:var(--ink-4);margin-bottom:8px;">' + parts.join(' · ') + '</p>';
+                            }
+                            countContent.innerHTML =
+                                '<p style="font-size:0.8rem;color:var(--ink-1);font-weight:600;margin-bottom:4px;">' +
+                                'Found <strong>' + count + '</strong> new papers</p>' +
+                                sourceNote +
+                                '<label style="display:block;font-size:0.75rem;color:var(--ink-2);margin-bottom:4px;">Screen how many with AI?</label>' +
+                                '<select id="paper-limit-select" style="width:100%;height:var(--input-height);background-color:var(--paper-2);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:0 12px;color:var(--ink-1);">' + optHtml + '</select>' +
+                                '<div style="display:flex;gap:8px;margin-top:12px;">' +
+                                '<button type="button" onclick="resetToKeywords()" class="focus-ring" style="flex:1;height:var(--button-height);padding:0 16px;background-color:var(--paper-2);color:var(--ink-2);border-radius:var(--radius-md);border:1px solid var(--border-default);">Back</button>' +
+                                '<button type="button" id="start-screening-btn" onclick="handleCrawlStart()" class="focus-ring" style="flex:1;height:var(--button-height);background-color:var(--accent);color:var(--accent-ink);border-radius:var(--radius-md);border:none;font-size:0.875rem;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px;">' +
+                                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg>Start Screening</button>' +
+                                '</div>';
+                        }
+
+                        function showCountError(msg) {
+                            clearInterval(elapsedInterval);
+                            searchBtn.disabled = false;
+                            searchBtn.innerHTML = _searchBtnOrigHtml;
+                            countContent.innerHTML = '<div style="color:var(--error);font-size:0.75rem;">' + msg + '</div>';
+                        }
+
+                        function pollCountStatus(taskId) {
+                            clearInterval(elapsedInterval);
+                            fetch('/projects/' + projectSlug + '/arxiv-count-status/' + taskId)
+                                .then(r => r.json())
+                                .then(data => {
+                                    if (data.status === 'done') {
+                                        currentArxivTaskId = taskId;
+                                        showCountResult(data.count, data.arxiv_count, data.scholar_count || 0, data.already_known || 0);
+                                    } else if (data.status === 'error') {
+                                        showCountError(data.error || 'arXiv search failed');
+                                    } else {
+                                        const s = Math.round((Date.now() - startTime) / 1000);
+                                        const waiters = data.arxiv_waiters || 0;
+                                        if (waiters > 0) {
+                                            countContent.innerHTML =
+                                                '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
+                                                _spinnerHtml + ' Waiting for arXiv&hellip; (' + waiters + ' request' + (waiters > 1 ? 's' : '') + ' ahead, ' + s + 's)</div>';
+                                        } else {
+                                            const kwInfo = data.keyword_total > 0
+                                                ? ' · Keyword ' + data.keyword_idx + '/' + data.keyword_total
+                                                : '';
+                                            const countInfo = data.count_so_far > 0
+                                                ? ' · ' + data.count_so_far + ' found so far'
+                                                : '';
+                                            const ssInfo = data.ss_status === 'running' ? ' · fetching Semantic Scholar…' : '';
+                                            countContent.innerHTML =
+                                                '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
+                                                _spinnerHtml + ' Searching ' + sourceLabel + '&hellip; ' + s + 's' + kwInfo + countInfo + ssInfo + '</div>';
+                                        }
+                                        setTimeout(() => pollCountStatus(taskId), 2500);
+                                    }
+                                })
+                                .catch(() => setTimeout(() => pollCountStatus(taskId), 3000));
+                        }
+
+                        fetch('/projects/' + projectSlug + '/arxiv-count', { method: 'POST', body: new URLSearchParams(formData) })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.error) { showCountError(data.error); return; }
+                                pollCountStatus(data.task_id);
+                            })
+                            .catch(() => showCountError('Failed to reach server'));
+                    }
+
+                    function _buildLimitOpts(count) {
+                        const steps = [1, 5, 10, 25, 50, 100, 250, 500];
+                        const opts = steps.filter(n => n < count);
+                        opts.push(-1);
+                        return opts;
+                    }
+
+                    function _defaultLimit(count, opts) {
+                        return -1; // default to all papers
+                    }
+
+                    function handleCrawlStart() {
+                        const statusContainer = document.getElementById('crawl-status-container');
+                        const selected = Array.from(document.querySelectorAll('input[name="keyword_item"]:checked')).map(el => el.value);
+                        if (selected.length === 0) { alert('Select at least one keyword.'); return; }
+
+                        const limitEl = document.getElementById('paper-limit-select');
+                        const paperLimit = limitEl ? limitEl.value : '50';
+
+                        const startBtn = document.getElementById('start-screening-btn');
+                        if (startBtn) { startBtn.disabled = true; startBtn.style.opacity = '0.7'; }
+
+                        statusContainer.innerHTML =
+                            '<div style="padding: 10px 12px; background-color: var(--paper-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); color: var(--ink-3); font-size: 0.75rem;">Starting crawl...</div>';
+
+                        const formData = new FormData();
+                        formData.append('date_from', document.getElementById('crawl-date-from').value);
+                        formData.append('date_to', document.getElementById('crawl-date-to').value);
+                        formData.append('paper_limit', paperLimit);
+                        formData.append('keywords_json', JSON.stringify(selected));
+                        formData.append('use_arxiv', document.getElementById('use-arxiv-checkbox').checked ? '1' : '0');
+                        formData.append('use_scholar', document.getElementById('use-scholar-checkbox').checked ? '1' : '0');
+                        if (currentArxivTaskId) formData.append('arxiv_task_id', currentArxivTaskId);
+
+                        fetch('/projects/' + projectSlug + '/crawl', { method: 'POST', body: new URLSearchParams(formData) })
+                            .then(r => r.text())
+                            .then(html => {
+                                statusContainer.innerHTML = html;
+                                if (typeof htmx !== 'undefined') htmx.process(statusContainer);
+                                startCrawlPolling();
+                                if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+                            })
+                            .catch(() => {
+                                statusContainer.innerHTML = '<div style="padding: 12px; background-color: var(--error-bg); border: 1px solid color-mix(in oklch, var(--error) 40%, transparent); border-radius: var(--radius-md); color: var(--error); font-size: 0.75rem;">Failed to start crawl</div>';
+                                if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
+                            });
+                    }
+
+                    function resetToKeywords() {
+                        document.getElementById('arxiv-count-panel').classList.add('hidden');
+                        const searchBtn = document.getElementById('arxiv-search-btn');
+                        if (searchBtn) { searchBtn.disabled = false; searchBtn.style.opacity = '1'; searchBtn.innerHTML = _searchBtnOrigHtml; }
+                    }
+
+                    function startCrawlPolling() {
+                        if (crawlPollInterval) clearInterval(crawlPollInterval);
+
+                        const checkStatus = () => {
+                            fetch('/projects/' + projectSlug + '/crawl-status')
+                                .then(r => r.text())
+                                .then(html => {
+                                    const container = document.getElementById('crawl-status-container');
+                                    if (html.trim() && html.trim() !== 'None') {
+                                        container.innerHTML = html;
+                                        if (typeof htmx !== 'undefined') htmx.process(container);
+                                        // Convert UTC timestamps to local time (scripts don't run in innerHTML)
+                                        container.querySelectorAll('[data-utc]').forEach(el => {
+                                            if (el.dataset.utc) {
+                                                var d = new Date(el.dataset.utc + 'Z');
+                                                el.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                            }
+                                        });
+                                    }
+                                    if (!html.includes('Crawling in progress')) {
+                                        clearInterval(crawlPollInterval);
+                                        crawlPollInterval = null;
+                                        // Refresh paper list to show newly added papers without full page reload
+                                        fetch('/projects/' + projectSlug + '/papers')
+                                            .then(r => r.text())
+                                            .then(ph => {
+                                                const paperList = document.getElementById('paper-list');
+                                                if (paperList && ph.trim()) {
+                                                    paperList.innerHTML = ph;
+                                                    if (typeof htmx !== 'undefined') htmx.process(paperList);
+                                                }
+                                            })
+                                            .catch(() => { });
+                                    }
+                                })
+                                .catch(() => { });
+                        };
+
+                        checkStatus();
+                        crawlPollInterval = setInterval(checkStatus, 4000);
+                    }
+
+                    // If a crawl is already running when page loads, auto-show status and poll
+                    {% if recent_crawl and recent_crawl.status == 'running' %}
+                    document.addEventListener('DOMContentLoaded', function () {
+                        fetch('/projects/' + projectSlug + '/crawl-status')
+                            .then(r => r.text())
+                            .then(html => {
+                                const container = document.getElementById('crawl-status-container');
+                                if (html.trim()) container.innerHTML = html;
+                                startCrawlPolling();
+                            })
+                            .catch(() => { });
+                    });
+                    {% endif %}
+
+                    const crawlLogs = {{ crawl_logs_js | tojson }};
+                    const paperDates = [{% for pp in papers %}{% if pp.paper.published_date %} "{{ pp.paper.published_date }}", {% endif %}{% endfor %}];
+                    const contextEpochs = {{ context_epochs | tojson }};
+
+                    // Returns true if dateStr should be highlighted for this crawl log.
+                    // Nightly crawls (date_to == date_from + 1 day) represent one day of papers — show only on date_from.
+                    // Multi-day manual crawls highlight every day in the range.
+                    function crawlCoversDate(log, dateStr) {
+                        if (!log.date_from || !log.date_to) return false;
+                        const from = new Date(log.date_from), to = new Date(log.date_to);
+                        const isOneDay = (to - from) === 86400000;
+                        return isOneDay ? dateStr === log.date_from : (dateStr >= log.date_from && dateStr <= log.date_to);
+                    }
+                    let currentMonth = new Date().getMonth();
+                    let currentYear = new Date().getFullYear();
+
+                    function renderCalendar() {
+                        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                        document.getElementById('calendar-month').textContent = monthNames[currentMonth] + ' ' + currentYear;
+                        const firstDay = new Date(currentYear, currentMonth, 1).getDay();
+                        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+                        const today = new Date();
+                        let html = '<div style="color: var(--ink-4); padding: 4px 0; font-size: 0.75rem;">Su</div>' +
+                            '<div style="color: var(--ink-4); padding: 4px 0; font-size: 0.75rem;">Mo</div>' +
+                            '<div style="color: var(--ink-4); padding: 4px 0; font-size: 0.75rem;">Tu</div>' +
+                            '<div style="color: var(--ink-4); padding: 4px 0; font-size: 0.75rem;">We</div>' +
+                            '<div style="color: var(--ink-4); padding: 4px 0; font-size: 0.75rem;">Th</div>' +
+                            '<div style="color: var(--ink-4); padding: 4px 0; font-size: 0.75rem;">Fr</div>' +
+                            '<div style="color: var(--ink-4); padding: 4px 0; font-size: 0.75rem;">Sa</div>';
+                        for (let i = 0; i < firstDay; i++) html += '<div></div>';
+                        for (let day = 1; day <= daysInMonth; day++) {
+                            const dateStr = currentYear + '-' + String(currentMonth + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+                            // Green = nightly crawls show on date_from only; multi-day crawls highlight the full range
+                            const hasCronCrawl = crawlLogs.some(log => log.status === 'success' && crawlCoversDate(log, dateStr) && log.triggered_by === 'cron');
+                            const hasManualCrawl = crawlLogs.some(log => log.status === 'success' && crawlCoversDate(log, dateStr) && log.triggered_by !== 'cron');
+                            const hasCrawl = hasCronCrawl || hasManualCrawl;
+                            const hasPapers = paperDates.some(d => d && d.startsWith(dateStr));
+                            const isToday = today.getDate() === day && today.getMonth() === currentMonth && today.getFullYear() === currentYear;
+                            const epochIdx = contextEpochs.findIndex(e => e.date === dateStr);
+                            const hasEpoch = epochIdx >= 0;
+
+                            let style = 'padding: 8px 0; border-radius: 6px; cursor: pointer; position: relative;';
+                            if (hasCronCrawl && hasManualCrawl) {
+                                style += 'background: linear-gradient(135deg, color-mix(in oklch, var(--success) 55%, transparent) 50%, color-mix(in oklch, var(--accent) 40%, transparent) 50%); border: 2px solid var(--success);';
+                            } else if (hasCronCrawl) {
+                                style += 'background-color: color-mix(in oklch, var(--success) 60%, transparent); border: 2px solid var(--success);';
+                            } else if (hasManualCrawl) {
+                                style += 'background-color: color-mix(in oklch, var(--accent) 35%, transparent); border: 2px solid var(--accent);';
+                            } else if (isToday) {
+                                style += 'background-color: var(--paper-3); color: var(--ink-1);';
+                            } else {
+                                style += 'color: var(--ink-3);';
+                            }
+
+                            let dot = '';
+                            if (hasPapers) dot += '<span style="position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; background-color: var(--accent); border-radius: 9999px;"></span>';
+                            if (hasEpoch) dot += '<span title="Screening context changed (v' + (epochIdx + 1) + ')" style="position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 6px solid var(--warning, #f59e0b);"></span>';
+
+                            html += '<div style="' + style + '" onclick="showCrawlDetails(\'' + dateStr + '\')">' + day + dot + '</div>';
+                        }
+                        document.getElementById('crawl-calendar').innerHTML = html;
+                    }
+
+                    function changeMonth(delta) {
+                        currentMonth += delta;
+                        if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+                        if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+                        renderCalendar();
+                    }
+
+                    function showCrawlDetails(dateStr) {
+                        const details = document.getElementById('calendar-details');
+                        const list = document.getElementById('calendar-details-list');
+                        // Tooltip: nightly crawls on date_from only; multi-day crawls on any day in range
+                        const coveringCrawls = crawlLogs.filter(log => crawlCoversDate(log, dateStr));
+                        const papersOnDate = paperDates.filter(d => d && d.startsWith(dateStr)).length;
+
+                        const epochOnDate = contextEpochs.find(e => e.date === dateStr);
+                        if (coveringCrawls.length === 0 && papersOnDate === 0 && !epochOnDate) { details.classList.add('hidden'); return; }
+                        let html = '';
+                        if (epochOnDate) {
+                            const epochNum = contextEpochs.indexOf(epochOnDate) + 1;
+                            html += '<div style="font-size: 0.75rem; color: var(--ink-3); margin-bottom: 8px; padding: 5px 8px; background: color-mix(in oklch, var(--warning, #f59e0b) 15%, var(--paper-3)); border-radius: var(--radius-sm); border-left: 3px solid var(--warning, #f59e0b);">▲ Screening context v' + epochNum + ' — research interest, references, or collection changed (hash: ' + epochOnDate.hash + '…)</div>';
+                        }
+                        if (papersOnDate > 0) {
+                            html += '<div style="font-size: 0.75rem; color: var(--ink-3); margin-bottom: 8px;"><span style="display:inline-flex;align-items:center;gap:6px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-book"></use></svg>' + papersOnDate + ' paper(s) published on this day</span></div>';
+                        }
+                        function fmtDate(iso) {
+                            if (!iso) return '?';
+                            var p = iso.substring(0, 10).split('-');
+                            return p[2] + '.' + p[1] + '.' + p[0];
+                        }
+                        coveringCrawls.forEach(log => {
+                            const runDate = fmtDate(log.started_at);
+                            const statusColor = log.status === 'success' ? 'var(--success)' : log.status === 'error' ? 'var(--error)' : 'var(--warning)';
+                            const triggerLabel = log.triggered_by === 'cron' ? 'nightly' : 'manual';
+                            const triggerColor = log.triggered_by === 'cron' ? 'var(--success)' : 'var(--accent)';
+                            const foundStr = log.papers_found + ' found';
+                            const skippedStr = log.papers_found > log.papers_added ? (log.papers_found - log.papers_added) + ' skipped' : '';
+                            const addedStr = log.papers_added + ' added';
+                            const counts = [foundStr, skippedStr, addedStr].filter(Boolean).join(' · ');
+                            const srcs = (log.sources_used || 'arxiv,ss').split(',');
+                            const srcLabels = srcs.map(s => s === 'arxiv' ? 'arXiv' : (s === 'ss' || s === 'semantic_scholar') ? 'Semantic Scholar' : s).join(' + ');
+                            html += '<div style="background-color: var(--paper-3); border-radius: var(--radius-sm); padding: 8px; font-size: 0.75rem; color: var(--ink-2); margin-bottom: 4px;">'
+                                + '<span style="color: ' + statusColor + '; font-weight: 600;">' + log.status + '</span>'
+                                + ' · <span style="color: ' + triggerColor + '; font-weight: 600;">' + triggerLabel + '</span>'
+                                + ' · ran ' + runDate
+                                + ' · range ' + fmtDate(log.date_from) + ' → ' + fmtDate(log.date_to)
+                                + ' · <span style="color: var(--accent);">' + srcLabels + '</span>'
+                                + '<br><span style="color: var(--ink-3);">' + counts + '</span>'
+                                + '</div>';
+                        });
+                        list.innerHTML = html;
+                        details.classList.remove('hidden');
+                    }
+
+                    // Lightbox for paper figures
+                    function openFigureLightbox(url, caption) {
+                        const lb = document.getElementById('figure-lightbox');
+                        document.getElementById('figure-lightbox-img').src = url;
+                        const capEl = document.getElementById('figure-lightbox-caption');
+                        capEl.textContent = caption || '';
+                        capEl.style.display = caption ? 'block' : 'none';
+                        lb.style.display = 'block';
+                        document.addEventListener('keydown', _lbEscHandler);
+                    }
+                    function closeFigureLightbox() {
+                        document.getElementById('figure-lightbox').style.display = 'none';
+                        document.removeEventListener('keydown', _lbEscHandler);
+                    }
+                    function _lbEscHandler(e) { if (e.key === 'Escape') closeFigureLightbox(); }
+
+                    document.addEventListener('DOMContentLoaded', function () {
+                        // Auto-populate keywords from saved
+                        if (savedKeywords && savedKeywords.length > 0) {
+                            keywordData.keywords = savedKeywords.slice();
+                        }
+                        renderKeywordList(keywordData.keywords);
+                        renderCalendar();
+                    });
+                </script>
+            </div>
+
+        </div>
+    </div>
+    {% set ns = namespace(total_tokens=0, total_cost=0.0) %}
+    {% for log in project.crawl_logs %}{% if log.total_tokens %}{% set ns.total_tokens = ns.total_tokens +
+    log.total_tokens %}{% set ns.total_cost = ns.total_cost + log.estimated_cost %}{% endif %}{% endfor %}
+    <div
+        style="margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+        <span style="font-size: 0.75rem; color: var(--ink-4); display: inline-flex; align-items: center; gap: 5px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-hash"></use>
+            </svg>
+            AI usage (all crawls):
+        </span>
+        <span style="font-size: 0.75rem; color: var(--ink-3);">
+            {% if ns.total_tokens >= 1000000000 %}~{{ (ns.total_tokens / 1000000000)|round(2) }}B tokens{% elif
+            ns.total_tokens >= 1000000 %}~{{ (ns.total_tokens / 1000000)|round(2) }}M tokens{% elif ns.total_tokens > 0
+            %}~{{ (ns.total_tokens / 1000)|round(1) }}k tokens{% else %}0 tokens{% endif %}
+        </span>
+        <span style="font-size: 0.75rem; color: var(--ink-3);">
+            ~${{ "%.2f" | format(ns.total_cost) }}
+        </span>
+        <span style="font-size: 0.7rem; color: var(--ink-4);">({{ cost_comparison_model }} pricing, for comparison)</span>
+        <span style="font-size: 0.7rem; color: var(--ink-4);">·</span>
+        <span style="font-size: 0.7rem; color: var(--ink-4);">All LLM inference via <code style="font-family: monospace; font-size: 0.68rem;">{{ llm_model }}</code>{% if llm_api_base %} at <code style="font-family: monospace; font-size: 0.68rem;">{{ llm_api_base }}</code>{% endif %}
+        </span>
+    </div>
+</div>
+
+<!-- Figure lightbox modal -->
+<div id="figure-lightbox"
+    style="display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.88); cursor: zoom-out;"
+    onclick="closeFigureLightbox()">
+    <div
+        style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 32px; pointer-events: none;">
+        <div
+            style="display: flex; flex-direction: column; align-items: center; gap: 16px; pointer-events: auto; cursor: default;">
+            <img id="figure-lightbox-img" src="" alt="Paper Figure"
+                style="max-width: 90vw; max-height: 78vh; object-fit: contain; background: white; border-radius: 8px; box-shadow: 0 8px 40px rgba(0,0,0,0.6);" />
+            <p id="figure-lightbox-caption"
+                style="display: none; color: rgba(255,255,255,0.85); font-size: 0.85rem; max-width: 70ch; text-align: center; line-height: 1.5; margin: 0;">
+            </p>
+        </div>
+    </div>
+    <button onclick="event.stopPropagation(); closeFigureLightbox()"
+        style="position: absolute; top: 16px; right: 20px; background: rgba(255,255,255,0.15); border: none; color: white; font-size: 1.5rem; line-height: 1; width: 36px; height: 36px; border-radius: 9999px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+        ×
+    </button>
+</div>
+{% endblock %}

@@ -1,0 +1,81 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: related-work-nightly-crawl
+spec:
+  schedule: "0 1,2,3,4 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: related-work
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: crawl
+            image: <YOUR_REGISTRY>/<YOUR_IMAGE>:latest
+            command:
+            - python
+            - scripts/nightly_crawl.py
+            env:
+            - name: DATABASE_URL
+              value: "sqlite:////data/related_work.db"
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: related-work-secret
+                  key: SECRET_KEY
+            - name: SITE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: related-work-secret
+                  key: SITE_PASSWORD
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: related-work-secret
+                  key: LLM_API_KEY
+            - name: LLM_API_BASE
+              value: "https://api.openai.com/v1"
+            - name: LLM_MODELS
+              value: "gpt-4o,gpt-4o-mini"
+            - name: SCHOLAR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: related-work-secret
+                  key: SCHOLAR_API_KEY
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: related-work-secret
+                  key: RESEND_API_KEY
+            - name: RESEND_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: related-work-secret
+                  key: RESEND_FROM
+            - name: NOTIFIER_TYPE
+              valueFrom:
+                secretKeyRef:
+                  name: related-work-secret
+                  key: NOTIFIER_TYPE
+            - name: SERVER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: related-work-secret
+                  key: SERVER_URL
+            - name: LOGS_DIR
+              value: "/data/logs"
+            volumeMounts:
+            - name: data
+              mountPath: /data
+          volumes:
+          - name: data
+            persistentVolumeClaim:
+              claimName: related-work-pvc
+          # Optional node affinity — same shape as deployment.yaml.example, see the
+          # comment there. Omitted here by default.
+          imagePullSecrets:
+          - name: private-registry-auth

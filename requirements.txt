@@ -1,0 +1,9 @@
+Flask==3.0.0
+Flask-SQLAlchemy==3.0.3
+Flask-Limiter==4.1.1
+gunicorn
+httpx
+arxiv
+python-dotenv
+Pillow
+pypdf

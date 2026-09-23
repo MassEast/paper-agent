@@ -1,0 +1,235 @@
+<div class="space-y-6">
+    {% if new_papers %}
+    <div
+        style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">
+        <h3
+            style="font-size: 1rem; font-weight: 600; color: var(--ink-2); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span style="display: inline-flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-inbox"></use>
+                </svg>
+                New Papers ({{ new_papers|length }})
+            </span>
+            <span style="margin-left: auto; display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; font-size: 0.7rem; font-weight: 500;">
+                <button id="new-sort-added" onclick="sortPaperList('new-papers-list','added')" style="padding: 2px 8px; background-color: var(--accent); color: #fff; border: none; cursor: pointer;">Date added</button>
+                <button id="new-sort-pub" onclick="sortPaperList('new-papers-list','pub')" style="padding: 2px 8px; background-color: transparent; color: var(--ink-3); border: none; cursor: pointer;">Release date</button>
+            </span>
+        </h3>
+        <div id="new-papers-list" class="space-y-3" style="max-height: 52vh; overflow-y: auto; padding-right: 4px;">
+            {% for pp in new_papers %}
+            {% with project=project, show_curate=True %}
+            {% include "partials/paper_card.html" %}
+            {% endwith %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if new_papers %}
+    <div style="height: 5px; border-radius: 9999px; background: var(--accent); opacity: 0.5; margin: 4px 0;"></div>
+    {% endif %}
+
+    <div
+        style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">
+        <h3
+            style="font-size: 1rem; font-weight: 600; color: var(--ink-2); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span style="display: inline-flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-star"></use>
+                </svg>
+                My Collection ({{ curated_papers|length }})
+                <span style="position: relative; display: inline-flex; align-items: center; color: var(--ink-4); cursor: help; flex-shrink: 0;"
+                    onmouseenter="this.querySelector('.col-tip').style.display='block'"
+                    onmouseleave="this.querySelector('.col-tip').style.display='none'">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <use href="/static/icons.svg#icon-info"></use>
+                    </svg>
+                    <div class="col-tip" style="display: none; position: absolute; left: 0; top: 100%; z-index: 50; width: 280px; background-color: var(--paper-1); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 10px 12px; font-size: 0.75rem; font-weight: 400; color: var(--ink-2); line-height: 1.5; margin-top: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                        Citation counts for papers in My Collection are refreshed automatically every month during the nightly crawl. Works for arXiv papers and non-arXiv papers that have a Semantic Scholar ID.
+                    </div>
+                </span>
+            </span>
+            {% set ns2 = namespace(n_important=0, n_read=0, n_discuss=0) %}
+            {% for pp in curated_papers %}
+                {% if 'important' in pp.tags_list %}{% set ns2.n_important = ns2.n_important + 1 %}{% endif %}
+                {% if 'to_read' in pp.tags_list %}{% set ns2.n_read = ns2.n_read + 1 %}{% endif %}
+                {% if 'to_discuss' in pp.tags_list %}{% set ns2.n_discuss = ns2.n_discuss + 1 %}{% endif %}
+            {% endfor %}
+            <span
+                style="font-size: 0.75rem; background-color: var(--tag-important-bg); color: var(--tag-important-ink); padding: 2px 8px; border-radius: 9999px;">{{ ns2.n_important }} important</span>
+            <span
+                style="font-size: 0.75rem; background-color: var(--tag-related-bg); color: var(--tag-related-ink); padding: 2px 8px; border-radius: 9999px;">{{ ns2.n_read }} to read</span>
+            <span
+                style="font-size: 0.75rem; background-color: var(--tag-discuss-bg); color: var(--tag-discuss-ink); padding: 2px 8px; border-radius: 9999px;">{{ ns2.n_discuss }} to discuss</span>
+            <span style="margin-left: auto; display: inline-flex; gap: 4px; align-items: center;">
+                <span style="display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; font-size: 0.7rem; font-weight: 500;">
+                    <button id="col-sort-added" onclick="sortPaperList('curated-list','added')" style="padding: 2px 8px; background-color: var(--accent); color: #fff; border: none; cursor: pointer;">Date added</button>
+                    <button id="col-sort-pub" onclick="sortPaperList('curated-list','pub')" style="padding: 2px 8px; background-color: transparent; color: var(--ink-3); border: none; cursor: pointer;">Release date</button>
+                </span>
+                <button id="col-sort-group" onclick="toggleGroupBy('curated-list')" title="Group by tag: to read → to discuss → important" style="padding: 2px 8px; font-size: 0.7rem; font-weight: 500; background-color: transparent; color: var(--ink-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); cursor: pointer;">Group by tag</button>
+            </span>
+        </h3>
+        {% if curated_papers %}
+        <div id="curated-list" class="space-y-3" style="max-height: 70vh; overflow-y: auto; padding-right: 4px;">
+            {% for pp in curated_papers %}
+            {% with project=project %}
+            {% include "partials/paper_card.html" %}
+            {% endwith %}
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-8" style="color: var(--ink-4);">
+            <p>No curated papers yet</p>
+            <p class="text-xs mt-1">Move papers here from "New Papers" above</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <div
+        style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid color-mix(in oklch, var(--error) 30%, transparent); padding: var(--space-md);">
+        <h3 style="font-size: 1rem; font-weight: 600; color: var(--error); margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer;"
+            onclick="document.getElementById('trash-list-{{ project.id }}').classList.toggle('hidden')">
+            <span style="display: inline-flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-trash-2"></use>
+                </svg>
+                Trash ({{ trashed_papers|length }})
+            </span>
+            <span style="font-size: 0.75rem; color: var(--ink-4);">Click to expand</span>
+        </h3>
+        <div id="trash-list-{{ project.id }}" class="hidden">
+            {% if trashed_papers %}
+            <div class="space-y-2">
+                {% for pp in trashed_papers %}
+                <div
+                    style="display: flex; align-items: center; justify-content: space-between; background-color: var(--paper-3); border-radius: var(--radius-md); padding: 12px 16px; opacity: 0.7;">
+                    <div class="flex-1 min-w-0">
+                        <span style="font-size: 0.875rem; color: var(--ink-3);" class="line-clamp-1">{{ pp.paper.title
+                            }}</span>
+                        <span style="font-size: 0.75rem; color: var(--ink-4); margin-left: 8px;">Trashed {{
+                            pp.trashed_at | berlin_time if pp.trashed_at else '' }}</span>
+                    </div>
+                    <button type="button" class="focus-ring"
+                        style="margin-left: 12px; height: 32px; padding: 0 12px; font-size: 0.75rem; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md);"
+                        hx-post="/paper/{{ pp.paper.arxiv_id }}/restore" hx-vals='{"project_id": {{ project.id }}}'
+                        hx-target="#paper-list" hx-swap="innerHTML">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <use href="/static/icons.svg#icon-rotate-ccw"></use>
+                        </svg>
+                        Restore
+                    </button>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-center" style="color: var(--ink-4); font-size: 0.875rem; padding: 16px 0;">Trash is empty</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+<script>
+// Persist sort state across HTMX swaps on window (survives partial re-render)
+window._paperSort = window._paperSort || {};
+
+var _TAG_GROUP_ORDER = { 'to_read': 0, 'to_discuss': 1, 'important': 2 };
+function _tagPriority(card) {
+    const tags = (card.dataset.tags || '').split(',').filter(Boolean);
+    if (!tags.length) return 3;
+    return Math.min(...tags.map(t => _TAG_GROUP_ORDER[t] ?? 3));
+}
+
+function _applySort(listId) {
+    const list = document.getElementById(listId);
+    if (!list) return;
+    const s = window._paperSort[listId] || { by: 'added', dir: 'desc', grouped: false };
+    const cards = Array.from(list.querySelectorAll(':scope > .paper-card'));
+    const dateKey = s.by === 'pub' ? 'pubDate' : 'addedAt';
+    const asc = s.dir === 'asc';
+    cards.sort((a, b) => {
+        if (s.grouped) {
+            const tDiff = _tagPriority(a) - _tagPriority(b);
+            if (tDiff !== 0) return tDiff;
+        }
+        const cmp = (b.dataset[dateKey] || '').localeCompare(a.dataset[dateKey] || '');
+        return asc ? -cmp : cmp;
+    });
+    cards.forEach(c => list.appendChild(c));
+}
+
+function _syncButtons(listId) {
+    const s = window._paperSort[listId] || { by: 'added', dir: 'desc', grouped: false };
+    const prefix = listId === 'curated-list' ? 'col' : 'new';
+    const btnAdded = document.getElementById(prefix + '-sort-added');
+    const btnPub   = document.getElementById(prefix + '-sort-pub');
+    const btnGroup = document.getElementById(prefix + '-sort-group');
+    const arrow = s.dir === 'asc' ? ' ↑' : ' ↓';
+    if (btnAdded) {
+        const active = s.by === 'added';
+        btnAdded.style.backgroundColor = active ? 'var(--accent)' : 'transparent';
+        btnAdded.style.color = active ? '#fff' : 'var(--ink-3)';
+        btnAdded.textContent = 'Date added' + (active ? arrow : '');
+    }
+    if (btnPub) {
+        const active = s.by === 'pub';
+        btnPub.style.backgroundColor = active ? 'var(--accent)' : 'transparent';
+        btnPub.style.color = active ? '#fff' : 'var(--ink-3)';
+        btnPub.textContent = 'Release date' + (active ? arrow : '');
+    }
+    if (btnGroup) { btnGroup.style.backgroundColor = s.grouped ? 'var(--accent-muted)' : 'transparent'; btnGroup.style.color = s.grouped ? 'var(--accent-hover)' : 'var(--ink-3)'; }
+}
+
+function sortPaperList(listId, by) {
+    window._paperSort[listId] = window._paperSort[listId] || { by: 'added', dir: 'desc', grouped: false };
+    const s = window._paperSort[listId];
+    if (s.by === by) {
+        s.dir = s.dir === 'desc' ? 'asc' : 'desc';
+    } else {
+        s.by = by;
+        s.dir = 'desc';
+    }
+    _applySort(listId);
+    _syncButtons(listId);
+}
+
+function toggleGroupBy(listId) {
+    window._paperSort[listId] = window._paperSort[listId] || { by: 'added', dir: 'desc', grouped: false };
+    window._paperSort[listId].grouped = !window._paperSort[listId].grouped;
+    _applySort(listId);
+    _syncButtons(listId);
+}
+
+// Re-apply saved state after every render (including HTMX swaps)
+['new-papers-list', 'curated-list'].forEach(function(id) {
+    _applySort(id);
+    _syncButtons(id);
+});
+
+function openCitEdit(cid, pid, cur) {
+    document.getElementById('cit-disp-'+cid+'-'+pid).style.display='none';
+    var e=document.getElementById('cit-edit-'+cid+'-'+pid);
+    e.style.display='inline-flex';
+    var i=document.getElementById('cit-inp-'+cid+'-'+pid);
+    i.value=cur; i.focus(); i.select();
+}
+function closeCitEdit(cid, pid) {
+    document.getElementById('cit-disp-'+cid+'-'+pid).style.display='inline-flex';
+    document.getElementById('cit-edit-'+cid+'-'+pid).style.display='none';
+}
+function saveCit(cid, pid) {
+    var disp=document.getElementById('cit-disp-'+cid+'-'+pid);
+    var arxivId=disp.dataset.arxivId;
+    var count=parseInt(document.getElementById('cit-inp-'+cid+'-'+pid).value,10);
+    if(isNaN(count)||count<0)return;
+    fetch('/paper/'+encodeURIComponent(arxivId)+'/citations',{
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'project_id='+pid+'&count='+count
+    }).then(function(r){return r.json();}).then(function(d){
+        if(d.ok){
+            disp.querySelector('.cit-text').textContent=
+                count+' citation'+(count!==1?'s':'')+' (as of '+d.as_of+')';
+            closeCitEdit(cid,pid);
+        }
+    });
+}
+</script>

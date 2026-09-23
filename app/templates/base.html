@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Related Work Agent{% endblock %}</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✨</text></svg>">
+    <link rel="stylesheet" href="/static/tokens.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body style="background-color: var(--paper-1); color: var(--ink-1); min-height: 100vh;">
+    {% block nav %}
+    <nav style="position: sticky; top: 0; z-index: 40; background-color: var(--paper-2); border-bottom: 1px solid var(--border-subtle);">
+        <div style="max-width: 1600px; margin: 0 auto; padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+            <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+                <a href="/projects" style="font-size: 1rem; font-weight: 600; color: var(--accent); text-decoration: none; display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color: var(--accent); flex-shrink: 0;"><use href="/static/icons.svg#icon-sparkles"></use></svg>
+                    Related Work Agent
+                </a>
+                {% block nav_project %}{% endblock %}
+            </div>
+            <form action="/logout" method="POST" style="flex-shrink: 0;">
+                <button type="submit" class="btn btn-ghost" style="font-size: 0.875rem;">
+                    Logout
+                </button>
+            </form>
+        </div>
+    </nav>
+    {% endblock %}
+
+    {% block content %}{% endblock %}
+</body>
+</html>

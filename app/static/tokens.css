@@ -1,0 +1,339 @@
+/* Hallmark Design Tokens · Related Work Agent
+ * Built from Hallmark audit v1.0
+ *
+ * Token discipline: all colors use OKLCH, all spacing on 4pt scale
+ * Every declaration references var(--token) — no inline values
+ */
+
+:root {
+  /* === Paper (backgrounds) === */
+  --paper-1: oklch(5% 0 0);
+  /* base — near-black */
+  --paper-2: oklch(13% 0 0);
+  /* elevated — cards */
+  --paper-3: oklch(18% 0 0);
+  /* input fields */
+
+  /* === Ink (text) === */
+  --ink-1: oklch(93% 0 0);
+  /* primary — high contrast */
+  --ink-2: oklch(80% 0 0);
+  /* secondary */
+  --ink-3: oklch(65% 0 0);
+  /* tertiary */
+  --ink-4: oklch(50% 0 0);
+  /* muted */
+  --ink-5: oklch(35% 0 0);
+  /* disabled */
+
+  /* === Accent (purple-500) — OKLCH native === */
+  --accent: oklch(55% 0.18 305);
+  /* primary accent */
+  --accent-hover: oklch(62% 0.18 305);
+  --accent-muted: oklch(35% 0.12 305);
+  /* badges, tags */
+  --accent-ink: oklch(97% 0 0);
+  /* text ON accent fill — verified ≥60 APCA */
+
+  /* === Focus === */
+  --focus-ring: oklch(65% 0.18 305);
+  /* ≥3:1 contrast on paper-2 and paper-3 */
+
+  /* === Status colors === */
+  --success: oklch(60% 0.15 145);
+  /* green-500 equivalent */
+  --success-bg: oklch(25% 0.08 145);
+  --warning: oklch(75% 0.15 75);
+  /* yellow — less saturated for dark bg */
+  --warning-bg: oklch(20% 0.06 75);
+  --error: oklch(60% 0.18 25);
+  /* red */
+  --error-bg: oklch(20% 0.08 25);
+
+  /* === Borders === */
+  --border-subtle: oklch(20% 0 0);
+  --border-default: oklch(28% 0 0);
+  --border-strong: oklch(38% 0 0);
+
+  /* === Spacing scale (4pt) === */
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+
+  /* === Typography === */
+  --font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* === Radius === */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
+
+  /* === Interactive heights (44px floor for touch) === */
+  --input-height: 44px;
+  --button-height: 44px;
+  --icon-size-sm: 16px;
+  --icon-size-md: 18px;
+  --icon-size-lg: 20px;
+
+  /* === Tag + badge colors === */
+  --tag-important-bg: oklch(28% 0.12 255);
+  --tag-important-ink: oklch(80% 0.12 255);
+  --tag-discuss-bg: var(--warning-bg);
+  --tag-discuss-ink: var(--warning);
+  --tag-related-bg: var(--paper-3);
+  --tag-related-ink: var(--ink-2);
+
+  --badge-dataset-bg: oklch(22% 0.08 255);
+  --badge-architecture-bg: oklch(22% 0.08 275);
+  --badge-method-bg: oklch(22% 0.08 210);
+  --badge-survey-bg: oklch(22% 0.08 90);
+  --badge-benchmark-bg: oklch(22% 0.08 170);
+}
+
+/* Reduced motion — respect user preference */
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* === Utility classes — reference tokens === */
+.paper {
+  background-color: var(--paper-1);
+}
+
+.paper-2 {
+  background-color: var(--paper-2);
+}
+
+.paper-3 {
+  background-color: var(--paper-3);
+}
+
+.ink-1 {
+  color: var(--ink-1);
+}
+
+.ink-2 {
+  color: var(--ink-2);
+}
+
+.ink-3 {
+  color: var(--ink-3);
+}
+
+.ink-4 {
+  color: var(--ink-4);
+}
+
+.ink-5 {
+  color: var(--ink-5);
+}
+
+.accent {
+  color: var(--accent);
+}
+
+.accent-bg {
+  background-color: var(--accent);
+}
+
+.accent-ink {
+  color: var(--accent-ink);
+}
+
+.focus-ring {
+  outline: none;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.border-subtle {
+  border-color: var(--border-subtle);
+}
+
+.border-default {
+  border-color: var(--border-default);
+}
+
+/* Interactive element base */
+.interactive {
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+/* Input base — all inputs share this height */
+.input-base {
+  height: var(--input-height);
+  padding: 0 var(--space-sm);
+  font-size: 0.875rem;
+  line-height: 1;
+  background-color: var(--paper-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--ink-1);
+}
+
+.input-base::placeholder {
+  color: var(--ink-4);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-4);
+}
+
+.input-base:hover {
+  border-color: var(--border-strong);
+}
+
+.input-base:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent);
+}
+
+/* Button base — matches input height */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  height: var(--button-height);
+  padding: 0 var(--space-md);
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Primary button */
+.btn-primary {
+  background-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+}
+
+/* Secondary button */
+.btn-secondary {
+  background-color: var(--paper-3);
+  color: var(--ink-2);
+  border: 1px solid var(--border-default);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--border-subtle);
+  border-color: var(--border-strong);
+}
+
+/* Ghost button — transparent bg */
+.btn-ghost {
+  background-color: transparent;
+  color: var(--ink-3);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background-color: var(--paper-3);
+  color: var(--ink-1);
+}
+
+/* Danger button */
+.btn-danger {
+  background-color: var(--error-bg);
+  color: var(--error);
+  border: 1px solid color-mix(in oklch, var(--error) 50%, transparent);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: color-mix(in oklch, var(--error-bg) 150%, transparent);
+}
+
+/* Icon button */
+.btn-icon {
+  width: var(--button-height);
+  padding: 0;
+}
+
+/* === Tag/chip base === */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  height: 28px;
+  padding: 0 var(--space-xs);
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+/* Card base */
+.card {
+  background-color: var(--paper-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+}
+
+.card-interactive {
+  transition: border-color 150ms ease;
+}
+
+.card-interactive:hover {
+  border-color: var(--border-default);
+}
+
+/* === HTMX loading states === */
+.htmx-request .htmx-request-hide { display: none !important; }
+.htmx-request .htmx-request-show { display: inline-flex !important; }
+
+/* === Scrollbars === */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(40% 0.08 305);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(52% 0.12 305);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(40% 0.08 305) transparent;
+}

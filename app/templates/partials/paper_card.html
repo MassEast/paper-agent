@@ -1,0 +1,338 @@
+<div class="paper-card"
+    id="paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
+    data-added-at="{{ pp.added_at.isoformat() if pp.added_at else '' }}"
+    data-pub-date="{{ pp.paper.published_date.isoformat() if pp.paper.published_date else '' }}"
+    data-tags="{{ pp.tags_list | join(',') }}"
+    style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">
+    <div class="flex items-start gap-4 mb-3">
+        <div class="flex-1 min-w-0">
+            <a href="{{ 'https://arxiv.org/abs/' + pp.paper.arxiv_id if pp.paper.is_arxiv else (pp.paper.pdf_url or '#') }}" target="_blank"
+                style="font-size: 1rem; font-weight: 600; color: var(--ink-1); line-height: 1.35; display: block; text-decoration: none;"
+                onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--ink-1)'">
+                {{ pp.paper.title }}
+            </a>
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1.5"
+                style="font-size: 0.75rem; color: var(--ink-3);">
+                {% set authors = pp.paper.authors_list %}
+                {% set n = authors|length %}
+                {% if n <= 4 %}
+                    <span>{{ authors|join(', ') }}</span>
+                {% else %}
+                    <span>{{ authors[:3]|join(', ') }} <span style="color:var(--ink-4);" title="{{ authors[3:-1]|join(', ') }}">… (+{{ n - 4 }}) …</span> {{ authors[-1] }}</span>
+                {% endif %}
+                {% if pp.paper.published_date %}<span>·</span><span>{{ pp.paper.published_date.strftime('%b %Y') }}</span>{% elif pp.paper.year %}<span>·</span><span>{{ pp.paper.year }}</span>{% endif %}
+                {% if pp.paper.is_arxiv or pp.paper.citation_fetched_at is not none %}
+                {% set _cid = pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') %}
+                <span>·</span>
+                <span id="cit-disp-{{ _cid }}-{{ project.id }}" data-arxiv-id="{{ pp.paper.arxiv_id }}"
+                      style="display:inline-flex;align-items:center;gap:3px;">
+                    <span class="cit-text">{% if pp.paper.citation_fetched_at is not none %}{{ pp.paper.citation_count }} citation{{ 's' if pp.paper.citation_count != 1 else '' }} (as of {{ pp.paper.citation_fetched_at.strftime('%b %Y') }}){% else %}? citations{% endif %}</span>
+                    <button title="Edit citation count"
+                            onclick="openCitEdit('{{ _cid }}',{{ project.id }},{{ pp.paper.citation_count or 0 }})"
+                            style="background:none;border:none;padding:0 0 0 2px;cursor:pointer;color:var(--ink-4);opacity:0.5;display:inline-flex;align-items:center;"
+                            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                </span>
+                <span id="cit-edit-{{ _cid }}-{{ project.id }}" style="display:none;align-items:center;gap:4px;">
+                    <input type="number" min="0" id="cit-inp-{{ _cid }}-{{ project.id }}"
+                           style="width:60px;font-size:0.7rem;border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:1px 4px;background:var(--paper-3);color:var(--ink-1);outline:none;"
+                           onkeydown="if(event.key==='Enter')saveCit('{{ _cid }}',{{ project.id }});else if(event.key==='Escape')closeCitEdit('{{ _cid }}',{{ project.id }})"/>
+                    <button onclick="saveCit('{{ _cid }}',{{ project.id }})"
+                            style="font-size:0.65rem;padding:1px 5px;border-radius:var(--radius-sm);background:var(--accent);color:#fff;border:none;cursor:pointer;">✓</button>
+                    <button onclick="closeCitEdit('{{ _cid }}',{{ project.id }})"
+                            style="font-size:0.65rem;padding:1px 5px;border-radius:var(--radius-sm);background:transparent;color:var(--ink-3);border:1px solid var(--border-default);cursor:pointer;">✕</button>
+                </span>
+                {% endif %}
+                {% if pp.paper.page_count %}<span>·</span><span>{{ pp.paper.page_count }} pages</span>{% endif %}
+                {% set insts = pp.paper.institutions_list %}
+                {% if insts %}
+                <span>·</span><span style="color:var(--ink-4);" title="{{ insts|join(', ') }}">{{ insts[:2]|join(', ') }}{% if insts|length > 2 %} +{{ insts|length - 2 }}{% endif %}</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="flex flex-wrap gap-1.5 shrink-0">
+            {% if show_restore %}
+            {# Trash section: restore only #}
+            <button
+                style="height: 32px; padding: 0 12px; border-radius: var(--radius-md); font-size: 0.75rem; font-weight: 600; background-color: var(--accent); color: var(--accent-ink); display: inline-flex; align-items: center; gap: 6px; outline: none;"
+                hx-post="/paper/{{ pp.paper.arxiv_id }}/restore" hx-vals='{"project_id": {{ project.id }}}'
+                hx-target="#paper-list" hx-swap="innerHTML show:false">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-rotate-ccw"></use>
+                </svg>
+                Restore
+            </button>
+            {% elif show_curate %}
+            {# New Papers: single action — move to My Collection #}
+            <button class="focus-ring"
+                style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; border: 1px solid var(--border-default); color: var(--ink-2); background-color: var(--paper-3); display: inline-flex; align-items: center; gap: 6px;"
+                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
+                hx-vals='{"project_id": {{ project.id }}, "tag": "related"}'
+                hx-target="#paper-list" hx-swap="innerHTML show:false">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-star"></use>
+                </svg>
+                Move to My Collection
+            </button>
+            {% else %}
+            {# My Collection: toggle tag buttons (highlighted when active) + move back #}
+            {% set _tags = pp.tags_list %}
+            <button
+                style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
+                    {% if 'important' in _tags %}border: 1px solid color-mix(in oklch, var(--tag-important-ink) 40%, transparent); color: var(--tag-important-ink); background-color: var(--tag-important-bg);
+                    {% else %}border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3);{% endif %}"
+                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
+                hx-vals='{"project_id": {{ project.id }}, "tag": "important"}'
+                hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" hx-swap="outerHTML">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-star"></use>
+                </svg>
+                Important
+            </button>
+            <button
+                style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
+                    {% if 'to_read' in _tags %}border: 1px solid color-mix(in oklch, var(--tag-related-ink) 40%, transparent); color: var(--tag-related-ink); background-color: var(--tag-related-bg);
+                    {% else %}border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3);{% endif %}"
+                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
+                hx-vals='{"project_id": {{ project.id }}, "tag": "to_read"}'
+                hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" hx-swap="outerHTML">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-book"></use>
+                </svg>
+                To Read
+            </button>
+            <button
+                style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
+                    {% if 'to_discuss' in _tags %}border: 1px solid color-mix(in oklch, var(--tag-discuss-ink) 40%, transparent); color: var(--tag-discuss-ink); background-color: var(--tag-discuss-bg);
+                    {% else %}border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3);{% endif %}"
+                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag-and-notify"
+                hx-vals='{"project_id": {{ project.id }}, "tag": "to_discuss"}'
+                hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" hx-swap="outerHTML">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-message-circle"></use>
+                </svg>
+                Discuss
+            </button>
+            <button
+                style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; color: var(--ink-3); background-color: var(--paper-3); border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; gap: 6px; outline: none;"
+                title="Remove from My Collection and move back to New Papers"
+                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag" hx-vals='{"project_id": {{ project.id }}, "tag": ""}'
+                hx-target="#paper-list" hx-swap="innerHTML show:false">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-corner-up-left"></use>
+                </svg>
+                Move to New Papers
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if pp.paper.summary %}
+    <div class="mb-3 border-l-2" style="border-color: var(--accent); padding-left: 12px;">
+        <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">AI Summary</p>
+        <p class="text-sm" style="color: var(--ink-2); line-height: 1.5;">{{ pp.paper.summary.summary_text }}</p>
+        <div class="flex flex-wrap gap-2 mt-3">
+            {% if pp.paper.summary.introduces_dataset %}
+            <span
+                style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; background-color: var(--badge-dataset-bg); color: var(--ink-2); font-size: 0.75rem; border-radius: 9999px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-database"></use>
+                </svg>
+                Dataset
+            </span>
+            {% endif %}
+            {% if pp.paper.summary.introduces_architecture %}
+            <span
+                style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; background-color: var(--badge-architecture-bg); color: var(--ink-2); font-size: 0.75rem; border-radius: 9999px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-cpu"></use>
+                </svg>
+                Architecture
+            </span>
+            {% endif %}
+            {% if pp.paper.summary.introduces_method %}
+            <span
+                style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; background-color: var(--badge-method-bg); color: var(--ink-2); font-size: 0.75rem; border-radius: 9999px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-settings"></use>
+                </svg>
+                Method
+            </span>
+            {% endif %}
+            {% if pp.paper.summary.is_survey %}
+            <span
+                style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; background-color: var(--badge-survey-bg); color: var(--ink-2); font-size: 0.75rem; border-radius: 9999px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-book"></use>
+                </svg>
+                Survey
+            </span>
+            {% endif %}
+            {% if pp.paper.summary.is_benchmark %}
+            <span
+                style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; background-color: var(--badge-benchmark-bg); color: var(--ink-2); font-size: 0.75rem; border-radius: 9999px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-target"></use>
+                </svg>
+                Benchmark
+            </span>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if pp.paper.summary and pp.paper.summary.main_contributions %}
+    <details class="mb-3"
+        style="background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+        <summary
+            style="padding: 8px 12px; font-size: 0.75rem; color: var(--accent); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; outline: none; list-style: none;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-target"></use>
+            </svg>
+            Main Contributions ({{ pp.paper.summary.main_contributions.split('\n')|length }})
+        </summary>
+        <div style="padding: 0 12px 12px;">
+            <p style="font-size: 0.75rem; color: var(--ink-2); line-height: 1.5; white-space: pre-line;">{{
+                pp.paper.summary.main_contributions }}</p>
+        </div>
+    </details>
+    {% endif %}
+
+    {% if pp.paper.abstract and pp.paper.is_arxiv %}
+    <details class="mb-3">
+        <summary
+            style="font-size: 0.75rem; color: var(--ink-3); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; outline: none; list-style: none;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-archive"></use>
+            </svg>
+            Abstract
+        </summary>
+        <p
+            style="font-size: 0.75rem; color: var(--ink-2); line-height: 1.5; margin-top: 8px; border-left: 2px solid var(--border-default); padding-left: 12px;">
+            {{ pp.paper.abstract }}</p>
+    </details>
+    {% endif %}
+
+    <div class="flex items-center gap-3 text-xs mb-3" style="color: var(--ink-3);">
+        {% if pp.paper.is_arxiv %}
+        <a href="https://arxiv.org/abs/{{ pp.paper.arxiv_id }}" target="_blank" style="color: var(--ink-3);">arXiv</a>
+        <a href="https://arxiv.org/pdf/{{ pp.paper.arxiv_id }}.pdf" target="_blank" style="color: var(--ink-3);">PDF</a>
+        {% elif pp.paper.pdf_url %}
+        <a href="{{ pp.paper.pdf_url }}" target="_blank" style="color: var(--ink-3);" title="{{ pp.paper.pdf_url }}">Source ↗</a>
+        {% endif %}
+        {% if pp.paper.figure_url %}
+        <span style="color: var(--accent); display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer;"
+              title="Click to view figure"
+              data-figure-url="{{ pp.paper.figure_url }}"
+              data-figure-caption="{{ pp.paper.figure_caption or '' }}"
+              onclick="openFigureLightbox(this.dataset.figureUrl, this.dataset.figureCaption || null)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-image"></use>
+            </svg>
+            Figure
+        </span>
+        {% endif %}
+        {% if pp.added_at or pp.collected_at %}
+        <span class="text-xs" style="color: var(--ink-4); display: inline-flex; align-items: center; gap: 6px;"
+            title="{% if pp.added_at %}Added to New Papers {{ pp.added_at.strftime('%b %-d, %Y') }}{% endif %}{% if pp.collected_at %}{% if pp.added_at %} | {% endif %}Added to My Collection {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-calendar"></use>
+            </svg>
+            {% if pp.added_at %}Added {{ pp.added_at.strftime('%b %-d, %Y') }}{% endif %}{% if pp.collected_at %}{% if pp.added_at %} | {% endif %}Collected {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}
+        </span>
+        {% endif %}
+        {% if pp.paper.summary and pp.paper.summary.elapsed_ms is not none %}
+        <span class="text-xs" style="color: var(--ink-4); display: inline-flex; align-items: center; gap: 6px;"
+            title="Model used | Processing time | Tokens used">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-cpu"></use>
+            </svg>
+            {{ pp.paper.summary.model_used }} | {{ (pp.paper.summary.elapsed_ms / 1000)|round(1) }}s{% if pp.paper.summary.tokens_used %} | {% if pp.paper.summary.tokens_used >= 1000 %}{{ (pp.paper.summary.tokens_used / 1000)|round|int }}k{% else %}{{ pp.paper.summary.tokens_used }}{% endif %} tokens{% endif %}
+        </span>
+        {% endif %}
+        {% if pp.paper.is_arxiv %}
+        <button
+            hx-post="/paper/{{ pp.paper.arxiv_id }}/regenerate"
+            hx-vals='{"project_id": {{ project.id }}}'
+            hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            style="background: none; border: none; padding: 0; cursor: pointer; color: var(--ink-4); font-size: 0.75rem; display: inline-flex; align-items: center; gap: 3px; transition: color 150ms ease;"
+            onmouseover="this.style.color='var(--ink-2)'" onmouseout="this.style.color='var(--ink-4)'"
+            title="Re-fetch figure, citations &amp; institutions; regenerate summary">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <span class="htmx-request-hide">Regenerate</span>
+            <span class="htmx-request-show" style="display:none;">Regenerating…</span>
+        </button>
+        {% endif %}
+        <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px;">
+        {% if not show_restore %}
+        <button class="focus-ring notify-btn"
+            style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); background-color: var(--accent); color: var(--accent-ink); border: none; display: inline-flex; align-items: center; gap: 6px;"
+            title="Send email notification to {{ project.notification_emails or 'configured addresses' }}"
+            data-emails="{{ project.notification_emails or '' }}"
+            onclick="(function(btn){
+                var svg='<svg width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\'><use href=\'/static/icons.svg#icon-send\'/></svg>';
+                var orig=btn.innerHTML;
+                var emails=btn.dataset.emails;
+                btn.disabled=true;
+                btn.innerHTML=svg+' Sending…';
+                fetch('/paper/{{ pp.paper.arxiv_id }}/notify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'project_id={{ project.id }}'})
+                .then(function(r){return r.json();})
+                .then(function(d){
+                    if(d.ok){
+                        var to='';
+                        if(d.emails){var parts=d.emails.split(',').map(function(s){return s.trim();}).filter(Boolean);to=' to '+(parts.length<=2?parts.join(', '):parts.slice(0,2).join(', ')+' +'+( parts.length-2)+' more');}
+                        btn.innerHTML=svg+' ✓ Sent'+to;
+                        setTimeout(function(){btn.innerHTML=orig;btn.disabled=false;},3000);
+                    } else {
+                        var msg=d.error||'Send failed';
+                        btn.innerHTML=svg+' ✗ '+msg;
+                        btn.style.backgroundColor='var(--error)';
+                        btn.disabled=false;
+                        setTimeout(function(){btn.innerHTML=orig;btn.style.backgroundColor='';},4000);
+                    }
+                })
+                .catch(function(){
+                    btn.innerHTML=svg+' Error';
+                    btn.disabled=false;
+                    setTimeout(function(){btn.innerHTML=orig;},2000);
+                });
+            })(this)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-send"></use>
+            </svg>
+            Notify
+        </button>
+        {% endif %}
+        <button
+            style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); background-color: var(--error-bg); color: var(--error); border: 1px solid color-mix(in oklch, var(--error) 50%, transparent); display: inline-flex; align-items: center; gap: 6px; outline: none;"
+            title="Trash"
+            hx-post="/paper/{{ pp.paper.arxiv_id }}/trash" hx-vals='{"project_id": {{ project.id }}}'
+            hx-target="#paper-list" hx-swap="innerHTML show:false">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-trash-2"></use>
+            </svg>
+            Trash
+        </button>
+        </span>
+    </div>
+
+    {% if not show_curate %}
+    <div style="position:relative;">
+        <textarea name="notes" placeholder="Notes... (auto-saved)"
+            id="notes-{{ pp.paper.arxiv_id }}-{{ project.id }}"
+            data-arxiv-id="{{ pp.paper.arxiv_id }}" data-project-id="{{ project.id }}"
+            style="width: 100%; background-color: var(--paper-3); border: none; outline: none; border-radius: var(--radius-md); padding: 8px 12px; font-size: 0.75rem; color: var(--ink-1); resize: vertical; min-height: 2.5rem;{% if pp.notes_height %} height: {{ pp.notes_height }}px;{% endif %}"
+            rows="2"
+            hx-post="/paper/{{ pp.paper.arxiv_id }}/notes"
+            hx-trigger="keyup delay:1200ms, blur"
+            hx-vals='{"project_id": {{ project.id }}}'
+            hx-on::after-request="document.getElementById('notes-saved-{{ pp.paper.arxiv_id }}-{{ project.id }}').style.display=''; setTimeout(()=>document.getElementById('notes-saved-{{ pp.paper.arxiv_id }}-{{ project.id }}').style.display='none', 1500)">{{ pp.notes or "" }}</textarea>
+        <span id="notes-saved-{{ pp.paper.arxiv_id }}-{{ project.id }}"
+            style="display:none;position:absolute;bottom:6px;right:8px;font-size:0.65rem;color:var(--success);pointer-events:none;">saved</span>
+    </div>
+    {% endif %}
+</div>

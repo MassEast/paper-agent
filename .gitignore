@@ -1,0 +1,76 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Data files
+data/
+*.csv
+*.json
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Browser/dev cookies and playwright artifacts
+cookies.txt
+.playwright-mcp/
+
+
+# Reference/resource files (local only, not part of the project)
+resources/
+
+# k8s manifests with real cluster-specific values — see k8s/*.yaml.example for the
+# public templates; these are the real ones actually applied to our cluster
+k8s/secret.yaml
+k8s/deployment.yaml
+k8s/cronjob.yaml
+k8s/ingress.yaml
+k8s/backup-cronjob.yaml
+
+# Local session docs (progress log, prompt log) — personal notes, not repo artifacts
+docs/PROGRESS.md
+docs/PROMPTS.log
+
+# Local-only operating instructions — not part of the public repo
+CLAUDE.md

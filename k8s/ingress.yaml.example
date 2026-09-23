@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: related-work-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    # nginx's default proxy timeout (~60s) can be shorter than a slow-but-successful
+    # crawl/keyword-gen response under load. Bump both if you see "Failed to reach
+    # server" in the browser during concurrent crawls:
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    # nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: "your-domain.example.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: related-work-service
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - "your-domain.example.com"
+    secretName: "related-work-tls"

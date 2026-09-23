@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: related-work-db-backup
+spec:
+  # Once daily, ahead of the crawl hours in cronjob.yaml.example (0 1,2,3,4 * * *) so each
+  # snapshot captures state right before that day's crawls run.
+  schedule: "0 0 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: related-work
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: backup
+            image: <YOUR_REGISTRY>/<YOUR_IMAGE>:latest
+            command:
+            - python
+            - scripts/backup_db.py
+            env:
+            - name: DATABASE_URL
+              value: "sqlite:////data/related_work.db"
+            - name: BACKUP_DIR
+              value: "/backups"
+            - name: BACKUP_RETENTION_DAYS
+              value: "30"
+            # Deliberately NOT /data/logs -- /data is mounted read-only below, and the
+            # backup script's own log handler needs to write somewhere.
+            - name: LOGS_DIR
+              value: "/backups/logs"
+            volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+            - name: backups
+              mountPath: /backups
+          volumes:
+          - name: data
+            persistentVolumeClaim:
+              claimName: related-work-pvc
+          - name: backups
+            persistentVolumeClaim:
+              claimName: related-work-backups-pvc
+          # Optional node affinity — same shape as deployment.yaml.example. Omitted here by default.
+          imagePullSecrets:
+          - name: private-registry-auth
