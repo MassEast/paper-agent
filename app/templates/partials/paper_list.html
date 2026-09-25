@@ -55,12 +55,12 @@
                 {% if 'to_read' in pp.tags_list %}{% set ns2.n_read = ns2.n_read + 1 %}{% endif %}
                 {% if 'to_discuss' in pp.tags_list %}{% set ns2.n_discuss = ns2.n_discuss + 1 %}{% endif %}
             {% endfor %}
-            <span
-                style="font-size: 0.75rem; background-color: var(--tag-important-bg); color: var(--tag-important-ink); padding: 2px 8px; border-radius: 9999px;">{{ ns2.n_important }} important</span>
-            <span
-                style="font-size: 0.75rem; background-color: var(--tag-related-bg); color: var(--tag-related-ink); padding: 2px 8px; border-radius: 9999px;">{{ ns2.n_read }} to read</span>
-            <span
-                style="font-size: 0.75rem; background-color: var(--tag-discuss-bg); color: var(--tag-discuss-ink); padding: 2px 8px; border-radius: 9999px;">{{ ns2.n_discuss }} to discuss</span>
+            <button type="button" id="tagpill-curated-list-important" onclick="toggleTagFilter('curated-list','important')" title="Click to filter My Collection to this tag"
+                style="font-size: 0.75rem; background-color: var(--tag-important-bg); color: var(--tag-important-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_important }} important</button>
+            <button type="button" id="tagpill-curated-list-to_read" onclick="toggleTagFilter('curated-list','to_read')" title="Click to filter My Collection to this tag"
+                style="font-size: 0.75rem; background-color: var(--tag-related-bg); color: var(--tag-related-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_read }} to read</button>
+            <button type="button" id="tagpill-curated-list-to_discuss" onclick="toggleTagFilter('curated-list','to_discuss')" title="Click to filter My Collection to this tag"
+                style="font-size: 0.75rem; background-color: var(--tag-discuss-bg); color: var(--tag-discuss-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_discuss }} to discuss</button>
             <span style="margin-left: auto; display: inline-flex; gap: 4px; align-items: center;">
                 <span style="display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; font-size: 0.7rem; font-weight: 500;">
                     <button id="col-sort-added" onclick="sortPaperList('curated-list','added')" style="padding: 2px 8px; background-color: var(--accent); color: #fff; border: none; cursor: pointer;">Date added</button>
@@ -70,6 +70,10 @@
             </span>
         </h3>
         {% if curated_papers %}
+        <div id="curated-list-filter-empty" class="hidden" style="text-align: center; padding: 16px 0; color: var(--ink-4); font-size: 0.875rem;">
+            No papers match the selected tag filter(s).
+            <button type="button" onclick="clearTagFilter('curated-list')" style="background: none; border: none; color: var(--accent); cursor: pointer; text-decoration: underline; font-size: 0.875rem;">Clear filter</button>
+        </div>
         <div id="curated-list" class="space-y-3" style="max-height: 70vh; overflow-y: auto; padding-right: 4px;">
             {% for pp in curated_papers %}
             {% with project=project %}
@@ -203,6 +207,54 @@ function toggleGroupBy(listId) {
     _applySort(id);
     _syncButtons(id);
 });
+_applyFilter('curated-list');
+_syncFilterPills('curated-list');
+
+// Tag filter for My Collection — click-to-toggle multi-select (union: show a card
+// if it has ANY of the active tags; no active tags means show everything).
+window._paperFilter = window._paperFilter || {};
+
+function toggleTagFilter(listId, tag) {
+    const arr = window._paperFilter[listId] || (window._paperFilter[listId] = []);
+    const idx = arr.indexOf(tag);
+    if (idx === -1) arr.push(tag); else arr.splice(idx, 1);
+    _applyFilter(listId);
+    _syncFilterPills(listId);
+}
+
+function clearTagFilter(listId) {
+    window._paperFilter[listId] = [];
+    _applyFilter(listId);
+    _syncFilterPills(listId);
+}
+
+function _applyFilter(listId) {
+    const list = document.getElementById(listId);
+    if (!list) return;
+    const active = window._paperFilter[listId] || [];
+    const cards = Array.from(list.querySelectorAll(':scope > .paper-card'));
+    let visibleCount = 0;
+    cards.forEach(function(c) {
+        const tags = (c.dataset.tags || '').split(',').filter(Boolean);
+        const show = active.length === 0 || tags.some(t => active.includes(t));
+        c.style.display = show ? '' : 'none';
+        if (show) visibleCount++;
+    });
+    const emptyEl = document.getElementById(listId + '-filter-empty');
+    if (emptyEl) emptyEl.classList.toggle('hidden', !(active.length > 0 && visibleCount === 0));
+}
+
+function _syncFilterPills(listId) {
+    const active = window._paperFilter[listId] || [];
+    ['important', 'to_read', 'to_discuss'].forEach(function(tag) {
+        const el = document.getElementById('tagpill-' + listId + '-' + tag);
+        if (!el) return;
+        const isActive = active.includes(tag);
+        el.style.outline = isActive ? '2px solid var(--ink-1)' : 'none';
+        el.style.outlineOffset = isActive ? '1px' : '0';
+        el.style.opacity = (active.length > 0 && !isActive) ? '0.45' : '1';
+    });
+}
 
 function openCitEdit(cid, pid, cur) {
     document.getElementById('cit-disp-'+cid+'-'+pid).style.display='none';
