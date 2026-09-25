@@ -61,6 +61,7 @@
                 style="font-size: 0.75rem; background-color: var(--tag-related-bg); color: var(--tag-related-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_read }} to read</button>
             <button type="button" id="tagpill-curated-list-to_discuss" onclick="toggleTagFilter('curated-list','to_discuss')" title="Click to filter My Collection to this tag"
                 style="font-size: 0.75rem; background-color: var(--tag-discuss-bg); color: var(--tag-discuss-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_discuss }} to discuss</button>
+            <span style="font-size: 0.7rem; color: var(--ink-4); font-weight: 400;">(click to filter)</span>
             <span style="margin-left: auto; display: inline-flex; gap: 4px; align-items: center;">
                 <span style="display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; font-size: 0.7rem; font-weight: 500;">
                     <button id="col-sort-added" onclick="sortPaperList('curated-list','added')" style="padding: 2px 8px; background-color: var(--accent); color: #fff; border: none; cursor: pointer;">Date added</button>
@@ -132,8 +133,9 @@
     </div>
 </div>
 <script>
-// Persist sort state across HTMX swaps on window (survives partial re-render)
+// Persist sort/filter state across HTMX swaps on window (survives partial re-render)
 window._paperSort = window._paperSort || {};
+window._paperFilter = window._paperFilter || {};
 
 var _TAG_GROUP_ORDER = { 'to_read': 0, 'to_discuss': 1, 'important': 2 };
 function _tagPriority(card) {
@@ -212,8 +214,6 @@ _syncFilterPills('curated-list');
 
 // Tag filter for My Collection — click-to-toggle multi-select (union: show a card
 // if it has ANY of the active tags; no active tags means show everything).
-window._paperFilter = window._paperFilter || {};
-
 function toggleTagFilter(listId, tag) {
     const arr = window._paperFilter[listId] || (window._paperFilter[listId] = []);
     const idx = arr.indexOf(tag);
