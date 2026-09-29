@@ -52,7 +52,11 @@ class MockPatches:
         s.enter_context(patch("app.crawl.get_citation_count", return_value=3))
         s.enter_context(patch("app.crawl.get_paper_figure", return_value=(None, None)))
         s.enter_context(patch(
-            "app.crawl.is_paper_relevant",
+            "app.crawl._screen_paper_quick",
+            return_value=(self._relevant, "reason", "test-model", 100, 60),
+        ))
+        s.enter_context(patch(
+            "app.crawl._screen_paper_deep",
             return_value=(self._relevant, "reason", "test-model", 100, 60),
         ))
         s.enter_context(patch(
@@ -213,7 +217,7 @@ class TestRunCrawl:
         papers = _papers(5, "2501.I")
         cancelled = [False]
 
-        def cancelling_relevance(title, abstract, paper_content, research_interest, collection_papers, **kw):
+        def cancelling_relevance(title, abstract, research_interest, collection_papers, **kw):
             # Flip the running crawl to cancelled on first call — must push app context since
             # this runs in a ThreadPoolExecutor worker thread.
             with app.app_context():
@@ -225,7 +229,7 @@ class TestRunCrawl:
             return (True, "relevant", "test-model", 100, 60)
 
         with MockPatches(papers):
-            with patch("app.crawl.is_paper_relevant", side_effect=cancelling_relevance):
+            with patch("app.crawl._screen_paper_quick", side_effect=cancelling_relevance):
                 run_crawl(
                     project.id,
                     date(2025, 9, 1), date(2025, 9, 28),
@@ -278,7 +282,7 @@ class TestRunCrawl:
         papers = _papers(3, "2501.J")
 
         with MockPatches(papers):
-            with patch("app.crawl.is_paper_relevant", side_effect=LLMUnavailableError("Connection refused")):
+            with patch("app.crawl._screen_paper_quick", side_effect=LLMUnavailableError("Connection refused")):
                 run_crawl(
                     project.id,
                     date(2025, 6, 1), date(2025, 6, 28),

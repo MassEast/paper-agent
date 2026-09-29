@@ -18,13 +18,13 @@ class TestLLMService:
     def test_llm_responds(self):
         """test-model should return a valid JSON screening decision."""
         from app.crawl import _screen_paper_quick
-        result = _screen_paper_quick(
+        relevant, reason, model, elapsed, tokens = _screen_paper_quick(
             title="Attention Is All You Need",
             abstract="We propose a model architecture based solely on attention mechanisms.",
             research_interest="transformer attention mechanisms",
-            reference_context="",
+            collection_papers=[],
         )
-        assert isinstance(result, bool), f"Expected bool, got {result!r}"
+        assert isinstance(relevant, bool), f"Expected bool, got {relevant!r}"
 
     def test_llm_json_call(self):
         """Direct _llm_json call returns parseable output."""

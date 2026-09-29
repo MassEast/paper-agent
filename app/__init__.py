@@ -107,6 +107,8 @@ def create_app():
             # One-time backfill: added_at used to be overwritten on every move into My Collection,
             # so for already-curated papers it currently holds the collection date, not the crawl date.
             "UPDATE project_papers SET collected_at = added_at WHERE manual_tag IS NOT NULL AND collected_at IS NULL",
+            "ALTER TABLE papers ADD COLUMN web_enrich_attempts INTEGER DEFAULT 0",
+            "ALTER TABLE papers ADD COLUMN web_enrich_last_attempt_at DATETIME",
         ]
         for _sql in _migrations:
             try:
@@ -158,6 +160,8 @@ def create_app():
 
     app.jinja_env.globals["date"] = date
     app.jinja_env.globals["timedelta"] = timedelta
+    from app.crawl import MAX_WEB_ENRICH_ATTEMPTS
+    app.jinja_env.globals["max_web_enrich_attempts"] = MAX_WEB_ENRICH_ATTEMPTS
 
     _berlin = ZoneInfo("Europe/Berlin")
 

@@ -56,6 +56,11 @@ class Paper(db.Model):
     figure_caption = db.Column(db.Text)
     enrich_complete = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Web-paper (non-arXiv) PDF metadata backfill (Pass 3 of backfill_missing_paper_metadata):
+    # capped-retry bookkeeping so a permanently-failing publisher fetch (403/bot-block, dead
+    # link, ...) doesn't get re-attempted forever by the nightly cronjob.
+    web_enrich_attempts = db.Column(db.Integer, default=0)
+    web_enrich_last_attempt_at = db.Column(db.DateTime)
 
     summary = db.relationship("PaperSummary", back_populates="paper", uselist=False)
     project_links = db.relationship("ProjectPaper", back_populates="paper")

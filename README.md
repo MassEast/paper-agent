@@ -70,6 +70,8 @@ flowchart TD
 
 The dashed edge is a feedback loop: papers you've already curated into My Collection seed Semantic Scholar's recommendations directly. Collection papers also quietly inform two LLM steps not drawn above — keyword extraction and relevance screening both get calibration excerpts from your Collection too — so **the tool gets better targeted the more you curate**.
 
+You can also add any paper directly by pasting its URL. It first tries to resolve the paper to its arXiv version — an explicit arXiv link on the page, a DOI match, or (as a last resort) a title search on arXiv itself — and if found, treats it as a regular arXiv paper with full enrichment. If no arXiv version exists, the landing page's title/abstract/authors are still read regardless of domain, but the actual PDF (used for page count and author-institution extraction) is only downloaded from a small allowlist of open-access hosts — arXiv, ACL Anthology, PMLR, OpenReview, NeurIPS Proceedings, CVF (CVPR/ICCV/ECCV), AAAI, IJCAI, JMLR — out of respect for publisher licensing terms. For anything else, you still get the metadata, just not a downloaded PDF.
+
 Every LLM step is a plain prompt template in [`app/prompts.py`](app/prompts.py). For example, the relevance check that filters candidate papers:
 
 ```

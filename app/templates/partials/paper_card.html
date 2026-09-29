@@ -266,6 +266,38 @@
             <span class="htmx-request-hide">Regenerate</span>
             <span class="htmx-request-show" style="display:none;">Regenerating…</span>
         </button>
+        {% elif not pp.paper.is_arxiv and pp.paper.web_enrich_attempts and pp.paper.web_enrich_attempts >= max_web_enrich_attempts and (not pp.paper.page_count or not pp.paper.institutions_list) %}
+        <span style="color: var(--error); font-size: 0.75rem;"
+            title="Page count / institutions could not be fetched from this paper's PDF after {{ pp.paper.web_enrich_attempts }} attempt{{ 's' if pp.paper.web_enrich_attempts != 1 else '' }}{% if pp.paper.web_enrich_last_attempt_at %} (last tried {{ pp.paper.web_enrich_last_attempt_at.strftime('%b %-d, %Y') }}){% endif %} — either the domain isn't on the open-access allowlist, or the fetch failed (403, dead link, etc).">
+            PDF metadata failed ({{ pp.paper.web_enrich_attempts }}/{{ max_web_enrich_attempts }} attempts)
+        </span>
+        <button
+            onclick="(function(btn){
+                var orig=btn.innerHTML;
+                btn.disabled=true;
+                btn.innerHTML='Retrying…';
+                fetch('/paper/{{ pp.paper.arxiv_id }}/retry-web-enrich',{method:'POST'})
+                .then(function(r){return r.json();})
+                .then(function(d){
+                    if(d.ok){
+                        btn.innerHTML='✓ Retry started';
+                        setTimeout(function(){btn.innerHTML=orig;btn.disabled=false;},4000);
+                    } else {
+                        btn.innerHTML='✗ '+(d.error||'Failed');
+                        btn.disabled=false;
+                        setTimeout(function(){btn.innerHTML=orig;},4000);
+                    }
+                })
+                .catch(function(){
+                    btn.innerHTML='✗ Error';
+                    btn.disabled=false;
+                    setTimeout(function(){btn.innerHTML=orig;},2000);
+                });
+            })(this)"
+            style="background: none; border: none; padding: 0; cursor: pointer; color: var(--accent); font-size: 0.75rem; text-decoration: underline;"
+            title="Reset attempt counter and retry PDF metadata fetch in the background — reload the page in a moment to see the result">
+            Retry
+        </button>
         {% endif %}
         <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px;">
         {% if not show_restore %}

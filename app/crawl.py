@@ -19,6 +19,7 @@ from app import db
 from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog, ScreenedPaper, compute_screening_hash
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
+from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, USER_AGENT
 
 API_KEY = os.environ.get("LLM_API_KEY")
 SCHOLAR_API_KEY = os.environ.get("SCHOLAR_API_KEY")
@@ -30,12 +31,81 @@ SCHOLAR_API_KEY = os.environ.get("SCHOLAR_API_KEY")
 # memory pressure for the crawl's duration though, so don't set this arbitrarily high.
 REFERENCE_PAPERS_LIMIT = int(os.environ.get("REFERENCE_PAPERS_LIMIT", "15"))
 
+# Domains we'll actually download a PDF from for a manually-added ("web:") paper — everything
+# else only gets its landing-page metadata (title/abstract/authors/doi) read, never a PDF
+# download. Publisher PDFs (ACM, IEEE, Elsevier, ScienceDirect, ...) are excluded on purpose:
+# a server-side bot repeatedly downloading them, possibly from a licensed institutional IP, is
+# exactly the pattern that gets flagged by publishers and can risk the license. Starting list —
+# extend as needed.
+OPEN_ACCESS_PDF_DOMAINS = {
+    "arxiv.org",
+    "ar5iv.labs.arxiv.org",
+    "aclanthology.org",
+    "proceedings.mlr.press",
+    "openreview.net",
+    "proceedings.neurips.cc",
+    "openaccess.thecvf.com",  # CVPR / ICCV / WACV — Computer Vision Foundation's own OA repo
+    "ojs.aaai.org",  # AAAI / IAAI proceedings — open access by AAAI policy
+    "ijcai.org",  # IJCAI proceedings
+    "jmlr.org",  # Journal of Machine Learning Research — always open
+}
+
+
+def _is_open_access_pdf_domain(url: str) -> bool:
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    return host in OPEN_ACCESS_PDF_DOMAINS or any(
+        host.endswith("." + d) for d in OPEN_ACCESS_PDF_DOMAINS
+    )
+
+
+MAX_WEB_ENRICH_ATTEMPTS = 3
+
+
+def _enrich_one_web_paper(paper) -> None:
+    """One enrichment attempt for a 'web:' paper: refresh pdf_url from the landing page, then
+    (if the resolved PDF is on an open-access domain) download it for page_count + institutions.
+    Always increments web_enrich_attempts / sets web_enrich_last_attempt_at, regardless of
+    outcome — shared by the Pass-3 nightly backfill and the manual "Retry" button in the UI.
+    Caller must db.session.commit()."""
+    paper.web_enrich_attempts = (paper.web_enrich_attempts or 0) + 1
+    paper.web_enrich_last_attempt_at = datetime.utcnow()
+
+    info = extract_paper_info_from_url(paper.pdf_url)
+    if info.get("pdf_url"):
+        paper.pdf_url = info["pdf_url"]
+    if info.get("page_count") and not paper.page_count:
+        paper.page_count = info["page_count"]
+    if info.get("pdf_url"):
+        _enrich_web_paper_pdf_metadata(paper, info["pdf_url"])
+
+
+def _is_safe_external_url(url: str) -> bool:
+    """Basic SSRF guard for user-supplied URLs (add-by-URL, /extract-from-url): reject
+    non-http(s) schemes and hosts that resolve to a private/loopback/link-local/reserved
+    address (RFC1918, 127.0.0.0/8, 169.254.0.0/16 incl. the cloud-metadata address, etc.).
+    Fails closed — any resolution error is treated as unsafe."""
+    import socket
+    import ipaddress
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return False
+        for family, _, _, _, sockaddr in socket.getaddrinfo(parsed.hostname, None):
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                return False
+        return True
+    except Exception:
+        return False
+
 _crawl_lock = threading.Lock()
 
-# Global arXiv rate-limit enforcement: at most one arXiv session active at a time across all
-# threads (crawls, count tasks, health checks).
-_arxiv_lock = threading.Lock()
-_arxiv_waiters = 0  # GIL-safe: number of threads currently waiting to acquire _arxiv_lock
+# _arxiv_lock / _ArxivLockCtx / arxiv_queue_depth now live in app.utils (shared with the
+# ar5iv/arxiv.org HTML+PDF fetches there) — imported above. Re-exported under these names
+# so existing `from app.crawl import _ArxivLockCtx` / `arxiv_queue_depth` call sites
+# (app/routes/projects.py) keep working unchanged.
 
 # Global Semantic Scholar rate-limit enforcement: 1 req/s with API key.
 # Same pattern as _arxiv_lock — all Scholar HTTP calls must go through _ScholarLockCtx.
@@ -75,46 +145,11 @@ class _ScholarLockCtx:
 
 
 def _scholar_headers() -> dict:
-    """Return auth headers for Semantic Scholar API (empty dict if no key configured)."""
+    """Return auth headers for Semantic Scholar API (User-Agent + API key if configured)."""
+    headers = {"User-Agent": USER_AGENT}
     if SCHOLAR_API_KEY:
-        return {"x-api-key": SCHOLAR_API_KEY}
-    return {}
-
-
-class _ArxivLockCtx:
-    """Context manager for _arxiv_lock that tracks the waiter count.
-
-    Usage (blocking):    with _ArxivLockCtx(): ...
-    Usage (with timeout): with _ArxivLockCtx(timeout=10.0) as ok:
-                              if not ok: <handle busy>
-    """
-
-    def __init__(self, timeout: Optional[float] = None):
-        self._timeout = timeout
-        self.acquired = False
-
-    def __enter__(self) -> bool:
-        global _arxiv_waiters
-        _arxiv_waiters += 1
-        self.acquired = False
-        try:
-            if self._timeout is not None:
-                self.acquired = _arxiv_lock.acquire(timeout=self._timeout)
-            else:
-                _arxiv_lock.acquire()
-                self.acquired = True
-        finally:
-            _arxiv_waiters -= 1  # no longer waiting (held, timed-out, or exception)
-        return self.acquired
-
-    def __exit__(self, *_):
-        if self.acquired:
-            _arxiv_lock.release()
-
-
-def arxiv_queue_depth() -> int:
-    """Return how many threads are currently waiting to acquire the arXiv lock."""
-    return _arxiv_waiters
+        headers["x-api-key"] = SCHOLAR_API_KEY
+    return headers
 
 def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, app) -> None:
     """Background thread: fully enrich a paper that was just added directly to My Collection.
@@ -147,8 +182,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                             _log.info("[collection-add] arXiv metadata fetched for %s: %s", arxiv_id, r.title)
                 except Exception as e:
                     _log.warning("[collection-add] arXiv fetch failed for %s: %s", arxiv_id, e)
-                finally:
-                    time.sleep(3.5)
+                # _ArxivLockCtx enforces the inter-request gap on release — no manual sleep needed.
 
             paper = Paper.query.get(paper_id)
             if not paper:
@@ -271,6 +305,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
 
             # Step 2: check if any in-page arXiv link corresponds to the same paper
             matched_arxiv_id = None
+            match_source = None
             for candidate_id in arxiv_links[:3]:  # check at most 3 links
                 try:
                     with _ArxivLockCtx():
@@ -279,13 +314,70 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
                         ))
                         if results and page_title and _titles_match(page_title, results[0].title):
                             matched_arxiv_id = candidate_id
+                            match_source = "in-page link"
                             _log.info("[web-add] arXiv match found for %s → %s (%s)",
                                       url, candidate_id, results[0].title)
-                        time.sleep(3.5)
                 except Exception as e:
                     _log.warning("[web-add] arXiv lookup failed for %s: %s", candidate_id, e)
                 if matched_arxiv_id:
                     break
+
+            # Step 2b: DOI → arXiv lookup
+            # 10.48550/arXiv.{id} DOIs encode the arXiv ID directly — no Scholar call needed.
+            # For other DOIs, fall through to Scholar.
+            doi = info.get("doi")
+            if not matched_arxiv_id and doi:
+                direct = re.match(r"10\.48550/arXiv\.(\d{4}\.\d{4,5})", doi)
+                if direct:
+                    matched_arxiv_id = direct.group(1)
+                    match_source = "DOI (direct)"
+                    _log.info("[web-add] DOI %s → arXiv %s (direct)", doi, matched_arxiv_id)
+                else:
+                    try:
+                        with _ScholarLockCtx():
+                            with httpx.Client(timeout=httpx.Timeout(10.0)) as _http:
+                                r = _http.get(
+                                    f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}",
+                                    params={"fields": "externalIds"},
+                                    headers=_scholar_headers(),
+                                )
+                        if r.status_code == 200:
+                            ext = r.json().get("externalIds") or {}
+                            arxiv_via_doi = ext.get("ArXiv")
+                            if arxiv_via_doi:
+                                matched_arxiv_id = arxiv_via_doi
+                                match_source = "DOI (Scholar)"
+                                _log.info("[web-add] DOI %s → Scholar → arXiv %s", doi, matched_arxiv_id)
+                    except Exception as _doi_e:
+                        _log.warning("[web-add] DOI Scholar lookup failed for %s: %s", doi, _doi_e)
+
+            # Step 2c: no explicit link or DOI match — search arXiv by title as a last resort.
+            # Many CS/ML papers published elsewhere (IEEE, ACM, Elsevier, ...) also have an
+            # arXiv preprint that just isn't linked from the publisher's landing page. Finding
+            # it recovers full enrichment (institutions/page-count come from the arXiv PDF,
+            # which is on OPEN_ACCESS_PDF_DOMAINS, instead of the paywalled original never
+            # being downloadable at all). Same _titles_match safety check as the other paths —
+            # a title-only search is the least reliable signal of the three, so this only
+            # accepts a near-exact title match, same threshold as everything else here.
+            if not matched_arxiv_id and page_title and page_title != url:
+                try:
+                    with _ArxivLockCtx():
+                        results = list(arxiv.Client(delay_seconds=3.1).results(
+                            arxiv.Search(
+                                query=f'ti:"{page_title}"',
+                                max_results=3,
+                                sort_by=arxiv.SortCriterion.Relevance,
+                            )
+                        ))
+                    for candidate in results:
+                        if _titles_match(page_title, candidate.title):
+                            matched_arxiv_id = candidate.entry_id.split("/")[-1]
+                            match_source = "title search"
+                            _log.info("[web-add] arXiv title-search match for %s → %s (%s)",
+                                      url, matched_arxiv_id, candidate.title)
+                            break
+                except Exception as e:
+                    _log.warning("[web-add] arXiv title search failed for %r: %s", page_title, e)
 
             if matched_arxiv_id:
                 # Convert the web paper record to an arXiv paper (if no conflict)
@@ -304,57 +396,9 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
                             db.session.delete(pp)
                     db.session.delete(paper)
                     db.session.commit()
-                    _log.info("[web-add] relinked to existing arXiv paper %s", matched_arxiv_id)
+                    _log.info("[web-add] relinked to existing arXiv paper %s (via %s)", matched_arxiv_id, match_source)
                     return
                 # Update arxiv_id on the placeholder paper then enrich
-                paper.arxiv_id = matched_arxiv_id
-                db.session.commit()
-                start_collection_add_async(project_id, matched_arxiv_id, paper_id, app)
-                return
-
-            # Step 2b: DOI → arXiv lookup
-            # 10.48550/arXiv.{id} DOIs encode the arXiv ID directly — no Scholar call needed.
-            # For other DOIs, fall through to Scholar.
-            doi = info.get("doi")
-            if not matched_arxiv_id and doi:
-                direct = re.match(r"10\.48550/arXiv\.(\d{4}\.\d{4,5})", doi)
-                if direct:
-                    matched_arxiv_id = direct.group(1)
-                    _log.info("[web-add] DOI %s → arXiv %s (direct)", doi, matched_arxiv_id)
-                else:
-                    try:
-                        with _ScholarLockCtx():
-                            with httpx.Client(timeout=httpx.Timeout(10.0)) as _http:
-                                r = _http.get(
-                                    f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}",
-                                    params={"fields": "externalIds"},
-                                    headers=_scholar_headers(),
-                                )
-                        if r.status_code == 200:
-                            ext = r.json().get("externalIds") or {}
-                            arxiv_via_doi = ext.get("ArXiv")
-                            if arxiv_via_doi:
-                                matched_arxiv_id = arxiv_via_doi
-                                _log.info("[web-add] DOI %s → Scholar → arXiv %s", doi, matched_arxiv_id)
-                    except Exception as _doi_e:
-                        _log.warning("[web-add] DOI Scholar lookup failed for %s: %s", doi, _doi_e)
-
-            if matched_arxiv_id:
-                existing_arxiv = Paper.query.filter_by(arxiv_id=matched_arxiv_id).first()
-                if existing_arxiv and existing_arxiv.id != paper_id:
-                    pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper_id).first()
-                    if pp:
-                        dup = ProjectPaper.query.filter_by(
-                            project_id=project_id, paper_id=existing_arxiv.id
-                        ).first()
-                        if not dup:
-                            pp.paper_id = existing_arxiv.id
-                        else:
-                            db.session.delete(pp)
-                    db.session.delete(paper)
-                    db.session.commit()
-                    _log.info("[web-add] DOI relinked to existing arXiv paper %s", matched_arxiv_id)
-                    return
                 paper.arxiv_id = matched_arxiv_id
                 db.session.commit()
                 start_collection_add_async(project_id, matched_arxiv_id, paper_id, app)
@@ -515,6 +559,10 @@ def extract_paper_info_from_url(url: str) -> dict:
         "pdf_url": None, "page_count": None,
     }
 
+    if not _is_safe_external_url(url):
+        _log.warning("[extract-url] rejected unsafe URL: %s", url)
+        return result
+
     arxiv_match = re.search(r"arxiv\.org/(?:abs|pdf)/(\d+\.\d+)", url)
     # NASA ADS URL: https://ui.adsabs.harvard.edu/abs/2026arXiv260309600B/abstract
     # Encoded arXiv ID: {year}arXiv{YYMM}{NNNNN}{letter} → {YYMM}.{NNNNN}
@@ -545,8 +593,7 @@ def extract_paper_info_from_url(url: str) -> dict:
                     result["authors"] = [str(a) for a in papers[0].authors]
             except Exception:
                 pass
-            finally:
-                time.sleep(3.5)
+            # _ArxivLockCtx enforces the inter-request gap on release — no manual sleep needed.
         return result
 
     # For PDF URLs: strip the .pdf suffix and fetch the HTML abstract page instead.
@@ -583,7 +630,8 @@ def extract_paper_info_from_url(url: str) -> dict:
         return results
 
     try:
-        resp = httpx.get(fetch_url, timeout=15.0, follow_redirects=True)
+        with _http_client(timeout=15.0, follow_redirects=True) as http:
+            resp = http.get(fetch_url)
         content = resp.text[:100000]
 
         # <title> fallback
@@ -728,7 +776,9 @@ def get_paper_figure(arxiv_id: str) -> tuple[Optional[str], Optional[str]]:
         f"https://arxiv.org/abs/{arxiv_id}",
     ]:
         try:
-            resp = httpx.get(page_url, timeout=15.0, follow_redirects=True)
+            with _ArxivLockCtx():
+                with _http_client(timeout=15.0, follow_redirects=True) as http:
+                    resp = http.get(page_url)
             if resp.status_code != 200:
                 continue
             content = resp.text
@@ -820,8 +870,9 @@ def get_paper_figure(arxiv_id: str) -> tuple[Optional[str], Optional[str]]:
 def _fetch_figure_html(figure_url: str, caption: Optional[str] = None) -> str:
     """Download figure URL, add white padding, return embedded HTML block. Returns '' on failure."""
     try:
-        with httpx.Client(timeout=15, follow_redirects=True) as http:
-            img_resp = http.get(figure_url)
+        with _ArxivLockCtx():
+            with _http_client(timeout=15, follow_redirects=True) as http:
+                img_resp = http.get(figure_url)
         if img_resp.status_code != 200 or len(img_resp.content) <= 1000:
             return ""
         img_data = img_resp.content
@@ -1546,10 +1597,7 @@ def search_arxiv_with_full_papers(
                 except Exception as e:
                     _log.warning("[arXiv] Error searching '%s': %s", keyword, e)
                     break
-
-            # Hold the lock for 3.5s after the search completes so the next waiter can't
-            # fire immediately — enforces the arXiv ≥3s inter-request gap at the process level.
-            time.sleep(3.5)
+            # _ArxivLockCtx enforces the inter-request gap on release — no manual sleep needed.
 
     return papers
 
@@ -1618,8 +1666,9 @@ def _enrich_institutions_llm_fallback(papers: list) -> None:
             import io
             from pypdf import PdfReader
             url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-            with httpx.Client(timeout=httpx.Timeout(30.0), follow_redirects=True) as http:
-                r = http.get(url)
+            with _ArxivLockCtx():
+                with _http_client(timeout=httpx.Timeout(30.0), follow_redirects=True) as http:
+                    r = http.get(url)
             if r.status_code == 200 and r.content:
                 reader = PdfReader(io.BytesIO(r.content), strict=False)
                 if reader.pages:
@@ -1654,11 +1703,20 @@ def _enrich_web_paper_pdf_metadata(paper, pdf_url: str) -> None:
     """Download pdf_url once; fill paper.page_count (if missing) and paper.institutions
     (via LLM extraction from page 1 text) — the same approach as the arXiv pipeline's
     _enrich_institutions_llm_fallback, generalized to an arbitrary PDF URL instead of
-    assuming arxiv.org/pdf/{id}.pdf. Updates paper in-place; caller must commit."""
+    assuming arxiv.org/pdf/{id}.pdf. Updates paper in-place; caller must commit.
+
+    Only actually downloads the PDF for domains in OPEN_ACCESS_PDF_DOMAINS — paper.pdf_url
+    itself (a landing-page-resolved link, for the user's own use) is set regardless by the
+    caller; this function is specifically the server-side bulk-download step, which is what
+    the allowlist restricts. No-ops (leaves page_count/institutions unset) for anything else.
+    """
+    if not _is_open_access_pdf_domain(pdf_url):
+        _log.info("[web-enrich] skipping PDF download for non-open-access domain: %s", pdf_url)
+        return
     try:
         import io
         from pypdf import PdfReader
-        with httpx.Client(timeout=httpx.Timeout(30.0), follow_redirects=True) as http:
+        with _http_client(timeout=httpx.Timeout(30.0), follow_redirects=True) as http:
             pdf_resp = http.get(pdf_url)
         if pdf_resp.status_code == 200 and pdf_resp.content:
             reader = PdfReader(io.BytesIO(pdf_resp.content), strict=False)
@@ -1703,8 +1761,9 @@ def enrich_page_counts(papers: list) -> None:
         import io
         try:
             url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-            with httpx.Client(timeout=httpx.Timeout(45.0), follow_redirects=True) as http:
-                r = http.get(url)
+            with _ArxivLockCtx():
+                with _http_client(timeout=httpx.Timeout(45.0), follow_redirects=True) as http:
+                    r = http.get(url)
             if r.status_code == 200 and r.content:
                 return len(PdfReader(io.BytesIO(r.content), strict=False).pages)
         except Exception as e:
@@ -1844,41 +1903,40 @@ def search_arxiv_papers(
                 sort_by=arxiv.SortCriterion.SubmittedDate,
             )
 
-            client = arxiv.Client(delay_seconds=3.1)
-            for result in client.results(search):
-                if (datetime.now() - start_time).total_seconds() > 20:
-                    print(f"[arXiv] Timeout for keyword '{keyword}' after 45s")
-                    break
+            with _ArxivLockCtx():
+                client = arxiv.Client(delay_seconds=3.1)
+                for result in client.results(search):
+                    if (datetime.now() - start_time).total_seconds() > 20:
+                        print(f"[arXiv] Timeout for keyword '{keyword}' after 45s")
+                        break
 
-                paper_id = result.entry_id.split("/")[-1]
-                if paper_id in seen_ids:
-                    continue
+                    paper_id = result.entry_id.split("/")[-1]
+                    if paper_id in seen_ids:
+                        continue
 
-                pub_date = result.published.date()
-                if pub_date < date_from or pub_date > date_to:
-                    continue
+                    pub_date = result.published.date()
+                    if pub_date < date_from or pub_date > date_to:
+                        continue
 
-                seen_ids.add(paper_id)
+                    seen_ids.add(paper_id)
 
-                keyword_papers.append(
-                    {
-                        "arxiv_id": paper_id,
-                        "title": result.title,
-                        "authors": [str(a) for a in result.authors],
-                        "abstract": result.summary,
-                        "pdf_url": result.pdf_url,
-                        "published_date": pub_date,
-                        "year": pub_date.year,
-                        "categories": [cat for cat in result.categories],
-                    }
-                )
+                    keyword_papers.append(
+                        {
+                            "arxiv_id": paper_id,
+                            "title": result.title,
+                            "authors": [str(a) for a in result.authors],
+                            "abstract": result.summary,
+                            "pdf_url": result.pdf_url,
+                            "published_date": pub_date,
+                            "year": pub_date.year,
+                            "categories": [cat for cat in result.categories],
+                        }
+                    )
+                # _ArxivLockCtx enforces the inter-request gap on release — no manual sleep needed.
 
         except Exception as e:
             print(f"[arXiv] Error searching '{keyword}': {e}")
             continue
-
-        # Respect arXiv rate limit: 1 request per 3 seconds
-        time.sleep(3)
 
         papers.extend(keyword_papers)
         if len(papers) >= limit:
@@ -1950,36 +2008,31 @@ def get_paper_content(arxiv_id: str) -> Optional[str]:
     return None
 
 
-def is_paper_relevant(
+def _relevance_ref_text(collection_papers: list[dict]) -> str:
+    if not collection_papers:
+        return ""
+    return "Researcher's collection (for context on what is relevant):\n" + "\n".join(
+        [f"- {p.get('title', '')}: {p.get('abstract', '')[:400]}" for p in collection_papers]
+    )
+
+
+def _screen_paper_quick(
     title: str,
     abstract: str,
-    paper_content: str,
     research_interest: str,
     collection_papers: list[dict],
-    skip_deep_check: bool = False,
 ) -> tuple[bool, str, str, int, int]:
-    """Two-phase LLM relevance screen for a candidate paper.
+    """Phase 1 of paper relevance screening: title + abstract only, no full-text fetch —
+    this is what keeps screening cheap (and avoids an ar5iv fetch per candidate) across
+    hundreds of candidates per crawl. Callers on the hot crawl path should only fetch
+    paper_content and call _screen_paper_deep if this returns relevant.
 
-    Phase 1 (quick): title + abstract only. If not relevant, returns immediately —
-    this is what keeps screening cheap across hundreds of candidates per crawl.
-    Phase 2 (deep): only runs if phase 1 passed and paper_content is available and
-    skip_deep_check is False; re-evaluates with up to 150k chars of full paper text.
-
-    Both phases are also shown titles+abstract-excerpts from collection_papers (the
-    caller's pre-selected My Collection papers, already capped to REFERENCE_PAPERS_LIMIT
-    by _select_reference_papers) as calibration examples of "relevant."
-
-    Returns (is_relevant, reason, model_used, elapsed_ms, tokens_used). reason is one
-    of "not-relevant", "relevant", "parse-failed", "deep-parse-failed" — a parse failure
-    is treated as not-relevant (paper is skipped) rather than raising.
+    Returns (is_relevant, reason, model_used, elapsed_ms, tokens_used). reason is one of
+    "not-relevant", "relevant", "parse-failed" — a parse failure is treated as not-relevant
+    (paper is skipped) rather than raising.
     """
-    ref_text = ""
-    if collection_papers:
-        ref_text = "Researcher's collection (for context on what is relevant):\n" + "\n".join(
-            [f"- {p.get('title', '')}: {p.get('abstract', '')[:400]}" for p in collection_papers]
-        )
+    ref_text = _relevance_ref_text(collection_papers)
 
-    # Phase 1: Quick check with title + abstract
     quick_prompt = prompts.RELEVANCE_QUICK.format(
         research_interest=research_interest,
         ref_text=ref_text,
@@ -1996,15 +2049,25 @@ def is_paper_relevant(
         print(f"[relevance] Quick check parse failed for '{title[:80]}' — skipping paper. result={result!r}")
         return False, "parse-failed", model, elapsed, tokens_used
 
-    initial_relevant = bool(result.get("relevant"))
+    relevant = bool(result.get("relevant"))
+    return relevant, ("relevant" if relevant else "not-relevant"), model, elapsed, tokens_used
 
-    # If not relevant at all, skip deep check
-    if not initial_relevant:
-        return False, "not-relevant", model, elapsed, tokens_used
 
-    # Phase 2: Deep check with full content (if available and not skipped)
-    if not paper_content or skip_deep_check:
-        return True, "relevant", model, elapsed, tokens_used
+def _screen_paper_deep(
+    title: str,
+    abstract: str,
+    paper_content: str,
+    research_interest: str,
+    collection_papers: list[dict],
+) -> tuple[bool, str, str, int, int]:
+    """Phase 2 of paper relevance screening: re-evaluates with up to 150k chars of full
+    paper text. Only meaningful to call for a candidate that already passed the quick
+    check — see _screen_paper_quick.
+
+    Returns (is_relevant, reason, model_used, elapsed_ms, tokens_used). reason is one of
+    "not-relevant", "relevant", "deep-parse-failed".
+    """
+    ref_text = _relevance_ref_text(collection_papers)
 
     deep_prompt = prompts.RELEVANCE_DEEP.format(
         research_interest=research_interest,
@@ -2014,22 +2077,50 @@ def is_paper_relevant(
         paper_content=paper_content[:150000],
     )
 
-    result, model, elapsed2, usage2 = _llm_json(
+    result, model, elapsed, usage = _llm_json(
         [{"role": "user", "content": deep_prompt}], temperature=0.3, max_tokens=4096
     )
-    tokens_used += int(usage2.get("total_tokens", 0))
+    tokens_used = int(usage.get("total_tokens", 0))
 
     if not isinstance(result, dict) or "relevant" not in result:
         print(f"[relevance] Deep check parse failed for '{title[:80]}' — treating as not relevant. result={result!r}")
-        return False, "deep-parse-failed", model, elapsed + elapsed2, tokens_used
+        return False, "deep-parse-failed", model, elapsed, tokens_used
 
-    return (
-        bool(result.get("relevant")),
-        "relevant" if result.get("relevant") else "not-relevant",
-        model,
-        elapsed + elapsed2,
-        tokens_used,
+    relevant = bool(result.get("relevant"))
+    return relevant, ("relevant" if relevant else "not-relevant"), model, elapsed, tokens_used
+
+
+def is_paper_relevant(
+    title: str,
+    abstract: str,
+    paper_content: str,
+    research_interest: str,
+    collection_papers: list[dict],
+    skip_deep_check: bool = False,
+) -> tuple[bool, str, str, int, int]:
+    """Two-phase LLM relevance screen for a candidate paper — composes _screen_paper_quick
+    and _screen_paper_deep for callers that already have paper_content in hand (e.g. the
+    collection-add / web-add paths, which fetch content unconditionally for a single known
+    paper). The main crawl loop fetches paper_content lazily instead — see _process_one in
+    run_crawl — so it can skip the ar5iv fetch entirely for candidates the quick check
+    already rejects.
+
+    Returns (is_relevant, reason, model_used, elapsed_ms, tokens_used). reason is one
+    of "not-relevant", "relevant", "parse-failed", "deep-parse-failed".
+    """
+    relevant, reason, model, elapsed, tokens_used = _screen_paper_quick(
+        title, abstract, research_interest, collection_papers
     )
+    if not relevant:
+        return relevant, reason, model, elapsed, tokens_used
+
+    if not paper_content or skip_deep_check:
+        return True, "relevant", model, elapsed, tokens_used
+
+    d_relevant, d_reason, d_model, d_elapsed, d_tokens = _screen_paper_deep(
+        title, abstract, paper_content, research_interest, collection_papers
+    )
+    return d_relevant, d_reason, d_model, elapsed + d_elapsed, tokens_used + d_tokens
 
 
 def extract_main_contributions(
@@ -2335,18 +2426,32 @@ def run_crawl(
                 _crawl_current_papers[_crawl_log_id] = pd.get("title", "")
                 _crawl_in_flight[_crawl_log_id] = _crawl_in_flight.get(_crawl_log_id, 0) + 1
                 try:
-                    paper_content = get_paper_content(arxiv_id)
+                    quick_relevant, _reason, _, _, rel_tokens = _screen_paper_quick(
+                        title=pd["title"],
+                        abstract=pd["abstract"],
+                        research_interest=_research_interest,
+                        collection_papers=_ref_dicts,
+                    )
+                    if not quick_relevant:
+                        return {"relevant": False, "tokens": rel_tokens, "paper_data": pd}
+
                     if cancel_event.is_set():
                         return None
 
-                    relevant, _reason, _, _, rel_tokens = is_paper_relevant(
+                    # Only fetch full paper content (ar5iv) for candidates that already passed
+                    # the abstract-only quick check — avoids an outbound fetch per candidate for
+                    # papers that get rejected immediately.
+                    paper_content = get_paper_content(arxiv_id)
+
+                    deep_relevant, _reason, _, _, deep_tokens = _screen_paper_deep(
                         title=pd["title"],
                         abstract=pd["abstract"],
                         paper_content=paper_content or pd["abstract"],
                         research_interest=_research_interest,
                         collection_papers=_ref_dicts,
                     )
-                    if not relevant:
+                    rel_tokens += deep_tokens
+                    if not deep_relevant:
                         return {"relevant": False, "tokens": rel_tokens, "paper_data": pd}
 
                     if cancel_event.is_set():
@@ -2722,25 +2827,32 @@ def backfill_missing_paper_metadata() -> int:
     # this extraction existed, or where it previously failed (no citation_pdf_url found,
     # PDF fetch failed, etc.). Re-running is safe/idempotent: extract_paper_info_from_url
     # only ever gets fed a landing-page-style URL here, never an already-resolved PDF link.
+    # Capped at MAX_WEB_ENRICH_ATTEMPTS per paper — without this, a permanently failing fetch
+    # (403/bot-block, dead link) got re-tried on every one of the 4 nightly cronjob runs
+    # forever, hammering the same publisher URL indefinitely. A paper that hits the cap can
+    # still be manually retried from its card in the UI (resets the counter to 0).
     needs_web_enrich = Paper.query.filter(
         Paper.arxiv_id.like("web:%"),
         or_(Paper.page_count.is_(None), Paper.institutions.is_(None)),
+        Paper.web_enrich_attempts < MAX_WEB_ENRICH_ATTEMPTS,
     ).limit(20).all()
 
     if needs_web_enrich:
         _log.info("[backfill] %d web paper(s) need PDF metadata (capped at 20/run)", len(needs_web_enrich))
 
     for paper in needs_web_enrich:
-        info = extract_paper_info_from_url(paper.pdf_url)
-        if info.get("pdf_url"):
-            paper.pdf_url = info["pdf_url"]
-        if info.get("page_count") and not paper.page_count:
-            paper.page_count = info["page_count"]
-        if info.get("pdf_url"):
-            _enrich_web_paper_pdf_metadata(paper, info["pdf_url"])
+        _enrich_one_web_paper(paper)
         db.session.commit()
         updated += 1
-        _log.info("[backfill] web paper %s: page_count=%s institutions=%s",
-                  paper.arxiv_id, paper.page_count, paper.institutions)
+        _log.info("[backfill] web paper %s: page_count=%s institutions=%s (attempt %d/%d)",
+                  paper.arxiv_id, paper.page_count, paper.institutions,
+                  paper.web_enrich_attempts, MAX_WEB_ENRICH_ATTEMPTS)
+        if paper.web_enrich_attempts >= MAX_WEB_ENRICH_ATTEMPTS and (
+            paper.page_count is None or paper.institutions is None
+        ):
+            _log.warning(
+                "[backfill] web paper %s giving up after %d failed attempts (page_count=%s institutions=%s)",
+                paper.arxiv_id, paper.web_enrich_attempts, paper.page_count, paper.institutions,
+            )
 
     return updated

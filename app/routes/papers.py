@@ -18,6 +18,7 @@ from app.crawl import (
     get_citation_count,
     get_citation_count_by_scholar_id,
     enrich_institutions_from_scholar,
+    _enrich_one_web_paper,
 )
 from app.llm import LLMUnavailableError
 
@@ -433,6 +434,44 @@ def regenerate_paper(arxiv_id):
             show_curate = pp.manual_tag is None
             return render_template("partials/paper_card.html", pp=pp, project=project, show_curate=show_curate)
     return ("", 204)
+
+
+@papers_bp.route("/paper/<arxiv_id>/retry-web-enrich", methods=["POST"])
+@login_required
+def retry_web_enrich(arxiv_id):
+    """Manually reset a stuck 'web:' paper's attempt counter and retry PDF metadata
+    enrichment in the background — the nightly Pass-3 backfill otherwise gives up on it
+    permanently after MAX_WEB_ENRICH_ATTEMPTS failed attempts."""
+    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
+    if not paper.arxiv_id.startswith("web:"):
+        return jsonify({"ok": False, "error": "Not a web paper"}), 400
+
+    paper.web_enrich_attempts = 0
+    paper.web_enrich_last_attempt_at = None
+    db.session.commit()
+
+    from flask import current_app
+    _app = current_app._get_current_object()
+    paper_id = paper.id
+
+    def _run():
+        with _app.app_context():
+            p = Paper.query.get(paper_id)
+            if not p:
+                return
+            try:
+                _enrich_one_web_paper(p)
+                db.session.commit()
+                _log.info("[retry-web-enrich] %s: page_count=%s institutions=%s",
+                          p.arxiv_id, p.page_count, p.institutions)
+            except Exception as e:
+                db.session.rollback()
+                _log.warning("[retry-web-enrich] failed for %s: %s", p.arxiv_id, e)
+
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+
+    return jsonify({"ok": True})
 
 
 @papers_bp.route("/paper/<arxiv_id>/notify", methods=["POST"])

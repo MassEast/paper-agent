@@ -29,11 +29,12 @@ class TestInstitutionLLMFallbackUnit:
 
         mock_result = (["MIT CSAIL", "Stanford University"], "test-model", 100, {"total_tokens": 50})
         with patch("app.crawl._llm_json", return_value=mock_result):
-            with patch("app.crawl.httpx.Client") as mock_client:
-                mock_resp = MagicMock()
-                mock_resp.status_code = 404
-                mock_client.return_value.__enter__.return_value.get.return_value = mock_resp
-                _enrich_institutions_llm_fallback([paper])
+            with patch("app.crawl._ArxivLockCtx"):
+                with patch("app.crawl._http_client") as mock_client:
+                    mock_resp = MagicMock()
+                    mock_resp.status_code = 404
+                    mock_client.return_value.__enter__.return_value.get.return_value = mock_resp
+                    _enrich_institutions_llm_fallback([paper])
 
         assert paper.institutions is not None
         insts = json.loads(paper.institutions)
@@ -52,11 +53,12 @@ class TestInstitutionLLMFallbackUnit:
 
         mock_result = ([], "test-model", 100, {"total_tokens": 50})
         with patch("app.crawl._llm_json", return_value=mock_result):
-            with patch("app.crawl.httpx.Client") as mock_client:
-                mock_resp = MagicMock()
-                mock_resp.status_code = 404
-                mock_client.return_value.__enter__.return_value.get.return_value = mock_resp
-                _enrich_institutions_llm_fallback([paper])
+            with patch("app.crawl._ArxivLockCtx"):
+                with patch("app.crawl._http_client") as mock_client:
+                    mock_resp = MagicMock()
+                    mock_resp.status_code = 404
+                    mock_client.return_value.__enter__.return_value.get.return_value = mock_resp
+                    _enrich_institutions_llm_fallback([paper])
 
         assert paper.institutions is None
 
@@ -104,25 +106,26 @@ class TestInstitutionLLMFallbackUnit:
         fake_page1 = "Title\nAuthor Name\nHarvard University\nAbstract: ..."
 
         with patch("app.crawl._llm_json", side_effect=fake_llm_json):
-            with patch("app.crawl.httpx.Client") as mock_client:
-                mock_resp = MagicMock()
-                mock_resp.status_code = 200
-                mock_resp.content = b"%PDF fake"
+            with patch("app.crawl._ArxivLockCtx"):
+                with patch("app.crawl._http_client") as mock_client:
+                    mock_resp = MagicMock()
+                    mock_resp.status_code = 200
+                    mock_resp.content = b"%PDF fake"
 
-                from pypdf import PdfWriter
-                buf = io.BytesIO()
-                writer = PdfWriter()
-                writer.add_blank_page(width=612, height=792)
-                writer.write(buf)
-                mock_resp.content = buf.getvalue()
+                    from pypdf import PdfWriter
+                    buf = io.BytesIO()
+                    writer = PdfWriter()
+                    writer.add_blank_page(width=612, height=792)
+                    writer.write(buf)
+                    mock_resp.content = buf.getvalue()
 
-                mock_client.return_value.__enter__.return_value.get.return_value = mock_resp
+                    mock_client.return_value.__enter__.return_value.get.return_value = mock_resp
 
-                with patch("pypdf.PdfReader") as mock_reader:
-                    mock_page = MagicMock()
-                    mock_page.extract_text.return_value = fake_page1
-                    mock_reader.return_value.pages = [mock_page]
-                    _enrich_institutions_llm_fallback([paper])
+                    with patch("pypdf.PdfReader") as mock_reader:
+                        mock_page = MagicMock()
+                        mock_page.extract_text.return_value = fake_page1
+                        mock_reader.return_value.pages = [mock_page]
+                        _enrich_institutions_llm_fallback([paper])
 
         assert len(captured_prompts) == 1
         assert "first page of the PDF" in captured_prompts[0]

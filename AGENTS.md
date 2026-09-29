@@ -85,6 +85,14 @@ Papers do **not** automatically move between sections — only explicit user act
 
 `Paper.arxiv_id` doubles as the identity key for non-arXiv papers too: anything added via "paste any URL" that isn't an arXiv paper gets a synthetic `"web:..."`-prefixed id (`Paper.is_arxiv` is `False` for these). Code that builds arXiv URLs/links from `arxiv_id`, or does citation/Scholar lookups keyed on it, needs to branch on `is_arxiv` first — this has broken UI targeting before (a literal `:` in the id collided with card-selector parsing).
 
+### Add paper by URL
+
+`start_web_paper_add_async` (`app/crawl.py`) is the entrypoint for "paste any URL" adds. It calls `extract_paper_info_from_url`, which is guarded by `_is_safe_external_url` (rejects non-http(s) schemes and private/loopback/link-local/reserved addresses — defense-in-depth behind `@login_required`, real SSRF shape since the URL is user-supplied). It then tries, in order, to resolve the paper to an arXiv id: an explicit arXiv link on the page, a DOI match, then (Step 2c) an arXiv title search (`arxiv.Search(query=f'ti:"{title}"')`, verified with `_titles_match`) — on any match it converts to a full arXiv paper via `start_collection_add_async`. If none match, it stays a synthetic `"web:..."`-id paper with only landing-page metadata (title/abstract/authors/DOI).
+
+PDF downloads (for page count + institution extraction, `_enrich_web_paper_pdf_metadata`) only happen for hosts in `OPEN_ACCESS_PDF_DOMAINS` (arxiv.org, ar5iv.labs.arxiv.org, aclanthology.org, proceedings.mlr.press, openreview.net, proceedings.neurips.cc, openaccess.thecvf.com, ojs.aaai.org, ijcai.org, jmlr.org) — checked via `_is_open_access_pdf_domain`. Any other domain still gets its landing-page metadata read, just never a PDF fetch. All outbound requests (this pipeline and the arXiv/Scholar crawl paths) carry a `USER_AGENT` identifying the bot with a link to this repo (`app/utils.py`).
+
+The nightly Pass-3 backfill (`backfill_missing_paper_metadata` in `crawl.py`) retries `"web:"` papers still missing `page_count`/`institutions`, capped at `MAX_WEB_ENRICH_ATTEMPTS` (3) total via `Paper.web_enrich_attempts`/`web_enrich_last_attempt_at` — not per night. Once capped, `paper_card.html` shows a "Retry" button + attempt count; `POST /paper/<id>/retry-web-enrich` resets the counter and re-runs `_enrich_one_web_paper` in a background thread (same fire-and-forget pattern as `start_web_paper_add_async`).
+
 ### Nightly crawl scheduling
 
 Each `Project` has a `crawl_hour` (integer 1–4 UTC, or `None` = disabled). A CronJob (see `k8s/cronjob.yaml.example`) runs `scripts/nightly_crawl.py` on a schedule. The script:
@@ -120,7 +128,7 @@ Toggle is in the project sidebar (UI POST to `/projects/<slug>/toggle-nightly-cr
 ## Deployment
 
 `gunicorn` runs with `--workers 1 --threads 4 --timeout 120`. **Do not increase `--workers` beyond 1** — the entire app depends on being a single process:
-- `_arxiv_lock` / `_arxiv_waiters` in `crawl.py` enforce a global arXiv rate limit (1 request / 3 s, single connection). Each worker process would get its own copy of these; they can't see each other, so concurrent arXiv requests from different workers would bypass the lock entirely.
+- `_arxiv_lock` / `_arxiv_waiters` (in `app/utils.py`, re-exported from `crawl.py`) enforce a global arXiv rate limit (one request in flight at a time, ≥3.5s gap) covering the search API *and* ar5iv/arxiv.org HTML+PDF fetches — all outbound arXiv-domain requests go through it. Each worker process would get its own copy of these; they can't see each other, so concurrent arXiv requests from different workers would bypass the lock entirely.
 - `_crawl_current_papers`, `_arxiv_count_tasks` (in-memory crawl/count state) — UI polling could hit a different worker than the one running the crawl, returning stale or missing data.
 - SQLite write contention — WAL mode helps reads, but concurrent writers across processes still cause `database is locked` errors.
 

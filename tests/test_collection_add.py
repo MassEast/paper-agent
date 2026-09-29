@@ -8,6 +8,7 @@ Live tests: hit real URLs. Marked slow — run with:
 
 import hashlib
 import pytest
+from unittest.mock import patch, MagicMock
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +157,110 @@ class TestArxivLinkDetection:
         html = "<p>No arXiv here, just a blog post about cooking.</p>"
         links = _re.findall(r'arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5}(?:v\d+)?)', html, _re.IGNORECASE)
         assert links == []
+
+
+class _SyncThread:
+    """Stand-in for threading.Thread that runs its target inline instead of in a real
+    thread — makes start_web_paper_add_async's background work deterministic to test
+    (no polling/sleeping needed) while everything it does (network, DB) is mocked anyway."""
+
+    def __init__(self, target=None, daemon=None, args=(), kwargs=None):
+        self._target = target
+
+    def start(self):
+        self._target()
+
+
+class TestWebAddTitleSearchFallback:
+    """start_web_paper_add_async Step 2c: when a publisher page has no in-page arXiv link
+    and no DOI match, fall back to searching arXiv by title (_titles_match-verified)."""
+
+    def _make_placeholder(self, app, project, arxiv_id):
+        from app import db
+        from app.models import Paper, ProjectPaper
+        paper = Paper(arxiv_id=arxiv_id, title="Fetching…", pdf_url="https://dl.acm.org/doi/fake",
+                      source="web", authors="[]")
+        db.session.add(paper)
+        db.session.flush()
+        pp = ProjectPaper(project_id=project.id, paper_id=paper.id)
+        db.session.add(pp)
+        db.session.commit()
+        return paper.id
+
+    def _cleanup(self, app, paper_id):
+        from app import db
+        from app.models import Paper, ProjectPaper, PaperSummary
+        p = Paper.query.get(paper_id)
+        if p:
+            PaperSummary.query.filter_by(paper_id=p.id).delete()
+            ProjectPaper.query.filter_by(paper_id=p.id).delete()
+            db.session.delete(p)
+            db.session.commit()
+
+    def test_title_search_converts_to_arxiv_paper_on_match(self, app, project):
+        from app.models import Paper
+        from app.crawl import start_web_paper_add_async
+
+        with app.app_context():
+            paper_id = self._make_placeholder(app, project, "web:title-search-match")
+            fake_info = {
+                "title": "A Very Specific Paper Title About Sparse Attention",
+                "abstract": "abstract text", "authors": ["A. Author"],
+                "page_arxiv_links": [], "doi": None, "pdf_url": None,
+                "page_count": None, "full_text": "abstract text",
+            }
+            fake_candidate = MagicMock()
+            fake_candidate.title = "A Very Specific Paper Title About Sparse Attention"
+            fake_candidate.entry_id = "http://arxiv.org/abs/2501.99999v1"
+
+            try:
+                with patch("app.crawl.threading.Thread", _SyncThread), \
+                     patch("app.crawl.extract_paper_info_from_url", return_value=fake_info), \
+                     patch("app.crawl._ArxivLockCtx"), \
+                     patch("app.crawl.arxiv.Client") as mock_client, \
+                     patch("app.crawl.start_collection_add_async") as mock_convert:
+                    mock_client.return_value.results.return_value = [fake_candidate]
+                    start_web_paper_add_async(project.id, "https://dl.acm.org/doi/fake", paper_id, app)
+                    mock_convert.assert_called_once_with(project.id, "2501.99999v1", paper_id, app)
+
+                assert Paper.query.get(paper_id).arxiv_id == "2501.99999v1"
+            finally:
+                self._cleanup(app, paper_id)
+
+    def test_title_search_no_match_stays_web_paper(self, app, project):
+        from app.models import Paper
+        from app.crawl import start_web_paper_add_async
+
+        with app.app_context():
+            paper_id = self._make_placeholder(app, project, "web:title-search-nomatch")
+            fake_info = {
+                "title": "An Unrelated Paper About Deep Sea Fish",
+                "abstract": "abstract text", "authors": ["A. Author"],
+                "page_arxiv_links": [], "doi": None, "pdf_url": None,
+                "page_count": None, "full_text": "abstract text",
+            }
+            fake_candidate = MagicMock()
+            fake_candidate.title = "Completely Different Paper About Sparse Attention"
+            fake_candidate.entry_id = "http://arxiv.org/abs/2501.11111v1"
+
+            try:
+                with patch("app.crawl.threading.Thread", _SyncThread), \
+                     patch("app.crawl.extract_paper_info_from_url", return_value=fake_info), \
+                     patch("app.crawl._ArxivLockCtx"), \
+                     patch("app.crawl.arxiv.Client") as mock_client, \
+                     patch("app.crawl.start_collection_add_async") as mock_convert, \
+                     patch("app.crawl.generate_summary_with_full_content", return_value=({}, "m", 1, 1)), \
+                     patch("app.crawl.extract_main_contributions", return_value=("", "", 1, 1)), \
+                     patch("app.crawl._enrich_web_paper_pdf_metadata"):
+                    mock_client.return_value.results.return_value = [fake_candidate]
+                    start_web_paper_add_async(project.id, "https://dl.acm.org/doi/fake", paper_id, app)
+                    mock_convert.assert_not_called()
+
+                refreshed = Paper.query.get(paper_id)
+                assert refreshed.arxiv_id == "web:title-search-nomatch"
+                assert refreshed.title == "An Unrelated Paper About Deep Sea Fish"
+            finally:
+                self._cleanup(app, paper_id)
 
 
 # ---------------------------------------------------------------------------
