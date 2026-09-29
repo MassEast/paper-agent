@@ -5,7 +5,7 @@
 
     <!-- Service status bar -->
     <div id="service-bar"
-        style="display: flex; align-items: center; gap: 12px; padding: 8px 14px; margin-bottom: 20px; background-color: var(--paper-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); font-size: 0.72rem; color: var(--ink-3);">
+        style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 14px; margin-bottom: 20px; background-color: var(--paper-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); font-size: 0.72rem; color: var(--ink-3);">
         <span style="font-weight: 600; color: var(--ink-4);">Services</span>
         <button type="button" id="svc-test-btn"
             style="font-size:0.72rem;color:var(--accent-ink);background:var(--accent);border:none;cursor:pointer;padding:2px 10px;border-radius:var(--radius-md);font-weight:600;line-height:1.6;"
@@ -114,13 +114,13 @@
     </div>
     <script>(function(){if(localStorage.getItem('ob-projects'))document.getElementById('onboarding-projects').style.display='none';})();</script>
 
-    <div class="flex items-center justify-between mb-8">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-8">
         <h1 class="text-2xl font-bold" style="color: var(--ink-1);">Your Projects</h1>
-        <form action="/projects" method="POST" class="flex gap-3">
+        <form action="/projects" method="POST" class="flex gap-3 w-full sm:w-auto">
             <input type="text" name="name" placeholder="New project name..." class="focus-ring"
                 style="flex: 1; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 16px; color: var(--ink-1);">
             <button type="submit" class="focus-ring"
-                style="height: var(--button-height); padding: 0 24px; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; font-weight: 600;">
+                style="height: var(--button-height); padding: 0 16px; white-space: nowrap; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; font-weight: 600;">
                 Create Project
             </button>
         </form>
@@ -133,27 +133,35 @@
              onmouseenter="this.querySelector('.project-trash-btn').style.opacity='1'"
              onmouseleave="this.querySelector('.project-trash-btn').style.opacity='0'">
             <a href="/projects/{{ project.slug }}" class="block"
-                style="background-color: var(--paper-2); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: var(--space-lg);">
+                style="background-color: var(--paper-2); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: var(--space-md);">
                 <div class="flex items-start justify-between">
-                    <div style="flex: 1; min-width: 0; padding-right: 32px;">
+                    <div style="flex: 1; min-width: 0; padding-right: 16px;">
                         <h2 class="text-xl font-semibold" style="color: var(--ink-1);">{{ project.name }}</h2>
                         {% if project.research_interest %}
-                        <p style="color: var(--ink-3); margin-top: 8px;" class="line-clamp-2">{{ project.research_interest }}</p>
+                        <p style="color: var(--ink-3); margin-top: 4px; font-size: 0.875rem;" class="line-clamp-2">{{ project.research_interest }}</p>
                         {% endif %}
-                        <div class="flex gap-6 mt-3 text-sm" style="color: var(--ink-4);">
-                            <span>{{ project.papers|length }} papers</span>
-                            {% if project.crawl_logs %}
-                            <span>Last crawl: {{ project.crawl_logs[0].started_at.strftime('%b %d') if project.crawl_logs[0] else 'Never' }}</span>
-                            {% endif %}
-                            <span style="display:inline-flex;align-items:center;gap:5px;"
-                                  title="{% if project.crawl_hour %}Nightly crawl on — {{ '%02d:00'|format(project.crawl_hour) }} UTC{% else %}Nightly crawl off{% endif %}">
-                                <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background-color:{% if project.crawl_hour %}var(--success, #16a34a){% else %}var(--error){% endif %};{% if not project.crawl_hour %}opacity:0.7;{% endif %}"></span>
-                                {% if project.crawl_hour %}Nightly crawl{% else %}No nightly crawl{% endif %}
-                            </span>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; margin-top: 10px;">
+                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;">
+                                <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">Papers</div>
+                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">{{ project.papers|length }}</div>
+                            </div>
+                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;">
+                                <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">Last crawl</div>
+                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">{{ project.crawl_logs[0].started_at.strftime('%b %d') if project.crawl_logs else 'Never' }}</div>
+                            </div>
+                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" title="{% if project.crawl_hour %}Nightly crawl on — {{ '%02d:00'|format(project.crawl_hour) }} UTC{% else %}Nightly crawl off{% endif %}">
+                                <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">Nightly</div>
+                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">
+                                    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle;background-color:{% if project.crawl_hour %}var(--success, #16a34a){% else %}var(--error){% endif %};{% if not project.crawl_hour %}opacity:0.7;{% endif %}"></span>{% if project.crawl_hour %}On{% else %}Off{% endif %}
+                                </div>
+                            </div>
                             {% set ns = namespace(total_tokens=0, total_cost=0.0) %}
                             {% for log in project.crawl_logs %}{% if log.total_tokens %}{% set ns.total_tokens = ns.total_tokens + log.total_tokens %}{% set ns.total_cost = ns.total_cost + log.estimated_cost %}{% endif %}{% endfor %}
                             {% if ns.total_tokens > 0 %}
-                            <span title="Total LLM tokens used across all crawls (estimated Sonnet 4.6 pricing)">~{% if ns.total_tokens >= 1000000000 %}{{ (ns.total_tokens / 1000000000)|round(2) }}B{% elif ns.total_tokens >= 1000000 %}{{ (ns.total_tokens / 1000000)|round(2) }}M{% else %}{{ (ns.total_tokens / 1000)|round(1) }}k{% endif %} tokens · ~${{ "%.2f"|format(ns.total_cost) }}</span>
+                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" title="Total LLM tokens used across all crawls (estimated Sonnet 4.6 pricing)">
+                                <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">LLM usage</div>
+                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">~${{ "%.2f"|format(ns.total_cost) }} <span style="font-weight: 400; font-size: 0.75rem; color: var(--ink-4);">{% if ns.total_tokens >= 1000000000 %}{{ (ns.total_tokens / 1000000000)|round(2) }}B{% elif ns.total_tokens >= 1000000 %}{{ (ns.total_tokens / 1000000)|round(2) }}M{% else %}{{ (ns.total_tokens / 1000)|round(1) }}k{% endif %} tok</span></div>
+                            </div>
                             {% endif %}
                         </div>
                     </div>

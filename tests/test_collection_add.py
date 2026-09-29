@@ -221,9 +221,9 @@ class TestWebAddTitleSearchFallback:
                      patch("app.crawl.start_collection_add_async") as mock_convert:
                     mock_client.return_value.results.return_value = [fake_candidate]
                     start_web_paper_add_async(project.id, "https://dl.acm.org/doi/fake", paper_id, app)
-                    mock_convert.assert_called_once_with(project.id, "2501.99999v1", paper_id, app)
+                    mock_convert.assert_called_once_with(project.id, "2501.99999", paper_id, app)
 
-                assert Paper.query.get(paper_id).arxiv_id == "2501.99999v1"
+                assert Paper.query.get(paper_id).arxiv_id == "2501.99999"
             finally:
                 self._cleanup(app, paper_id)
 

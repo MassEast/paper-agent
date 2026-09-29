@@ -121,3 +121,8 @@ def fetch_paper_figure(arxiv_id: str) -> str | None:
     except Exception:
         pass
     return None
+
+
+def base_arxiv_id(arxiv_id: str) -> str:
+    """Strip a trailing version suffix: '2605.23872v2' -> '2605.23872'. Non-arXiv ids pass through."""
+    return re.sub(r"v\d+$", "", arxiv_id)

@@ -24,7 +24,8 @@ from app.crawl import (
     start_web_paper_add_async,
 )
 from app.llm import LLMUnavailableError, MODELS as LLM_MODELS
-from app.models import slugify
+from app.models import slugify, compute_screening_hash
+from app.utils import base_arxiv_id
 
 # In-memory store for async arXiv count tasks (dev only — single process)
 _arxiv_count_tasks: dict[str, dict] = {}
@@ -376,9 +377,23 @@ def arxiv_count(slug):
     if project_obj:
         for pp in project_obj.papers:
             if pp.paper and pp.paper.arxiv_id:
-                existing_arxiv_ids.add(pp.paper.arxiv_id)
+                existing_arxiv_ids.add(base_arxiv_id(pp.paper.arxiv_id))
             if not pp.trashed_at and pp.manual_tag and pp.paper and pp.paper.arxiv_id:
                 seed_arxiv_ids.append(pp.paper.arxiv_id)
+
+    # Papers rejected earlier under the *current* screening context — re-screening them is an instant
+    # cache hit (no LLM call), so the UI reports them separately from genuinely new papers.
+    rejected_base_ids = set()
+    if project_obj:
+        _collection = [pp for pp in project_obj.papers if pp.manual_tag and not pp.trashed_at and pp.paper]
+        _hash = compute_screening_hash(project_obj.research_interest or "", _collection)
+        rejected_base_ids = {
+            sp.arxiv_id for sp in ScreenedPaper.query.filter_by(
+                project_id=project_obj.id, screening_hash=_hash, is_relevant=False
+            ).all()
+        }
+
+    search_warnings: list[str] = []
 
     def _run():
         def _progress(kw_idx, kw_total, count_so_far, current_keyword):
@@ -391,10 +406,12 @@ def arxiv_count(slug):
 
         try:
             if use_arxiv:
-                arxiv_papers = search_arxiv_with_full_papers(keywords, date_from, date_to, progress_callback=_progress)
+                arxiv_papers = search_arxiv_with_full_papers(
+                    keywords, date_from, date_to, progress_callback=_progress, warnings=search_warnings
+                )
             else:
                 arxiv_papers = []
-            seen_ids = {p["arxiv_id"] for p in arxiv_papers}
+            seen_ids = {base_arxiv_id(p["arxiv_id"]) for p in arxiv_papers}
 
             ss_papers = []
             if use_scholar and seed_arxiv_ids:
@@ -403,15 +420,16 @@ def arxiv_count(slug):
                 # Filter to crawl date range — SS API has no date filter so it returns old papers too
                 ss_papers = [
                     p for p in ss_papers
-                    if p["arxiv_id"] not in seen_ids
+                    if base_arxiv_id(p["arxiv_id"]) not in seen_ids
                     and p.get("published_date") is not None
                     and date_from <= p["published_date"] <= date_to
                 ]
 
             all_papers = arxiv_papers + ss_papers
             # Subtract papers already in this project (any state: new/curated/trash)
-            already_known = sum(1 for p in all_papers if p["arxiv_id"] in existing_arxiv_ids)
-            new_papers = [p for p in all_papers if p["arxiv_id"] not in existing_arxiv_ids]
+            already_known = sum(1 for p in all_papers if base_arxiv_id(p["arxiv_id"]) in existing_arxiv_ids)
+            new_papers = [p for p in all_papers if base_arxiv_id(p["arxiv_id"]) not in existing_arxiv_ids]
+            previously_rejected = sum(1 for p in new_papers if base_arxiv_id(p["arxiv_id"]) in rejected_base_ids)
             new_arxiv = sum(1 for p in new_papers if p.get("source") != "semantic_scholar")
             new_scholar = sum(1 for p in new_papers if p.get("source") == "semantic_scholar")
             _arxiv_count_tasks[task_id] = {
@@ -421,6 +439,8 @@ def arxiv_count(slug):
                 "arxiv_count": new_arxiv,
                 "scholar_count": new_scholar,
                 "already_known": already_known,
+                "previously_rejected": previously_rejected,
+                "warnings": search_warnings,
             }
         except Exception as e:
             _arxiv_count_tasks[task_id] = {"status": "error", "error": str(e)[:200]}

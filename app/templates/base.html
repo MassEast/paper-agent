@@ -8,15 +8,28 @@
     <link rel="stylesheet" href="/static/tokens.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        html, body { max-width: 100%; overflow-x: hidden; }
+        @media (max-width: 640px) {
+            .nav-inner { padding: 8px 12px !important; gap: 8px !important; }
+            .nav-brand-text { display: none; }
+            .paper-card { padding: 12px !important; }
+            div[style*="max-width: 1600px"] { padding-left: 8px !important; padding-right: 8px !important; }
+            div[style*="padding: var(--space-lg)"], div[style*="padding: var(--space-md)"] { padding: 10px !important; }
+            #paper-list h3 button { white-space: nowrap; }
+            input, textarea, select { font-size: 16px; }
+            input::placeholder, textarea::placeholder { font-size: 0.875rem; }
+        }
+    </style>
 </head>
 <body style="background-color: var(--paper-1); color: var(--ink-1); min-height: 100vh;">
     {% block nav %}
     <nav style="position: sticky; top: 0; z-index: 40; background-color: var(--paper-2); border-bottom: 1px solid var(--border-subtle);">
-        <div style="max-width: 1600px; margin: 0 auto; padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+        <div class="nav-inner" style="max-width: 1600px; margin: 0 auto; padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
             <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
                 <a href="/projects" style="font-size: 1rem; font-weight: 600; color: var(--accent); text-decoration: none; display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color: var(--accent); flex-shrink: 0;"><use href="/static/icons.svg#icon-sparkles"></use></svg>
-                    Related Work Agent
+                    <span class="nav-brand-text">Related Work Agent</span>
                 </a>
                 {% block nav_project %}{% endblock %}
             </div>

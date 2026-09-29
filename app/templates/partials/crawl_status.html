@@ -64,7 +64,7 @@
     <div class="mt-2 flex items-center gap-2 flex-wrap">
         <span class="text-xs" style="color: var(--ink-4); font-weight: 600;">Keywords:</span>
         <div class="flex gap-1 flex-wrap">
-            {% for kw in crawl.keywords_list[:6] %}
+            {% for kw in crawl.keywords_list %}
             <span
                 style="padding: 2px 8px; font-size: 0.75rem; background-color: color-mix(in oklch, var(--accent) 20%, var(--paper-2)); color: var(--ink-2); border-radius: 9999px;">{{
                 kw }}</span>

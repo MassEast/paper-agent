@@ -28,13 +28,13 @@
 
     .detail-grid {
         display: grid;
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 24px;
     }
 
     @media (min-width: 1024px) {
         .detail-grid {
-            grid-template-columns: 1fr 360px;
+            grid-template-columns: minmax(0, 1fr) 360px;
         }
     }
 
@@ -324,7 +324,7 @@
                 <form action="/projects/{{ project.slug }}/collection-add" method="POST">
                     <div class="flex flex-col sm:flex-row gap-3">
                         <input type="url" name="url" placeholder="Paste any URL — arXiv, ACL, NeurIPS, blog…"
-                            style="flex: 1; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 16px; color: var(--ink-1); outline: none;">
+                            style="flex: 1 1 auto; min-width: 0; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 16px; color: var(--ink-1); outline: none;">
                         <button class="focus-ring" type="submit"
                             style="height: var(--button-height); padding: 0 24px; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; white-space: nowrap;">
                             Add
@@ -1023,7 +1023,7 @@
                         formData.append('use_arxiv', useArxiv ? '1' : '0');
                         formData.append('use_scholar', useScholar ? '1' : '0');
 
-                        function showCountResult(count, arxivCount, ssCount, alreadyKnown) {
+                        function showCountResult(count, arxivCount, ssCount, alreadyKnown, previouslyRejected, warnings) {
                             clearInterval(elapsedInterval);
                             searchBtn.disabled = false;
                             searchBtn.innerHTML = _searchBtnOrigHtml;
@@ -1040,6 +1040,15 @@
                                 if (ssCount > 0) parts.push('Semantic Scholar: ' + ssCount);
                                 if (alreadyKnown > 0) parts.push(alreadyKnown + ' already in project (skipped)');
                                 sourceNote = '<p style="font-size:0.7rem;color:var(--ink-4);margin-bottom:8px;">' + parts.join(' · ') + '</p>';
+                                if (previouslyRejected > 0) {
+                                    sourceNote += '<p style="font-size:0.7rem;color:var(--ink-4);margin-bottom:8px;">' + previouslyRejected +
+                                        ' previously rejected</p>';
+                                }
+                                (warnings || []).forEach(function (w) {
+                                    const el = document.createElement('div');
+                                    el.textContent = w;
+                                    sourceNote += '<p style="font-size:0.7rem;color:var(--warning, #d9a441);margin-bottom:8px;">⚠ ' + el.innerHTML + '</p>';
+                                });
                             }
                             countContent.innerHTML =
                                 '<p style="font-size:0.8rem;color:var(--ink-1);font-weight:600;margin-bottom:4px;">' +
@@ -1068,7 +1077,7 @@
                                 .then(data => {
                                     if (data.status === 'done') {
                                         currentArxivTaskId = taskId;
-                                        showCountResult(data.count, data.arxiv_count, data.scholar_count || 0, data.already_known || 0);
+                                        showCountResult(data.count, data.arxiv_count, data.scholar_count || 0, data.already_known || 0, data.previously_rejected || 0, data.warnings || []);
                                     } else if (data.status === 'error') {
                                         showCountError(data.error || 'arXiv search failed');
                                     } else {

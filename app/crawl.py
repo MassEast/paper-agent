@@ -7,7 +7,7 @@ import signal
 import time
 import html
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 _log = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ from app import db
 from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog, ScreenedPaper, compute_screening_hash
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
-from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, USER_AGENT
+from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, USER_AGENT, base_arxiv_id
 
 API_KEY = os.environ.get("LLM_API_KEY")
 SCHOLAR_API_KEY = os.environ.get("SCHOLAR_API_KEY")
@@ -371,7 +371,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
                         ))
                     for candidate in results:
                         if _titles_match(page_title, candidate.title):
-                            matched_arxiv_id = candidate.entry_id.split("/")[-1]
+                            matched_arxiv_id = base_arxiv_id(candidate.entry_id.split("/")[-1])
                             match_source = "title search"
                             _log.info("[web-add] arXiv title-search match for %s → %s (%s)",
                                       url, matched_arxiv_id, candidate.title)
@@ -508,7 +508,7 @@ def search_arxiv_with_timeout(
                 continue
             papers.append(
                 {
-                    "arxiv_id": result.entry_id.split("/")[-1],
+                    "arxiv_id": base_arxiv_id(result.entry_id.split("/")[-1]),
                     "title": result.title,
                     "authors": [str(a) for a in result.authors],
                     "abstract": result.summary,
@@ -1525,18 +1525,111 @@ def get_relevant_papers(project_id: int) -> list[str]:
     return [link.paper.title + "\n" + (link.paper.abstract or "") for link in important_papers[:10]]
 
 
+def _fetch_arxiv_window(keyword: str, d_from: date, d_to: date, max_results: int) -> tuple[list[dict], bool, bool]:
+    """One arXiv query for `keyword` restricted server-side to submittedDate in [d_from, d_to].
+
+    Returns (papers, hit_cap, timed_out). `hit_cap` means arXiv returned max_results papers, so
+    older ones in this window may have been cut off.
+    """
+    base = f'abs:"{keyword}"' if " " in keyword else keyword
+    query = f"({base}) AND submittedDate:[{d_from:%Y%m%d}0000 TO {d_to:%Y%m%d}2359]"
+    papers: list[dict] = []
+    timed_out = False
+    with _ArxivLockCtx():
+        for attempt in range(3):
+            papers = []
+            timed_out = False
+            try:
+                start_time = datetime.now()
+                search = arxiv.Search(query=query, max_results=max_results, sort_by=arxiv.SortCriterion.SubmittedDate)
+                client = arxiv.Client(num_retries=1, delay_seconds=3.1)
+                for result in client.results(search):
+                    if (datetime.now() - start_time).total_seconds() > 45:
+                        timed_out = True
+                        break
+                    pub_date = result.published.date()
+                    papers.append(
+                        {
+                            "arxiv_id": base_arxiv_id(result.entry_id.split("/")[-1]),
+                            "title": result.title,
+                            "authors": [str(a) for a in result.authors],
+                            "abstract": result.summary,
+                            "pdf_url": re.sub(r"v\d+$", "", result.pdf_url or ""),
+                            "published_date": pub_date,
+                            "year": pub_date.year,
+                            "categories": [cat for cat in result.categories],
+                        }
+                    )
+                break  # success — don't retry
+            except arxiv.HTTPError as e:
+                if getattr(e, "status", 0) == 429 and attempt < 2:
+                    wait = 120 * (attempt + 1)  # 120s, then 240s
+                    _log.warning("[arXiv] 429 rate limit for '%s', waiting %ds (attempt %d/3)", keyword, wait, attempt + 1)
+                    time.sleep(wait)
+                else:
+                    _log.warning("[arXiv] HTTP error for '%s': %s", keyword, e)
+                    break
+            except Exception as e:
+                _log.warning("[arXiv] Error searching '%s': %s", keyword, e)
+                break
+        # _ArxivLockCtx enforces the inter-request gap on release — no manual sleep needed.
+    return papers, len(papers) >= max_results, timed_out
+
+
+def _collect_arxiv_keyword(keyword: str, d_from: date, d_to: date, max_results: int, warnings: list[str]) -> list[dict]:
+    """All papers for `keyword` in [d_from, d_to], newest first.
+
+    arXiv caps each query at `max_results`. When a query hits the cap, the oldest paper we got
+    tells us how far back it reached: the next window is [d_from, that date] (the boundary day is
+    re-queried since it may have been cut mid-day; duplicates are dropped by id).
+    """
+    papers: list[dict] = []
+    seen: set[str] = set()
+    cur_to = d_to
+    while cur_to >= d_from:
+        batch, hit_cap, timed_out = _fetch_arxiv_window(keyword, d_from, cur_to, max_results)
+        for p in batch:
+            if p["arxiv_id"] not in seen:
+                seen.add(p["arxiv_id"])
+                papers.append(p)
+        if timed_out:
+            msg = f"'{keyword}': arXiv search timed out for {d_from}..{cur_to} — results may be incomplete"
+            _log.warning("[arXiv] %s", msg)
+            warnings.append(msg)
+        if not hit_cap:
+            break
+        oldest = min(p["published_date"] for p in batch)
+        if oldest >= cur_to:  # the cap was filled by a single day — can't page further back by date
+            msg = f"'{keyword}': more than {max_results} papers on {cur_to} — some were cut off"
+            _log.warning("[arXiv] %s", msg)
+            warnings.append(msg)
+            cur_to = cur_to - timedelta(days=1)
+        else:
+            _log.info("[arXiv] '%s' hit %d-result cap, oldest %s — continuing with %s..%s", keyword, max_results, oldest, d_from, oldest)
+            cur_to = oldest
+    return papers
+
+
 def search_arxiv_with_full_papers(
     keywords: list[str],
     date_from: date,
     date_to: date,
     max_results: int = 200,
     progress_callback=None,
+    warnings: Optional[list[str]] = None,
 ) -> list[dict]:
     """Search arXiv for each keyword and return deduplicated papers in date range.
+    Returns list of paper dicts without LLM processing.
+    Used for the search phase to show user how many papers were found.
 
+    `max_results` is the per-query cap; when it is hit, the search continues from the oldest paper's date
+    back to `date_from`, so the full range is covered. Anything still truncated (single day over
+    the cap, or a 45s timeout) is appended to `warnings` if given.
     progress_callback(keyword_idx, keyword_total, count_so_far, current_keyword) is called
     before each keyword so callers can report live progress.
     """
+    if warnings is None:
+        warnings = []
     papers = []
     seen_ids = set()
 
@@ -1546,58 +1639,11 @@ def search_arxiv_with_full_papers(
                 progress_callback(kw_idx, len(keywords), len(papers), keyword)
             except Exception:
                 pass
-
-        with _ArxivLockCtx():
-            for attempt in range(3):
-                try:
-                    start_time = datetime.now()
-                    arxiv_query = f'abs:"{keyword}"' if " " in keyword else keyword
-                    search = arxiv.Search(
-                        query=arxiv_query, max_results=max_results, sort_by=arxiv.SortCriterion.SubmittedDate
-                    )
-
-                    client = arxiv.Client(num_retries=1, delay_seconds=3.1)
-                    for result in client.results(search):
-                        if (datetime.now() - start_time).total_seconds() > 45:
-                            _log.info("[arXiv] timeout for '%s' after 45s", keyword)
-                            break
-                        if result.entry_id.split("/")[-1] in seen_ids:
-                            continue
-
-                        pub_date = result.published.date()
-                        if pub_date > date_to:
-                            continue
-                        if pub_date < date_from:
-                            _log.info("[arXiv] early stop for '%s' — %s is before date_from %s (reverse-chrono, nothing older in range)", keyword, pub_date, date_from)
-                            break  # results are in reverse-chronological order; nothing older is in range
-
-                        seen_ids.add(result.entry_id.split("/")[-1])
-
-                        papers.append(
-                            {
-                                "arxiv_id": result.entry_id.split("/")[-1],
-                                "title": result.title,
-                                "authors": [str(a) for a in result.authors],
-                                "abstract": result.summary,
-                                "pdf_url": result.pdf_url,
-                                "published_date": pub_date,
-                                "year": pub_date.year,
-                                "categories": [cat for cat in result.categories],
-                            }
-                        )
-                    break  # success — don't retry
-                except arxiv.HTTPError as e:
-                    if getattr(e, "status", 0) == 429 and attempt < 2:
-                        wait = 120 * (attempt + 1)  # 120s, then 240s
-                        _log.warning("[arXiv] 429 rate limit for '%s', waiting %ds (attempt %d/3)", keyword, wait, attempt + 1)
-                        time.sleep(wait)
-                    else:
-                        _log.warning("[arXiv] HTTP error for '%s': %s", keyword, e)
-                        break
-                except Exception as e:
-                    _log.warning("[arXiv] Error searching '%s': %s", keyword, e)
-                    break
-            # _ArxivLockCtx enforces the inter-request gap on release — no manual sleep needed.
+        for paper in _collect_arxiv_keyword(keyword, date_from, date_to, max_results, warnings):
+            if paper["arxiv_id"] in seen_ids:
+                continue
+            seen_ids.add(paper["arxiv_id"])
+            papers.append(paper)
 
     return papers
 
@@ -2329,11 +2375,11 @@ def run_crawl(
             papers_data = arxiv_results + ss_results
         # Subtract papers already linked to this project (any state) — same logic as the count step
         existing_project_ids = {
-            pp.paper.arxiv_id
+            base_arxiv_id(pp.paper.arxiv_id)
             for pp in ProjectPaper.query.filter_by(project_id=project_id).all()
             if pp.paper and pp.paper.arxiv_id
         }
-        papers_data = [p for p in papers_data if p["arxiv_id"] not in existing_project_ids]
+        papers_data = [p for p in papers_data if base_arxiv_id(p["arxiv_id"]) not in existing_project_ids]
         arxiv_papers_count = sum(1 for p in papers_data if p.get("source") != "semantic_scholar")
         ss_papers_count = sum(1 for p in papers_data if p.get("source") == "semantic_scholar")
         crawl_log.papers_found = len(papers_data)
@@ -2405,7 +2451,7 @@ def run_crawl(
                 db.session.commit()
             else:
                 # Check screening cache — skip papers already rejected with the same context
-                base_id = arxiv_id.split("v")[0]
+                base_id = base_arxiv_id(arxiv_id)
                 if base_id in already_rejected:
                     papers_skipped += 1
                     _log.info("[crawl] cache-skip (same context): %s", arxiv_id)
@@ -2519,7 +2565,7 @@ def run_crawl(
                     tokens_used += result["tokens"]
 
                     # Persist screening result to cache for future crawls
-                    _base_id = result["paper_data"]["arxiv_id"].split("v")[0]
+                    _base_id = base_arxiv_id(result["paper_data"]["arxiv_id"])
                     db.session.add(ScreenedPaper(
                         project_id=project_id,
                         arxiv_id=_base_id,
