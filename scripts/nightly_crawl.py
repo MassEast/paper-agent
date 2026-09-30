@@ -8,6 +8,7 @@ Uses project.saved_keywords if set, otherwise generates keywords fresh via LLM.
 import json
 import logging
 import os
+import time
 import sys
 from datetime import timedelta, datetime, timezone
 from logging.handlers import RotatingFileHandler
@@ -100,6 +101,28 @@ def _refresh_collection_citations():
     return updated
 
 
+def _notify_failure(project, message):
+    """Log + email the project's notification addresses about a failed nightly crawl."""
+    _log.error("[nightly] ✗ FAILED: %s — %s", project.name, message)
+    if not project.notification_emails:
+        return
+    server_url = os.environ.get("SERVER_URL", "http://localhost:5001")
+    project_url = f"{server_url}/projects/{project.slug}"
+    send_notification(
+        subject=f"[{project.name}] Nightly crawl failed",
+        message="",
+        project_emails=project.notification_emails,
+        content_html=(
+            f'<p style="margin:0 0 10px 0;">The nightly crawl for project '
+            f'<strong>{project.name}</strong> failed:</p>'
+            f'<p style="margin:0 0 10px 0; font-family:monospace; font-size:0.85em;">'
+            f'{message or "unknown error"}</p>'
+            f'<p style="margin:0;"><a href="{project_url}" '
+            f'style="color:#7c3aed;">{project_url}</a></p>'
+        ),
+    )
+
+
 def nightly_crawl():
     _setup_crawl_log()
     app = create_app()
@@ -116,6 +139,7 @@ def nightly_crawl():
             projects = [p for p in all_projects if p.crawl_hour == current_hour]
             _log.info("[nightly] Hour %02d:00 UTC — %d/%d project(s) scheduled now", current_hour, len(projects), len(all_projects))
 
+        retry_queue: list = []
         for idx, project in enumerate(projects, 1):
             keywords_override = project.saved_keywords_list if project.saved_keywords else None
             _log.info("[nightly] ── project %d/%d: %s ──────────────────────", idx, len(projects), project.name)
@@ -158,26 +182,28 @@ def nightly_crawl():
                 triggered_by="cron",
                 keywords_override=keywords_override,
             )
-            if crawl_log and crawl_log.status == "error":
-                _log.error("[nightly] ✗ FAILED: %s — %s", project.name, crawl_log.error_message)
-                if project.notification_emails:
-                    server_url = os.environ.get("SERVER_URL", "http://localhost:5001")
-                    project_url = f"{server_url}/projects/{project.slug}"
-                    send_notification(
-                        subject=f"[{project.name}] Nightly crawl failed",
-                        message="",
-                        project_emails=project.notification_emails,
-                        content_html=(
-                            f'<p style="margin:0 0 10px 0;">The nightly crawl for project '
-                            f'<strong>{project.name}</strong> failed:</p>'
-                            f'<p style="margin:0 0 10px 0; font-family:monospace; font-size:0.85em;">'
-                            f'{crawl_log.error_message or "unknown error"}</p>'
-                            f'<p style="margin:0;"><a href="{project_url}" '
-                            f'style="color:#7c3aed;">{project_url}</a></p>'
-                        ),
-                    )
+            failed_kws = getattr(crawl_log, "failed_keywords", None)
+            if failed_kws:
+                # arXiv throttled/unavailable — retry those keywords once after the other projects are done
+                _log.error("[nightly] ⚠ arXiv failed for %d keyword(s) in %s: %s — will retry at end of run",
+                           len(failed_kws), project.name, failed_kws)
+                retry_queue.append((project, failed_kws, date_from, date_to))
+            elif crawl_log and crawl_log.status == "error":
+                _notify_failure(project, crawl_log.error_message)
             else:
                 _log.info("[nightly] ✓ done: %s", project.name)
+
+        if retry_queue:
+            wait = int(os.environ.get("NIGHTLY_RETRY_WAIT_S", "600"))
+            _log.info("[nightly] ── retrying arXiv-failed keywords for %d project(s) in %ds ──", len(retry_queue), wait)
+            time.sleep(wait)
+            for project, kws, d_from, d_to in retry_queue:
+                retry_log = run_crawl(project.id, d_from, d_to, triggered_by="cron", keywords_override=kws)
+                if retry_log.status == "error" or getattr(retry_log, "failed_keywords", None):
+                    _log.error("[nightly] ✗ retry still failing: %s — %s", project.name, retry_log.error_message)
+                    _notify_failure(project, f"arXiv search kept failing after a retry: {retry_log.error_message}")
+                else:
+                    _log.info("[nightly] ✓ retry done: %s (%d added)", project.name, retry_log.papers_added or 0)
 
         _log.info("[nightly] ── backfill: enriching incomplete papers ──────────────────────")
         filled = backfill_missing_paper_metadata()

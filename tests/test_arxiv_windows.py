@@ -34,7 +34,7 @@ def test_cap_hit_continues_from_oldest_date():
     def fake_fetch(kw, d_from, d_to, max_results):
         calls.append((d_from, d_to))
         batch, cap = pages[len(calls) - 1]
-        return batch, cap, False
+        return batch, cap, False, False
 
     warnings = []
     with patch("app.crawl._fetch_arxiv_window", side_effect=fake_fetch):
@@ -47,7 +47,7 @@ def test_cap_hit_continues_from_oldest_date():
 def test_single_day_over_cap_warns_and_moves_on():
     warnings = []
     day = date(2026, 9, 3)
-    with patch("app.crawl._fetch_arxiv_window", side_effect=[([_pd("a", day)] * 5, True, False), ([], False, False)]) as m:
+    with patch("app.crawl._fetch_arxiv_window", side_effect=[([_pd("a", day)] * 5, True, False, False), ([], False, False, False)]) as m:
         _collect_arxiv_keyword("kw", date(2026, 9, 1), day, 5, warnings)
     assert len(warnings) == 1 and "kw" in warnings[0] and "cut off" in warnings[0]
     assert m.call_args_list[1].args[1:3] == (date(2026, 9, 1), date(2026, 9, 2))
@@ -55,13 +55,13 @@ def test_single_day_over_cap_warns_and_moves_on():
 
 def test_timeout_warns():
     warnings = []
-    with patch("app.crawl._fetch_arxiv_window", return_value=([_p("a")], False, True)):
+    with patch("app.crawl._fetch_arxiv_window", return_value=([_p("a")], False, True, False)):
         _collect_arxiv_keyword("kw", date(2026, 9, 1), date(2026, 9, 3), 200, warnings)
     assert len(warnings) == 1 and "timed out" in warnings[0]
 
 
 def test_search_dedups_across_keywords_and_reports_warnings():
-    def fake_collect(kw, d_from, d_to, max_results, warnings):
+    def fake_collect(kw, d_from, d_to, max_results, warnings, failed=None):
         warnings.append(f"w-{kw}")
         return [_p("1"), _p(f"2-{kw}")]
 
@@ -70,6 +70,43 @@ def test_search_dedups_across_keywords_and_reports_warnings():
         papers = search_arxiv_with_full_papers(["a", "b"], date(2026, 9, 1), date(2026, 9, 2), warnings=w)
     assert [p["arxiv_id"] for p in papers] == ["1", "2-a", "2-b"]
     assert w == ["w-a", "w-b"]
+
+
+def test_errored_query_is_reported_as_failed_keyword():
+    warnings, failed = [], []
+    with patch("app.crawl._fetch_arxiv_window", return_value=([], False, False, True)):
+        papers = _collect_arxiv_keyword("kw", date(2026, 9, 1), date(2026, 9, 3), 200, warnings, failed)
+    assert papers == [] and failed == ["kw"]
+    assert len(warnings) == 1 and "failed" in warnings[0]
+
+
+def test_apply_search_outcome_all_failed_is_error_partial_is_success_with_message():
+    from types import SimpleNamespace
+    from app.crawl import _apply_search_outcome
+    log = SimpleNamespace(status=None, error_message=None)
+    _apply_search_outcome(log, ["a", "b"], ["a", "b"])
+    assert log.status == "error" and "all 2" in log.error_message
+
+    log = SimpleNamespace(status=None, error_message=None)
+    _apply_search_outcome(log, ["a"], ["a", "b"])
+    assert log.status == "success" and "1/2" in log.error_message
+
+    log = SimpleNamespace(status=None, error_message=None)
+    _apply_search_outcome(log, [], ["a", "b"])  # quiet day: nothing failed
+    assert log.status == "success" and log.error_message is None
+
+
+def test_citation_fetch_strips_arxiv_version():
+    from unittest.mock import MagicMock
+    from app import crawl
+    crawl._citation_cache.clear()
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = {"citationCount": 7}
+    with patch("app.crawl.httpx.Client") as client:
+        client.return_value.__enter__.return_value.get.return_value = resp
+        assert crawl._fetch_citations("arXiv:2510.01706v2") == 7
+        url = client.return_value.__enter__.return_value.get.call_args.args[0]
+    assert url.endswith("/paper/arXiv:2510.01706?fields=citationCount")
 
 
 import pytest
