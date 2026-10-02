@@ -352,7 +352,6 @@
         </span>
     </div>
 
-    {% if not show_curate %}
     <div style="position:relative;">
         <textarea name="notes" placeholder="Notes... (auto-saved)"
             id="notes-{{ pp.paper.arxiv_id }}-{{ project.id }}"
@@ -366,5 +365,4 @@
         <span id="notes-saved-{{ pp.paper.arxiv_id }}-{{ project.id }}"
             style="display:none;position:absolute;bottom:6px;right:8px;font-size:0.65rem;color:var(--success);pointer-events:none;">saved</span>
     </div>
-    {% endif %}
 </div>
