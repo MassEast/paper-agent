@@ -24,7 +24,7 @@ except ImportError:
 
 from app import create_app, db
 from app.models import Project, Paper, ProjectPaper
-from app.crawl import run_crawl, backfill_missing_paper_metadata, get_citation_count, get_citation_count_by_scholar_id, send_notification
+from app.crawl import run_crawl, send_carry_notification, _search_warning, backfill_missing_paper_metadata, get_citation_count, get_citation_count_by_scholar_id, send_notification
 
 _log = logging.getLogger(__name__)
 
@@ -181,13 +181,14 @@ def nightly_crawl():
                 date_to,
                 triggered_by="cron",
                 keywords_override=keywords_override,
+                defer_notification=True,  # if keywords fail, the retry pass sends one combined email
             )
             failed_kws = getattr(crawl_log, "failed_keywords", None)
             if failed_kws:
                 # arXiv throttled/unavailable — retry those keywords once after the other projects are done
                 _log.error("[nightly] ⚠ arXiv failed for %d keyword(s) in %s: %s — will retry at end of run",
                            len(failed_kws), project.name, failed_kws)
-                retry_queue.append((project, failed_kws, date_from, date_to))
+                retry_queue.append((project, failed_kws, date_from, date_to, getattr(crawl_log, "notify_carry", None)))
             elif crawl_log and crawl_log.status == "error":
                 _notify_failure(project, crawl_log.error_message)
             else:
@@ -197,13 +198,21 @@ def nightly_crawl():
             wait = int(os.environ.get("NIGHTLY_RETRY_WAIT_S", "600"))
             _log.info("[nightly] ── retrying arXiv-failed keywords for %d project(s) in %ds ──", len(retry_queue), wait)
             time.sleep(wait)
-            for project, kws, d_from, d_to in retry_queue:
-                retry_log = run_crawl(project.id, d_from, d_to, triggered_by="cron", keywords_override=kws)
+            for project, kws, d_from, d_to, carry in retry_queue:
+                retry_log = run_crawl(project.id, d_from, d_to, triggered_by="cron", keywords_override=kws, carry=carry)
                 if retry_log.status == "error" or getattr(retry_log, "failed_keywords", None):
                     _log.error("[nightly] ✗ retry still failing: %s — %s", project.name, retry_log.error_message)
-                    _notify_failure(project, f"arXiv search kept failing after a retry: {retry_log.error_message}")
+                    if getattr(retry_log, "notified", False):
+                        pass  # the crawl-complete email already carries the incomplete-search warning
+                    elif carry and carry["papers_added"]:
+                        send_carry_notification(project.id, carry, d_from, d_to,
+                                                _search_warning(retry_log.failed_keywords, carry["keywords"]))
+                    else:
+                        _notify_failure(project, f"arXiv search kept failing after a retry: {retry_log.error_message}")
                 else:
                     _log.info("[nightly] ✓ retry done: %s (%d added)", project.name, retry_log.papers_added or 0)
+                    if not getattr(retry_log, "notified", False) and carry and carry["papers_added"]:
+                        send_carry_notification(project.id, carry, d_from, d_to, None)  # retry found nothing new
 
         _log.info("[nightly] ── backfill: enriching incomplete papers ──────────────────────")
         filled = backfill_missing_paper_metadata()

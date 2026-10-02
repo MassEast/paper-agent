@@ -183,3 +183,10 @@ class TestCountStepDedup:
             Paper.query.filter(Paper.arxiv_id.in_(["2605.23872", "2609.00002"])).delete()
             db.session.commit()
 
+
+
+def test_search_warning_names_failed_and_ok_keywords():
+    from app.crawl import _search_warning
+    w = _search_warning(["bar"], ["foo", "moe", "bar"])
+    assert "1 of 3 keywords (bar)" in w and "Searched fine: foo, moe." in w
+    assert "No keyword could be searched" in _search_warning(["foo"], ["foo"])

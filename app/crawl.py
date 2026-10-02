@@ -1188,6 +1188,7 @@ def notify_crawl_complete(
     date_from=None,
     date_to=None,
     keywords_auto_generated: bool = False,
+    warning: Optional[str] = None,
 ):
     """Build and send the crawl-complete summary email (stats table + featured paper card).
 
@@ -1375,10 +1376,18 @@ def notify_crawl_complete(
             f'</div>'
         )
 
+    warning_html = (
+        f'<div style="margin: 12px 0; padding: 10px 14px; background-color: #fffbeb;'
+        f' border: 1px solid #fde68a; border-radius: 8px; font-size: 13px; color: #92400e;">'
+        f'<strong>Incomplete search:</strong> {html.escape(warning)}</div>'
+        if warning else ""
+    )
+
     content_html = (
         f'<p style="margin: 0 0 4px 0; font-size: 15px; color: #374151;">'
         f'Crawl finished for <strong>{html.escape(project_name)}</strong></p>'
         + date_range_html
+        + warning_html
         + stats_html
         + featured_html
         + figure_html
@@ -1397,6 +1406,7 @@ def notify_crawl_complete(
         + f'\narXiv: {arxiv_count or "?"} · Semantic Scholar: {scholar_count or "?"} · Total: {papers_found}\n'
         f'Added: {papers_added} · Skipped: {screened - papers_added}\n\n'
         f'View and tag papers: {dashboard_url}'
+        + (f'\n\nIncomplete search: {warning}' if warning else '')
     )
 
     project_emails = None
@@ -1865,7 +1875,7 @@ def select_featured_paper_llm(papers: list, research_interest: str) -> tuple:
         return papers[0], 0
 
     items = []
-    for i, p in enumerate(papers[:15]):
+    for i, p in enumerate(papers):
         snippet = (p.abstract or "")[:200]
         citations = getattr(p, "citation_count", None)
         cit_str = f" · {citations:,} citations" if citations else ""
@@ -2278,6 +2288,35 @@ def generate_summary_with_full_content(
         )
 
 
+def _make_carry(crawl_log, papers_added, papers_checked, papers, arxiv_count, scholar_count) -> dict:
+    """First-pass numbers handed to the retry pass so both produce one combined email."""
+    return {
+        "papers_found": crawl_log.papers_found, "papers_added": papers_added, "papers_checked": papers_checked,
+        "papers": list(papers), "keywords": list(crawl_log.keywords_list or []),
+        "arxiv": arxiv_count, "scholar": scholar_count,
+    }
+
+
+def _search_warning(failed: list[str], all_keywords: list[str]) -> str:
+    """Email banner text: which keywords arXiv could not answer and which were searched fine."""
+    ok = [k for k in all_keywords if k not in failed]
+    text = (f"arXiv was rate limited or unavailable for {len(failed)} of {len(all_keywords)} keywords "
+            f"({', '.join(failed)}), so papers matching only those may be missing for this date range.")
+    return text + (f" Searched fine: {', '.join(ok)}." if ok else " No keyword could be searched.")
+
+
+def send_carry_notification(project_id: int, carry: dict, date_from, date_to, warning: str) -> bool:
+    """Send the deferred first-pass email when the retry pass could not (it errored before screening)."""
+    project = Project.query.get(project_id)
+    featured, _ = select_featured_paper_llm(carry["papers"], project.research_interest or "")
+    return notify_crawl_complete(
+        project.name, project.slug, carry["papers_found"], carry["papers_added"],
+        [featured] if featured else [], project_id=project_id, keywords_used=carry["keywords"],
+        papers_screened=carry["papers_checked"], arxiv_count=carry["arxiv"], scholar_count=carry["scholar"],
+        date_from=date_from, date_to=date_to, warning=warning,
+    )
+
+
 def run_crawl(
     project_id: int,
     date_from: date,
@@ -2289,6 +2328,8 @@ def run_crawl(
     cached_papers: Optional[list[dict]] = None,
     use_arxiv: bool = True,
     use_scholar: bool = True,
+    defer_notification: bool = False,
+    carry: Optional[dict] = None,
 ) -> Optional[CrawlLog]:
     """Run one crawl end-to-end: keywords → search → screen → summarize → enrich → notify.
 
@@ -2299,7 +2340,9 @@ def run_crawl(
     Creates (or reuses, if crawl_log_id is passed) a CrawlLog row and updates it live as
     the crawl progresses — that row is what the crawl-status UI polls. Any existing
     "running" CrawlLog for this project is marked "cancelled" first (only one crawl per
-    project at a time). keywords_override/cached_papers let the UI skip re-running
+    project at a time). defer_notification: if some keywords failed, skip the email and stash the
+    numbers in crawl_log.notify_carry; pass that dict as `carry` to the retry run so the two passes
+    produce ONE combined email. keywords_override/cached_papers let the UI skip re-running
     keyword extraction / arXiv search when the user already previewed a count.
 
     Returns the CrawlLog on completion (status "success", "cancelled", or "error"), or
@@ -2439,6 +2482,8 @@ def run_crawl(
             crawl_log.finished_at = datetime.utcnow()
             db.session.commit()
             crawl_log.failed_keywords = failed_keywords  # transient attr, read by the nightly retry pass
+            if defer_notification and failed_keywords:
+                crawl_log.notify_carry = _make_carry(crawl_log, 0, 0, [], arxiv_papers_count, ss_papers_count)
             return crawl_log
 
         papers_to_process = papers_data if paper_limit <= 0 else papers_data[:paper_limit]
@@ -2695,31 +2740,42 @@ def run_crawl(
                 enrich_page_counts(papers_needing_pages)
             db.session.commit()
 
-        should_notify = not cancelled and papers_added > 0
+        carry = carry or {}
+        if defer_notification and failed_keywords and not cancelled:
+            crawl_log.notify_carry = _make_carry(crawl_log, papers_added, papers_checked, newly_added_papers,
+                                                 arxiv_papers_count, ss_papers_count)
+            should_notify = False
+        else:
+            should_notify = not cancelled and (papers_added + carry.get("papers_added", 0)) > 0
         if should_notify:
             project = Project.query.get(project_id)
             if project:
+                all_added = carry.get("papers", []) + newly_added_papers
+                total_added = papers_added + carry.get("papers_added", 0)
                 featured, featured_tokens = select_featured_paper_llm(
-                    newly_added_papers, project.research_interest or ""
-                ) if papers_added > 0 else (None, 0)
+                    all_added, project.research_interest or ""
+                )
                 tokens_used += featured_tokens
                 crawl_log.total_tokens = tokens_used
                 db.session.commit()
+                crawl_log.notified = True  # transient, read by the nightly script
                 notify_crawl_complete(
                     project.name,
                     project.slug,
-                    crawl_log.papers_found,
-                    papers_added,
+                    crawl_log.papers_found + carry.get("papers_found", 0),
+                    total_added,
                     [featured] if featured else [],
                     project_id=project_id,
-                    keywords_used=crawl_log.keywords_list,
-                    papers_screened=papers_checked,
+                    keywords_used=list(dict.fromkeys(carry.get("keywords", []) + list(crawl_log.keywords_list or []))),
+                    papers_screened=papers_checked + carry.get("papers_checked", 0),
                     paper_limit=paper_limit,
-                    arxiv_count=arxiv_papers_count,
-                    scholar_count=ss_papers_count,
+                    arxiv_count=arxiv_papers_count + carry.get("arxiv", 0),
+                    scholar_count=ss_papers_count + carry.get("scholar", 0),
                     date_from=date_from,
                     date_to=date_to,
                     keywords_auto_generated=keywords_auto_generated,
+                    warning=_search_warning(failed_keywords, carry.get("keywords") or list(crawl_log.keywords_list or []))
+                    if failed_keywords else None,
                 )
 
         _log.info("[crawl] ✓ success: %d added, %d skipped, %d screened in %.1fs",
