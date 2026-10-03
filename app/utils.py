@@ -19,7 +19,7 @@ def _http_client(**kwargs) -> httpx.Client:
 
 
 # Global arXiv/ar5iv rate-limit enforcement: at most one request in flight at a time, with a
-# 3.5 s gap enforced after each one releases the lock — covers export.arxiv.org (API search),
+# 5 s gap enforced after each one releases the lock — covers export.arxiv.org (API search),
 # ar5iv.labs.arxiv.org (full-text fetch), and arxiv.org/pdf|html|abs (figure, page count).
 # arXiv's bulk-access policy expects exactly this kind of single-connection throttling; prior
 # to this, only the export.arxiv.org API calls in crawl.py went through it — ar5iv/PDF/HTML
@@ -29,7 +29,7 @@ _arxiv_waiters = 0  # GIL-safe: number of threads currently waiting to acquire _
 
 
 class _ArxivLockCtx:
-    """Context manager for _arxiv_lock that tracks the waiter count and enforces a 3.5 s gap
+    """Context manager for _arxiv_lock that tracks the waiter count and enforces a 5 s gap
     between requests (sleeps before releasing, so the next caller never violates the limit).
 
     Usage (blocking):    with _ArxivLockCtx(): ...
@@ -57,7 +57,7 @@ class _ArxivLockCtx:
 
     def __exit__(self, *_):
         if self.acquired:
-            time.sleep(3.5)  # enforce ≥3.5s gap between arXiv/ar5iv requests
+            time.sleep(5)  # enforce ≥5s gap between arXiv/ar5iv requests
             _arxiv_lock.release()
 
 

@@ -170,7 +170,7 @@ def nightly_crawl():
                     )
                 continue
 
-            days_back = int(os.environ.get("CRAWL_DAYS_BACK", "1"))
+            days_back = int(os.environ.get("CRAWL_DAYS_BACK", "2"))
             today_utc = datetime.now(timezone.utc).date()
             date_from = today_utc - timedelta(days=days_back)
             date_to = today_utc

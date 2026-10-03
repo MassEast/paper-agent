@@ -1918,14 +1918,20 @@ def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = 100)
     try:
         url = "https://api.semanticscholar.org/recommendations/v1/papers/"
         payload = {"positivePaperIds": positive_ids}
-        with _ScholarLockCtx():
-            with httpx.Client(timeout=httpx.Timeout(30.0)) as http:
-                r = http.post(
-                    url,
-                    json=payload,
-                    params={"fields": "externalIds,title,authors,abstract,year,publicationDate", "limit": limit},
-                    headers=_scholar_headers(),
-                )
+        for attempt in range(4):
+            with _ScholarLockCtx():
+                with httpx.Client(timeout=httpx.Timeout(30.0)) as http:
+                    r = http.post(
+                        url,
+                        json=payload,
+                        params={"fields": "externalIds,title,authors,abstract,year,publicationDate", "limit": limit},
+                        headers=_scholar_headers(),
+                    )
+            if r.status_code != 429 or attempt == 3:
+                break
+            wait = 15 * 3 ** attempt  # 15s, 45s, 135s
+            _log.warning("[Scholar] Recommendations rate limited, retrying in %ds (attempt %d/4)", wait, attempt + 1)
+            time.sleep(wait)
         if r.status_code != 200:
             _log.warning("[Scholar] Recommendations API returned %d: %s", r.status_code, r.text[:200])
             return []
@@ -2033,6 +2039,10 @@ def search_arxiv_papers(
 
 
 _citation_cache: dict[str, int] = {}
+_CITATION_429_GIVE_UP = 5  # consecutive papers that exhausted retries on 429 → pause citation fetches
+_CITATION_PAUSE_S = 900
+_citation_429_streak = 0
+_citation_paused_until = 0.0
 
 
 def _fetch_citations(paper_ref: str) -> Optional[int]:
@@ -2047,6 +2057,9 @@ def _fetch_citations(paper_ref: str) -> Optional[int]:
         return _citation_cache[paper_ref]
 
     url = f"https://api.semanticscholar.org/graph/v1/paper/{paper_ref}?fields=citationCount"
+    global _citation_429_streak, _citation_paused_until
+    if time.time() < _citation_paused_until:
+        return None  # Scholar has been refusing us for many papers in a row; stop hammering it for a while
     for attempt in range(3):
         try:
             with _ScholarLockCtx():
@@ -2055,9 +2068,17 @@ def _fetch_citations(paper_ref: str) -> Optional[int]:
             if r.status_code == 200:
                 count = r.json().get("citationCount", 0)
                 _citation_cache[paper_ref] = count
+                _citation_429_streak = 0
                 return count
             if r.status_code == 429:
-                wait = 2 ** attempt
+                if attempt == 2:
+                    _citation_429_streak += 1
+                    if _citation_429_streak >= _CITATION_429_GIVE_UP:
+                        _citation_429_streak = 0
+                        _citation_paused_until = time.time() + _CITATION_PAUSE_S
+                        _log.warning("[Scholar] %d papers in a row rate limited — pausing citation fetches for %ds", _CITATION_429_GIVE_UP, _CITATION_PAUSE_S)
+                    break
+                wait = 10 * 3 ** attempt  # 10s, 30s
                 _log.warning("[Scholar] Rate limited fetching citations for %s, retrying in %ds", paper_ref, wait)
                 time.sleep(wait)
                 continue

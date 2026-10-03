@@ -66,6 +66,8 @@ Model cascade: tries each model in `LLM_MODELS` (comma-separated env var) in ord
 
 `use_arxiv` and `use_ss` flags (default True) can disable either source for manual crawls from the UI; the nightly script always uses both. Default `paper_limit=500`.
 
+Semantic Scholar 429s are retried with backoff: recommendations after 15/45/135s (then give up for that crawl), citation lookups after 10/30s, and after 5 papers in a row exhaust their retries citation fetches pause for 15 min (`_CITATION_429_GIVE_UP`, `_CITATION_PAUSE_S`). The shared cluster IP also means arXiv 429s are common; the nightly end-of-run retry covers them.
+
 Previously-rejected candidates aren't re-screened on every crawl: `ScreenedPaper` caches each paper's relevance verdict under a `screening_hash` (`compute_screening_hash`, over `research_interest` + sorted My Collection titles). A paper found `is_relevant=False` under the current hash is skipped outright; changing the research interest or the Collection's contents changes the hash and makes everything eligible for re-screening again.
 
 `_select_reference_papers` (used by the keyword-extraction and screening-context steps above, and by `generate_research_interest_from_collection` for the `RESEARCH_INTEREST_FROM_COLLECTION`/`RESEARCH_INTEREST_IMPROVE` prompts) fills by tag tier — `important` > `to_discuss` > `to_read` > untagged `related` — and only within whichever tier runs out of slots does it alternate newest/oldest by `collected_at` (newest, oldest, 2nd-newest, ...) rather than taking an arbitrary subset. Limit is `REFERENCE_PAPERS_LIMIT` (env var, default 15) — this same text block is repeated in every relevance-check call for a crawl, so it's cheap under prefix caching but still adds to KV-cache memory pressure; don't set it arbitrarily high.
@@ -98,7 +100,7 @@ The nightly Pass-3 backfill (`backfill_missing_paper_metadata` in `crawl.py`) re
 Each `Project` has a `crawl_hour` (integer 1–4 UTC, or `None` = disabled). A CronJob (see `k8s/cronjob.yaml.example`) runs `scripts/nightly_crawl.py` on a schedule. The script:
 - Filters to projects whose `crawl_hour` matches `datetime.now(UTC).hour` (trashed projects excluded)
 - Uses `project.saved_keywords` if set, otherwise generates via LLM and auto-saves them
-- Date range: yesterday UTC to today UTC (`CRAWL_DAYS_BACK` env var overrides, default 1)
+- Date range: two days back to today UTC (`CRAWL_DAYS_BACK` env var overrides, default 2 — covers arXiv index lag; dedup absorbs the overlap)
 
 Toggle is in the project sidebar (UI POST to `/projects/<slug>/toggle-nightly-crawl`).
 
@@ -128,7 +130,7 @@ Toggle is in the project sidebar (UI POST to `/projects/<slug>/toggle-nightly-cr
 ## Deployment
 
 `gunicorn` runs with `--workers 1 --threads 4 --timeout 120`. **Do not increase `--workers` beyond 1** — the entire app depends on being a single process:
-- `_arxiv_lock` / `_arxiv_waiters` (in `app/utils.py`, re-exported from `crawl.py`) enforce a global arXiv rate limit (one request in flight at a time, ≥3.5s gap) covering the search API *and* ar5iv/arxiv.org HTML+PDF fetches — all outbound arXiv-domain requests go through it. Each worker process would get its own copy of these; they can't see each other, so concurrent arXiv requests from different workers would bypass the lock entirely.
+- `_arxiv_lock` / `_arxiv_waiters` (in `app/utils.py`, re-exported from `crawl.py`) enforce a global arXiv rate limit (one request in flight at a time, ≥5s gap) covering the search API *and* ar5iv/arxiv.org HTML+PDF fetches — all outbound arXiv-domain requests go through it. Each worker process would get its own copy of these; they can't see each other, so concurrent arXiv requests from different workers would bypass the lock entirely.
 - `_crawl_current_papers`, `_arxiv_count_tasks` (in-memory crawl/count state) — UI polling could hit a different worker than the one running the crawl, returning stale or missing data.
 - SQLite write contention — WAL mode helps reads, but concurrent writers across processes still cause `database is locked` errors.
 
