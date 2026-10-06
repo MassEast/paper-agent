@@ -48,6 +48,7 @@ class Paper(db.Model):
     pdf_url = db.Column(db.Text)
     citation_count = db.Column(db.Integer, default=0)
     citation_fetched_at = db.Column(db.DateTime)
+    citation_attempted_at = db.Column(db.DateTime)  # last backfill fetch attempt, success or not (cooldown)
     citation_manual = db.Column(db.Boolean, default=False)
     page_count = db.Column(db.Integer)
     semantic_scholar_id = db.Column(db.Text)

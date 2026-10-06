@@ -60,6 +60,9 @@ def _is_open_access_pdf_domain(url: str) -> bool:
 
 
 MAX_WEB_ENRICH_ATTEMPTS = 3
+# Backfill Pass 2 retries a paper's citation count at most once per this many days. Without it
+# the same ~100 zero-citation papers were re-fetched on each of the 4 nightly cron runs.
+CITATION_BACKFILL_COOLDOWN_DAYS = 3
 
 
 def _enrich_one_web_paper(paper) -> None:
@@ -1775,7 +1778,7 @@ def _enrich_institutions_llm_fallback(papers: list) -> None:
         )
         try:
             result, _, _, _ = _llm_json(
-                [{"role": "user", "content": prompt}], temperature=0, max_tokens=2048
+                [{"role": "user", "content": prompt}], temperature=0, max_tokens=4096
             )
             if isinstance(result, list):
                 insts = [str(i).strip() for i in result if i and str(i).strip()]
@@ -1818,7 +1821,7 @@ def _enrich_web_paper_pdf_metadata(paper, pdf_url: str) -> None:
                         text=page1_text[:5000],
                     )
                     result, _, _, _ = _llm_json(
-                        [{"role": "user", "content": prompt}], temperature=0, max_tokens=2048
+                        [{"role": "user", "content": prompt}], temperature=0, max_tokens=4096
                     )
                     if isinstance(result, list):
                         insts = [str(i).strip() for i in result if i and str(i).strip()]
@@ -2406,8 +2409,8 @@ def run_crawl(
         if not project:
             raise ValueError("Project not found")
 
-        # My Collection papers — used for keyword extraction, screening context, and SS seeds.
-        # _collection_pps (full, tag-priority sorted) feeds the SS seed list — SS seeding wants
+        # My Collection papers — used for keyword extraction, screening context, and Scholar seeds.
+        # _collection_pps (full, tag-priority sorted) feeds the Scholar seed list — Scholar seeding wants
         # as many candidates as possible, not just the capped LLM-context selection below.
         _collection_pps = sorted(
             [pp for pp in ProjectPaper.query.filter_by(project_id=project_id).all()
@@ -2460,22 +2463,22 @@ def run_crawl(
                 _log.error("[crawl] arXiv search FAILED for %d/%d keywords: %s",
                            len(failed_keywords), len(keywords), failed_keywords)
             seen_ids = {p["arxiv_id"] for p in arxiv_results}
-            ss_results: list[dict] = []
+            scholar_results: list[dict] = []
             if use_scholar:
                 seed_ids = [
                     pp.paper.arxiv_id for pp in _collection_pps
                     if pp.paper and pp.paper.arxiv_id
                 ]
                 if seed_ids:
-                    ss_results = get_semantic_scholar_recommendations(seed_ids, limit=100)
-                    ss_results = [
-                        p for p in ss_results
+                    scholar_results = get_semantic_scholar_recommendations(seed_ids, limit=100)
+                    scholar_results = [
+                        p for p in scholar_results
                         if p["arxiv_id"] not in seen_ids
                         and p.get("published_date") is not None
                         and date_from <= p["published_date"] <= date_to
                     ]
-            _log.info("[crawl] SS: %d papers after date filter", len(ss_results))
-            papers_data = arxiv_results + ss_results
+            _log.info("[crawl] Scholar: %d papers after date filter", len(scholar_results))
+            papers_data = arxiv_results + scholar_results
         # Subtract papers already linked to this project (any state) — same logic as the count step
         existing_project_ids = {
             base_arxiv_id(pp.paper.arxiv_id)
@@ -2484,18 +2487,18 @@ def run_crawl(
         }
         papers_data = [p for p in papers_data if base_arxiv_id(p["arxiv_id"]) not in existing_project_ids]
         arxiv_papers_count = sum(1 for p in papers_data if p.get("source") != "semantic_scholar")
-        ss_papers_count = sum(1 for p in papers_data if p.get("source") == "semantic_scholar")
+        scholar_papers_count = sum(1 for p in papers_data if p.get("source") == "semantic_scholar")
         crawl_log.papers_found = len(papers_data)
         sources = []
         if arxiv_papers_count > 0 or use_arxiv:
             sources.append("arxiv")
-        if ss_papers_count > 0 or use_scholar:
+        if scholar_papers_count > 0 or use_scholar:
             sources.append("ss")
         crawl_log.sources_used = ",".join(sources) if sources else "arxiv,ss"
         db.session.commit()  # persist papers_found before loop
 
-        _log.info("[crawl] found %d new papers (arXiv: %d, SS: %d) after dedup against existing",
-                  len(papers_data), arxiv_papers_count, ss_papers_count)
+        _log.info("[crawl] found %d new papers (arXiv: %d, Scholar: %d) after dedup against existing",
+                  len(papers_data), arxiv_papers_count, scholar_papers_count)
 
         if not papers_data:
             _log.info("[crawl] no new papers found for date range — nothing to process")
@@ -2504,7 +2507,7 @@ def run_crawl(
             db.session.commit()
             crawl_log.failed_keywords = failed_keywords  # transient attr, read by the nightly retry pass
             if defer_notification and failed_keywords:
-                crawl_log.notify_carry = _make_carry(crawl_log, 0, 0, [], arxiv_papers_count, ss_papers_count)
+                crawl_log.notify_carry = _make_carry(crawl_log, 0, 0, [], arxiv_papers_count, scholar_papers_count)
             return crawl_log
 
         papers_to_process = papers_data if paper_limit <= 0 else papers_data[:paper_limit]
@@ -2529,7 +2532,7 @@ def run_crawl(
         papers_skipped = 0
         papers_checked = 0
         newly_added_papers = []
-        total_processing_ms = 0
+        screening_started = time.time()
         cancelled = False
 
         # Step 1: Sequentially handle papers already in DB (needs DB reads; fast).
@@ -2727,7 +2730,6 @@ def run_crawl(
                     crawl_log.papers_added = papers_added
                     crawl_log.papers_checked = papers_checked
                     crawl_log.total_tokens = tokens_used
-                    total_processing_ms += result["total_elapsed"]
 
                     link = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
                     if not link:
@@ -2764,7 +2766,7 @@ def run_crawl(
         carry = carry or {}
         if defer_notification and failed_keywords and not cancelled:
             crawl_log.notify_carry = _make_carry(crawl_log, papers_added, papers_checked, newly_added_papers,
-                                                 arxiv_papers_count, ss_papers_count)
+                                                 arxiv_papers_count, scholar_papers_count)
             should_notify = False
         else:
             should_notify = not cancelled and (papers_added + carry.get("papers_added", 0)) > 0
@@ -2791,7 +2793,7 @@ def run_crawl(
                     papers_screened=papers_checked + carry.get("papers_checked", 0),
                     paper_limit=paper_limit,
                     arxiv_count=arxiv_papers_count + carry.get("arxiv", 0),
-                    scholar_count=ss_papers_count + carry.get("scholar", 0),
+                    scholar_count=scholar_papers_count + carry.get("scholar", 0),
                     date_from=date_from,
                     date_to=date_to,
                     keywords_auto_generated=keywords_auto_generated,
@@ -2800,7 +2802,7 @@ def run_crawl(
                 )
 
         _log.info("[crawl] ✓ success: %d added, %d skipped, %d screened in %.1fs",
-                  papers_added, papers_skipped, papers_checked, total_processing_ms / 1000)
+                  papers_added, papers_skipped, papers_checked, time.time() - screening_started)
 
     except LLMUnavailableError as e:
         import traceback
@@ -2966,18 +2968,27 @@ def backfill_missing_paper_metadata() -> int:
     #   - citation_fetched_at IS NULL: fetch previously failed (429/timeout) — retry
     #   - citation_count = 0: might be a failed fetch stored as 0 before the None fix,
     #     or a new paper that has since accumulated citations
+    # Each paper is tried at most once per CITATION_BACKFILL_COOLDOWN_DAYS, least recently tried first.
     from sqlalchemy import or_
+    cooldown_cutoff = datetime.utcnow() - timedelta(days=CITATION_BACKFILL_COOLDOWN_DAYS)
     needs_citation = Paper.query.filter(
         ~Paper.arxiv_id.like("web:%"),
         or_(Paper.citation_fetched_at.is_(None), Paper.citation_count == 0),
-    ).limit(100).all()
+        or_(Paper.citation_attempted_at.is_(None), Paper.citation_attempted_at < cooldown_cutoff),
+    ).order_by(Paper.citation_attempted_at.asc()).limit(100).all()  # SQLite sorts NULL first
 
     if needs_citation:
         _log.info("[backfill] %d paper(s) need citation refresh (capped at 100/run)", len(needs_citation))
 
-    for paper in needs_citation:
+    for i, paper in enumerate(needs_citation):
+        if time.time() < _citation_paused_until:
+            _log.warning("[backfill] Scholar citation fetches paused — skipping the remaining %d paper(s)",
+                         len(needs_citation) - i)
+            break
         time.sleep(2.0)  # conservative throttle on top of the 1.1s in _ScholarLockCtx; avoids post-crawl burst exhaustion
         count = get_citation_count(paper.arxiv_id)
+        paper.citation_attempted_at = datetime.utcnow()
+        db.session.commit()
         if count is not None:
             if not paper.citation_manual or count >= paper.citation_count:
                 paper.citation_count = count

@@ -1094,10 +1094,10 @@
                                             const countInfo = data.count_so_far > 0
                                                 ? ' · ' + data.count_so_far + ' found so far'
                                                 : '';
-                                            const ssInfo = data.ss_status === 'running' ? ' · fetching Semantic Scholar…' : '';
+                                            const scholarInfo = data.scholar_status === 'running' ? ' · fetching Semantic Scholar…' : '';
                                             countContent.innerHTML =
                                                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
-                                                _spinnerHtml + ' Searching ' + sourceLabel + '&hellip; ' + s + 's' + kwInfo + countInfo + ssInfo + '</div>';
+                                                _spinnerHtml + ' Searching ' + sourceLabel + '&hellip; ' + s + 's' + kwInfo + countInfo + scholarInfo + '</div>';
                                         }
                                         setTimeout(() => pollCountStatus(taskId), 2500);
                                     }

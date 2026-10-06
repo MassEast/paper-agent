@@ -109,6 +109,7 @@ def create_app():
             "UPDATE project_papers SET collected_at = added_at WHERE manual_tag IS NOT NULL AND collected_at IS NULL",
             "ALTER TABLE papers ADD COLUMN web_enrich_attempts INTEGER DEFAULT 0",
             "ALTER TABLE papers ADD COLUMN web_enrich_last_attempt_at DATETIME",
+            "ALTER TABLE papers ADD COLUMN citation_attempted_at DATETIME",
         ]
         for _sql in _migrations:
             try:

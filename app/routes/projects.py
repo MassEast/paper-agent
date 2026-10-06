@@ -413,19 +413,19 @@ def arxiv_count(slug):
                 arxiv_papers = []
             seen_ids = {base_arxiv_id(p["arxiv_id"]) for p in arxiv_papers}
 
-            ss_papers = []
+            scholar_papers = []
             if use_scholar and seed_arxiv_ids:
-                _arxiv_count_tasks[task_id]["ss_status"] = "running"
-                ss_papers = get_semantic_scholar_recommendations(seed_arxiv_ids, limit=100)
-                # Filter to crawl date range — SS API has no date filter so it returns old papers too
-                ss_papers = [
-                    p for p in ss_papers
+                _arxiv_count_tasks[task_id]["scholar_status"] = "running"
+                scholar_papers = get_semantic_scholar_recommendations(seed_arxiv_ids, limit=100)
+                # Filter to crawl date range — Scholar API has no date filter so it returns old papers too
+                scholar_papers = [
+                    p for p in scholar_papers
                     if base_arxiv_id(p["arxiv_id"]) not in seen_ids
                     and p.get("published_date") is not None
                     and date_from <= p["published_date"] <= date_to
                 ]
 
-            all_papers = arxiv_papers + ss_papers
+            all_papers = arxiv_papers + scholar_papers
             # Subtract papers already in this project (any state: new/curated/trash)
             already_known = sum(1 for p in all_papers if base_arxiv_id(p["arxiv_id"]) in existing_arxiv_ids)
             new_papers = [p for p in all_papers if base_arxiv_id(p["arxiv_id"]) not in existing_arxiv_ids]

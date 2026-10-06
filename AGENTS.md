@@ -66,7 +66,7 @@ Model cascade: tries each model in `LLM_MODELS` (comma-separated env var) in ord
 
 `use_arxiv` and `use_ss` flags (default True) can disable either source for manual crawls from the UI; the nightly script always uses both. Default `paper_limit=500`.
 
-Semantic Scholar 429s are retried with backoff: recommendations after 15/45/135s (then give up for that crawl), citation lookups after 10/30s, and after 5 papers in a row exhaust their retries citation fetches pause for 15 min (`_CITATION_429_GIVE_UP`, `_CITATION_PAUSE_S`). The shared cluster IP also means arXiv 429s are common; the nightly end-of-run retry covers them.
+Semantic Scholar 429s are retried with backoff: recommendations after 15/45/135s (then give up for that crawl), citation lookups after 10/30s, and after 5 papers in a row exhaust their retries citation fetches pause for 15 min (`_CITATION_429_GIVE_UP`, `_CITATION_PAUSE_S`). The nightly backfill re-checks zero-citation papers at most once per `CITATION_BACKFILL_COOLDOWN_DAYS` (3) each, tracked in `Paper.citation_attempted_at`, and stops while fetches are paused. The shared cluster IP also means arXiv 429s are common; the nightly end-of-run retry covers them.
 
 Previously-rejected candidates aren't re-screened on every crawl: `ScreenedPaper` caches each paper's relevance verdict under a `screening_hash` (`compute_screening_hash`, over `research_interest` + sorted My Collection titles). A paper found `is_relevant=False` under the current hash is skipped outright; changing the research interest or the Collection's contents changes the hash and makes everything eligible for re-screening again.
 
@@ -100,7 +100,7 @@ The nightly Pass-3 backfill (`backfill_missing_paper_metadata` in `crawl.py`) re
 Each `Project` has a `crawl_hour` (integer 1–4 UTC, or `None` = disabled). A CronJob (see `k8s/cronjob.yaml.example`) runs `scripts/nightly_crawl.py` on a schedule. The script:
 - Filters to projects whose `crawl_hour` matches `datetime.now(UTC).hour` (trashed projects excluded)
 - Uses `project.saved_keywords` if set, otherwise generates via LLM and auto-saves them
-- Date range: two days back to today UTC (`CRAWL_DAYS_BACK` env var overrides, default 2 — covers arXiv index lag; dedup absorbs the overlap)
+- Date range: five days back to today UTC (`CRAWL_DAYS_BACK` env var overrides, default 5 — arXiv only makes Fri/weekend submissions searchable Mon/Tue 00:00 UTC, so the lag is up to ~4 days; dedup + screening cache absorb the overlap)
 
 Toggle is in the project sidebar (UI POST to `/projects/<slug>/toggle-nightly-crawl`).
 

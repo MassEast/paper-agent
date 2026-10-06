@@ -1,7 +1,7 @@
 """
 Live smoke tests for Semantic Scholar citation count fetching.
 
-Marked `slow` — not run by default (hits real SS API).
+Marked `slow` — not run by default (hits real Semantic Scholar API).
 Run: SCHOLAR_API_KEY=... pytest tests/test_citations.py -v -m slow
 """
 

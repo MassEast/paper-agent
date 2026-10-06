@@ -73,11 +73,11 @@ class TestArxivService:
 
 class TestSemanticScholarService:
     def test_recommendations_returns_results(self):
-        """SS recommendations API returns papers for a known seed."""
+        """Semantic Scholar recommendations API returns papers for a known seed."""
         from app.crawl import get_semantic_scholar_recommendations
         results = get_semantic_scholar_recommendations(["2307.09288"], limit=5)  # Llama 2
         assert isinstance(results, list), f"Expected list, got {type(results)}"
-        assert len(results) > 0, "SS returned no recommendations"
+        assert len(results) > 0, "Semantic Scholar returned no recommendations"
         paper = results[0]
         for field in ("arxiv_id", "title"):
             assert field in paper, f"Missing field: {field}"
