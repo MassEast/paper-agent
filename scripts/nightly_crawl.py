@@ -8,6 +8,7 @@ Uses project.saved_keywords if set, otherwise generates keywords fresh via LLM.
 import json
 import logging
 import os
+import re
 import time
 import sys
 from datetime import timedelta, datetime, timezone
@@ -123,10 +124,23 @@ def _notify_failure(project, message):
     )
 
 
+def _scheduled_hour() -> int:
+    """UTC hour this run was scheduled for, not the hour it happens to start in.
+
+    With concurrencyPolicy Forbid a run that overlaps the previous one starts late (02:00 job began at
+    02:27 on 2026-10-07); past the next full hour, wall-clock would pick the wrong projects. CronJob
+    pods are named <job>-<scheduled minutes since epoch>-<suffix>; manual/local runs fall back to now.
+    """
+    m = re.search(r"-(\d{8,})-[a-z0-9]+$", os.environ.get("HOSTNAME", ""))
+    if m:
+        return datetime.fromtimestamp(int(m.group(1)) * 60, timezone.utc).hour
+    return datetime.now(timezone.utc).hour
+
+
 def nightly_crawl():
     _setup_crawl_log()
     app = create_app()
-    current_hour = datetime.now(timezone.utc).hour
+    current_hour = _scheduled_hour()
 
     with app.app_context():
         all_projects = Project.query.filter_by(trashed_at=None).all()
