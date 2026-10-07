@@ -16,3 +16,7 @@ docs/
 logs/
 *.log
 resources/
+.claude/
+.DS_Store
+.pytest_cache/
+.ruff_cache/
