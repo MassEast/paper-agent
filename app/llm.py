@@ -71,10 +71,8 @@ def _llm(
                         headers={
                             "Authorization": f"Bearer {API_KEY}",
                             "Content-Type": "application/json",
-                            # Some OpenAI-compatible gateways (including ours) check this
-                            # instead of, or in addition to, the Authorization header.
-                            # Harmless extra header for providers that only look at Bearer auth.
-                            "x-api-key": API_KEY,
+                            # No x-api-key: BHT's Sophia Lumis gateway (2026-10-07) answers 401
+                            # when it is sent alongside a valid Bearer token.
                         },
                         json={
                             "model": model,
