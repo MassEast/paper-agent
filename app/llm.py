@@ -28,6 +28,9 @@ if not API_KEY:
     raise EnvironmentError("LLM_API_KEY environment variable is required")
 
 
+MAX_TOKENS_CEILING = 16384
+
+
 class LLMUnavailableError(Exception):
     pass
 
@@ -56,6 +59,10 @@ def _llm(
     backoff on connection errors, timeouts, HTTP errors, or an empty/think-only completion.
     Falls through to the next model only after exhausting retries on the current one.
 
+    A completion cut off by max_tokens is retried at once with double the budget (up to
+    MAX_TOKENS_CEILING): bht/large sometimes reasons past the cap, and a same-budget retry at low
+    temperature reproduces the identical cut-off (2026-10-08 log: 4x the same 18,357 chars).
+
     Returns (response_text, model_used, elapsed_ms, usage_dict). Raises LLMUnavailableError
     if every model/attempt combination fails.
     """
@@ -63,6 +70,7 @@ def _llm(
     last_err = None
 
     for model in MODELS:
+        budget = max_tokens
         for attempt in range(5):
             try:
                 with httpx.Client(timeout=httpx.Timeout(300.0, connect=30.0)) as http:
@@ -78,18 +86,26 @@ def _llm(
                             "model": model,
                             "messages": messages,
                             "temperature": temperature,
-                            "max_tokens": max_tokens,
+                            "max_tokens": budget,
                         },
                     )
                     r.raise_for_status()
                     payload = r.json()
                     raw = payload["choices"][0]["message"]["content"]
+                    finish_reason = payload["choices"][0].get("finish_reason")
                     if not raw or not raw.strip():
                         last_err = ValueError("empty completion from server")
                         if attempt < 4:
                             time.sleep((2**attempt) + random.uniform(0, 2))
                         continue
                     stripped = _strip(raw)
+                    if finish_reason == "length" and budget < MAX_TOKENS_CEILING:
+                        # Cut off mid-thought or mid-answer: the output is unusable either way
+                        _log.warning("[LLM] hit max_tokens %d (raw %d chars, model %s), retrying with %d",
+                                     budget, len(raw), model, min(budget * 2, MAX_TOKENS_CEILING))
+                        last_err = ValueError(f"completion cut off at max_tokens {budget}")
+                        budget = min(budget * 2, MAX_TOKENS_CEILING)
+                        continue
                     if not stripped:
                         # Model returned only a <think> block with no actual output
                         _log.warning("[LLM] empty after strip (raw %d chars, model %s): %s", len(raw), model, raw[:200])

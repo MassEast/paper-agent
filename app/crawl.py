@@ -1871,9 +1871,13 @@ def enrich_page_counts(papers: list) -> None:
 
 
 def select_featured_paper_llm(papers: list, research_interest: str) -> tuple:
-    """Return (paper, tokens_used). paper may be None if papers is empty."""
+    """Return (paper, tokens_used). paper may be None if papers is empty.
+
+    Only papers with a figure are candidates when any has one, so the crawl email shows an image
+    whenever one is available at all."""
     if not papers:
         return None, 0
+    papers = [p for p in papers if p.figure_url] or papers
     if len(papers) == 1:
         return papers[0], 0
 
@@ -1890,7 +1894,7 @@ def select_featured_paper_llm(papers: list, research_interest: str) -> tuple:
     )
     try:
         result, _, _, usage = _llm_json(
-            [{"role": "user", "content": prompt}], temperature=0.1, max_tokens=1024
+            [{"role": "user", "content": prompt}], temperature=0.1, max_tokens=4096
         )
         tokens = int(usage.get("total_tokens", 0))
         idx = int(result.get("selected", 1)) - 1
@@ -1900,10 +1904,6 @@ def select_featured_paper_llm(papers: list, research_interest: str) -> tuple:
     except Exception as e:
         _log.warning("[featured] LLM selection failed: %s", e)
 
-    # Fallback: prefer a paper with a figure
-    for p in papers:
-        if p.figure_url:
-            return p, 0
     return papers[0], 0
 
 
@@ -2248,7 +2248,7 @@ def extract_main_contributions(
 
     try:
         result, model, elapsed, usage = _llm_json(
-            [{"role": "user", "content": prompt}], temperature=0.2, max_tokens=2048
+            [{"role": "user", "content": prompt}], temperature=0.2, max_tokens=4096
         )
         if isinstance(result, dict):
             contributions = result.get("main_contributions", [])
@@ -2286,7 +2286,7 @@ def generate_summary_with_full_content(
 
     try:
         result, model, elapsed, usage = _llm_json(
-            [{"role": "user", "content": prompt}], temperature=0.3, max_tokens=2048
+            [{"role": "user", "content": prompt}], temperature=0.3, max_tokens=4096
         )
         if isinstance(result, dict) and isinstance(result.get("summary"), list):
             result["summary"] = " ".join(result["summary"])
@@ -2546,26 +2546,22 @@ def run_crawl(
 
             arxiv_id = paper_data["arxiv_id"]
             existing_paper = Paper.query.filter_by(arxiv_id=arxiv_id).first()
-            if existing_paper:
-                link = ProjectPaper.query.filter_by(
-                    project_id=project_id, paper_id=existing_paper.id
-                ).first()
-                if not link:
-                    link = ProjectPaper(project_id=project_id, paper_id=existing_paper.id)
-                    db.session.add(link)
-                    papers_added += 1
-                    crawl_log.papers_added = papers_added
+            if existing_paper and ProjectPaper.query.filter_by(
+                project_id=project_id, paper_id=existing_paper.id
+            ).first():
                 papers_checked += 1
                 crawl_log.papers_checked = papers_checked
                 db.session.commit()
+            elif base_arxiv_id(arxiv_id) in already_rejected:
+                # Screening cache — skip papers already rejected with the same context
+                papers_skipped += 1
+                _log.info("[crawl] cache-skip (same context): %s", arxiv_id)
             else:
-                # Check screening cache — skip papers already rejected with the same context
-                base_id = base_arxiv_id(arxiv_id)
-                if base_id in already_rejected:
-                    papers_skipped += 1
-                    _log.info("[crawl] cache-skip (same context): %s", arxiv_id)
-                else:
-                    papers_to_check_fresh.append(paper_data)
+                # A paper already in the DB (found by another project's crawl) is screened against
+                # this project like any new one; if it passes, its stored summary/figure are reused.
+                if existing_paper:
+                    paper_data = {**paper_data, "existing_paper_id": existing_paper.id}
+                papers_to_check_fresh.append(paper_data)
 
         # Step 2: Process new papers in parallel — workers do only HTTP + LLM calls (no DB).
         if not cancelled and papers_to_check_fresh:
@@ -2611,6 +2607,9 @@ def run_crawl(
 
                     if cancel_event.is_set():
                         return None
+
+                    if pd.get("existing_paper_id"):
+                        return {"relevant": True, "paper_data": pd, "tokens": rel_tokens}
 
                     figure_url, figure_caption = get_paper_figure(arxiv_id)
                     citation_count = get_citation_count(arxiv_id)
@@ -2691,6 +2690,17 @@ def run_crawl(
 
                     # Sequential DB writes (main thread only)
                     pd = result["paper_data"]
+                    if pd.get("existing_paper_id"):
+                        paper = Paper.query.get(pd["existing_paper_id"])
+                        db.session.add(ProjectPaper(project_id=project_id, paper_id=paper.id))
+                        newly_added_papers.append(paper)
+                        papers_added += 1
+                        crawl_log.papers_added = papers_added
+                        crawl_log.papers_checked = papers_checked
+                        crawl_log.total_tokens = tokens_used
+                        db.session.commit()
+                        continue
+
                     paper = Paper(
                         arxiv_id=pd["arxiv_id"],
                         title=pd["title"],

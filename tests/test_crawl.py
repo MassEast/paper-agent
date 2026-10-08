@@ -327,3 +327,56 @@ class TestRunCrawl:
 
         assert len(summary_calls) == 0, "Should not re-summarize a paper already in DB"
         assert ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper_id).first() is not None
+
+
+def _existing_paper(arxiv_id, title):
+    from app.models import Paper
+    from app import db
+    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first()
+    if not paper:
+        paper = Paper(arxiv_id=arxiv_id, title=title, authors=json.dumps(["A. Author"]),
+                      abstract="Abstract.", source="arxiv", year=2025, figure_url="https://x/fig.png")
+        db.session.add(paper)
+        db.session.commit()
+    return paper
+
+
+def test_existing_paper_from_other_project_is_screened(app, project):
+    """2026-10-08: a paper found earlier by another project (TAFFY, a tabular foundation model) was
+    linked into OCL without screening. It must go through this project's relevance check."""
+    from app.crawl import run_crawl
+    from app.models import ProjectPaper
+
+    paper = _existing_paper("2510.OTHER1", "Unrelated Paper From Another Project")
+    with MockPatches([dict(FAKE_PAPER, arxiv_id=paper.arxiv_id, title=paper.title)], relevant=False):
+        run_crawl(project.id, date(2025, 11, 1), date(2025, 11, 28), keywords_override=["test"])
+
+    assert ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper.id).first() is None
+
+
+def test_existing_relevant_paper_reaches_featured_pick(app, project):
+    """A DB-existing paper that passes screening counts as newly added, so the email can feature it."""
+    from app.crawl import run_crawl
+    from app.models import ProjectPaper
+
+    paper = _existing_paper("2510.OTHER2", "Relevant Paper From Another Project")
+    picked = []
+    with MockPatches([dict(FAKE_PAPER, arxiv_id=paper.arxiv_id, title=paper.title)]):
+        with patch("app.crawl.select_featured_paper_llm",
+                   side_effect=lambda papers, ri: (picked.extend(papers) or (papers[0], 0))):
+            run_crawl(project.id, date(2025, 10, 1), date(2025, 10, 28), keywords_override=["test"])
+
+    assert ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper.id).first() is not None
+    assert [p.id for p in picked] == [paper.id]
+
+
+def test_featured_pick_only_considers_papers_with_figure():
+    from types import SimpleNamespace
+    from app.crawl import select_featured_paper_llm
+
+    no_fig = SimpleNamespace(title="No figure", abstract="", figure_url=None)
+    with_fig = SimpleNamespace(title="Has figure", abstract="", figure_url="https://x/f.png")
+    paper, tokens = select_featured_paper_llm([no_fig, with_fig], "interest")
+    assert paper is with_fig and tokens == 0  # single candidate left, no LLM call
+    paper, _ = select_featured_paper_llm([no_fig], "interest")
+    assert paper is no_fig  # nothing has a figure: still pick one
