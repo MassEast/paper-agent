@@ -199,3 +199,43 @@ def test_logged_out_click_goes_to_login_page(app, page, seeded):
     page.get_by_role("button", name="Move to My Collection").first.click()
     page.wait_for_url("**/login")
     assert _link(app, seeded, NEW_ID).manual_tag is None
+
+
+@pytest.mark.slow
+def test_notes_changed_elsewhere_are_merged_with_conflict_markers(app, page, seeded):
+    page.route("**/notes", lambda route: route.abort())
+    notes = _notes(page, seeded, COLL_ID)
+    notes.click()
+    notes.type("written here")
+    notes.blur()
+    page.wait_for_function(
+        "el => el.textContent.includes('not saved')", arg=_notes_status(page, seeded, COLL_ID).element_handle()
+    )
+    # Meanwhile the note is saved from another device
+    with app.app_context():
+        link = _link(app, seeded, COLL_ID)
+        db.session.get(ProjectPaper, link.id).notes = "written elsewhere"
+        db.session.commit()
+
+    page.unroute("**/notes")
+    page.on("dialog", lambda d: d.accept())
+    page.reload()
+    page.wait_for_function(
+        "key => localStorage.getItem(key) === null", arg=f"notes-draft:{COLL_ID}:{seeded}", timeout=10_000
+    )
+    merged = (
+        "<<<<<<< this browser (not saved before)\nwritten here\n=======\n"
+        "written elsewhere\n>>>>>>> saved version\n"
+    )
+    assert _notes(page, seeded, COLL_ID).input_value() == merged
+    assert _link(app, seeded, COLL_ID).notes == merged
+
+
+@pytest.mark.slow
+def test_crlf_research_interest_is_not_reported_unsaved(app, page, seeded):
+    # Browsers turn \r\n into \n inside a textarea; the stored value must still count as saved
+    with app.app_context():
+        db.session.get(Project, seeded).research_interest = "line one\r\nline two"
+        db.session.commit()
+    page.reload()
+    assert not page.evaluate("unsavedChecks.some(f => f())")

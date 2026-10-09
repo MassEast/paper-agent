@@ -141,9 +141,11 @@
                     </div>
                 </form>
                 <script>
-                    let _riSavedValue = {{ (project.research_interest or '') | tojson }};
                     const saveBtn = document.getElementById('save-btn');
                     const riField = document.getElementById('research-interest-field');
+                    // Read back from the field, not the raw DB string: browsers turn \r\n into \n in a
+                    // textarea, so a stored interest with \r\n would otherwise always look unsaved.
+                    let _riSavedValue = riField.value;
                     const riForm = document.getElementById('research-form');
 
                     function _setSaveBtnState(dirty) {

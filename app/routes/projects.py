@@ -5,7 +5,7 @@ import threading
 import uuid
 from datetime import date, timedelta, datetime
 
-from flask import render_template, request, redirect, url_for, jsonify
+from flask import current_app, render_template, request, redirect, url_for, jsonify
 
 from app import db
 from app.auth import login_required
@@ -743,6 +743,7 @@ def toggle_nightly_crawl(slug):
         project.crawl_hour = random.choice(available) if available else random.randint(1, 4)
 
     db.session.commit()
+    current_app.logger.info(f"[nightly] toggle for {project.name!r}: crawl_hour now {project.crawl_hour}")
 
     if project.crawl_hour is not None:
         schedule_html = (

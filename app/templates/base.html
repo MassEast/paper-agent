@@ -107,7 +107,21 @@
 
         // --- Notes drafts: written on every keystroke, removed only once the server confirmed the
         // exact text. Survives failed saves, #paper-list swaps and reloads (same browser only).
+        // A draft is {base, text}: base is the server's note the edit started from, so a note that
+        // was changed elsewhere in the meantime is detected and merged with conflict markers.
         function draftKey(t) { return 'notes-draft:' + t.dataset.arxivId + ':' + t.dataset.projectId; }
+        function writeDraft(t) {
+            localStorage.setItem(draftKey(t), JSON.stringify({ base: t._notesBase, text: t.value }));
+        }
+        function readDraft(t) {
+            var raw = localStorage.getItem(draftKey(t));
+            if (raw === null) return null;
+            try { var d = JSON.parse(raw); if (d && typeof d.text === 'string') return d; } catch (err) {}
+            return { base: undefined, text: raw };  // plain-text draft from before drafts carried a base
+        }
+        function conflictText(mine, theirs) {
+            return '<<<<<<< this browser (not saved before)\n' + mine + '\n=======\n' + theirs + '\n>>>>>>> saved version\n';
+        }
         function setNotesStatus(t, text, ok) {
             var s = document.getElementById('notes-saved-' + t.dataset.arxivId + '-' + t.dataset.projectId);
             s.textContent = text;
@@ -122,26 +136,37 @@
         window.notesAfterRequest = function (e) {
             var t = e.detail.elt;
             if (e.detail.successful) {
-                if (t.value === e.detail.requestConfig.parameters.notes) localStorage.removeItem(draftKey(t));
+                t._notesBase = e.detail.requestConfig.parameters.notes;
+                if (t.value === t._notesBase) localStorage.removeItem(draftKey(t));
+                else writeDraft(t);
                 setNotesStatus(t, 'saved', true);
                 setTimeout(function () { if (localStorage.getItem(draftKey(t)) === null) setNotesStatus(t, '', true); }, 1500);
             } else {
-                localStorage.setItem(draftKey(t), t.value);
+                writeDraft(t);
                 setNotesStatus(t, navigator.onLine ? 'not saved — server error' : 'not saved — will retry when online', false);
             }
         };
         document.addEventListener('input', function (e) {
-            if (isNotes(e.target)) localStorage.setItem(draftKey(e.target), e.target.value);
+            if (isNotes(e.target)) writeDraft(e.target);
         });
         // Fires for every notes textarea htmx initialises: page load, swaps, and htmx.process().
         document.body.addEventListener('htmx:afterProcessNode', function (e) {
             var t = e.detail.elt;
             if (!isNotes(t)) return;
-            var draft = localStorage.getItem(draftKey(t));
+            var server = t.value;
+            t._notesBase = server;
+            var draft = readDraft(t);
             if (draft === null) return;
-            if (draft === t.value) { localStorage.removeItem(draftKey(t)); return; }
-            t.value = draft;
-            setNotesStatus(t, 'not saved yet', false);
+            if (draft.text === server) { localStorage.removeItem(draftKey(t)); return; }
+            if (draft.base === undefined || draft.base === server) {
+                t.value = draft.text;
+                setNotesStatus(t, 'not saved yet', false);
+            } else {
+                // Changed here (unsaved) and elsewhere (saved): keep both, like a git merge conflict.
+                t.value = conflictText(draft.text, server);
+                setNotesStatus(t, 'conflict — edited elsewhere too, both versions kept', false);
+            }
+            writeDraft(t);
             if (navigator.onLine) setTimeout(function () { htmx.trigger(t, 'notes-retry'); }, 0);
         });
         window.addEventListener('online', function () {
