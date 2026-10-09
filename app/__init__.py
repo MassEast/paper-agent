@@ -118,20 +118,6 @@ def create_app():
             except Exception:
                 db.session.rollback()
 
-        # Back-fill crawl_hour for existing projects that don't have one
-        import random as _random
-        try:
-            unassigned = Project.query.filter(Project.crawl_hour == None).all()  # noqa: E711
-            if unassigned:
-                taken = {p.crawl_hour for p in Project.query.all() if p.crawl_hour is not None}
-                for p in unassigned:
-                    available = [h for h in range(1, 5) if h not in taken]
-                    p.crawl_hour = _random.choice(available) if available else _random.randint(1, 4)
-                    taken.add(p.crawl_hour)
-                db.session.commit()
-        except Exception:
-            db.session.rollback()
-
         # Re-enrich papers with missing authors — can happen if the arXiv enrichment thread
         # hit a 429 at startup. Scholar (institutions/citations) runs separately so those
         # papers end up partially enriched. Only kick off threads for visibly broken papers
