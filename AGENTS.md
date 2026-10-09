@@ -10,7 +10,7 @@ A Flask-based literature review agent. It crawls arXiv and Semantic Scholar for 
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt   # app deps + pytest/pytest-timeout
+pip install -r requirements-dev.txt   # app deps + pytest/pytest-timeout/playwright (then: python -m playwright install chromium)
 cp .env.example .env   # fill in your LLM_API_BASE / LLM_API_KEY / LLM_MODELS etc.
 
 # Run the dev server (LOG_LLM=1 logs every LLM prompt/response)

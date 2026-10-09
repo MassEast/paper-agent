@@ -8,6 +8,10 @@
     <link rel="stylesheet" href="/static/tokens.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script>
+        // "Unsaved changes" checks consulted before leaving the page; pages push their own (see bottom of body).
+        window.unsavedChecks = [];
+    </script>
     <style>
         html, body { max-width: 100%; overflow-x: hidden; }
         @media (max-width: 640px) {
@@ -50,6 +54,104 @@
     </nav>
     {% endblock %}
 
+    <div id="offline-banner" role="status" hidden
+        style="position: fixed; top: 0; left: 0; right: 0; z-index: 60; padding: 8px 16px; text-align: center; font-size: 0.8rem; font-weight: 500; background-color: var(--error-bg); color: var(--error); border-bottom: 1px solid color-mix(in oklch, var(--error) 40%, transparent);">
+        You're offline — clicks and edits won't be saved until the connection is back. Notes you type are kept in this browser and saved automatically once you're online.
+    </div>
+    <div id="toast-stack" aria-live="assertive"
+        style="position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 70; display: flex; flex-direction: column; gap: 8px; width: max-content; max-width: calc(100vw - 32px);"></div>
+
     {% block content %}{% endblock %}
+
+    <script>
+    // Connection-loss safety for every page. The UI never changes before the server confirms, so a
+    // failed request leaves page and DB consistent — these handlers make the failure visible instead
+    // of silent, and keep unsaved notes in localStorage until a save actually succeeds.
+    (function () {
+        var banner = document.getElementById('offline-banner');
+        function syncOnline() { banner.hidden = navigator.onLine; }
+        window.addEventListener('online', syncOnline);
+        window.addEventListener('offline', syncOnline);
+        syncOnline();
+
+        window.showToast = function (msg) {
+            var t = document.createElement('div');
+            t.className = 'rw-toast';
+            t.textContent = msg;
+            t.style.cssText = 'padding: 10px 14px; border-radius: var(--radius-md); font-size: 0.8rem; background-color: var(--error-bg); color: var(--error); border: 1px solid color-mix(in oklch, var(--error) 40%, transparent); box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
+            document.getElementById('toast-stack').appendChild(t);
+            setTimeout(function () { t.remove(); }, 7000);
+        };
+
+        function isNotes(elt) { return elt.matches && elt.matches('textarea[data-arxiv-id]'); }
+        function failMsg(detail, reason) {
+            return detail.requestConfig.verb === 'get'
+                ? reason + ' — couldn\'t load. Try again once you\'re back online.'
+                : reason + ' — that was NOT saved. Try again once you\'re back online.';
+        }
+        // Notes have their own inline indicator + retry; everything else gets a toast.
+        document.body.addEventListener('htmx:sendError', function (e) {
+            if (!isNotes(e.detail.elt)) showToast(failMsg(e.detail, 'No connection'));
+        });
+        document.body.addEventListener('htmx:responseError', function (e) {
+            if (!isNotes(e.detail.elt)) showToast(failMsg(e.detail, 'Server error ' + e.detail.xhr.status));
+        });
+        // One request per button at a time: on a flaky connection a second click could land after
+        // the first and undo it (tag badges are toggles).
+        document.body.addEventListener('htmx:beforeRequest', function (e) {
+            if (e.detail.elt.tagName === 'BUTTON') e.detail.elt.disabled = true;
+        });
+        document.body.addEventListener('htmx:afterRequest', function (e) {
+            if (e.detail.elt.tagName === 'BUTTON') e.detail.elt.disabled = false;
+        });
+
+        // --- Notes drafts: written on every keystroke, removed only once the server confirmed the
+        // exact text. Survives failed saves, #paper-list swaps and reloads (same browser only).
+        function draftKey(t) { return 'notes-draft:' + t.dataset.arxivId + ':' + t.dataset.projectId; }
+        function setNotesStatus(t, text, ok) {
+            var s = document.getElementById('notes-saved-' + t.dataset.arxivId + '-' + t.dataset.projectId);
+            s.textContent = text;
+            s.style.color = ok ? 'var(--success)' : 'var(--error)';
+            s.style.display = text ? '' : 'none';
+        }
+        function pendingNotes() {
+            return Array.prototype.filter.call(document.querySelectorAll('textarea[data-arxiv-id]'), function (t) {
+                return localStorage.getItem(draftKey(t)) !== null;
+            });
+        }
+        window.notesAfterRequest = function (e) {
+            var t = e.detail.elt;
+            if (e.detail.successful) {
+                if (t.value === e.detail.requestConfig.parameters.notes) localStorage.removeItem(draftKey(t));
+                setNotesStatus(t, 'saved', true);
+                setTimeout(function () { if (localStorage.getItem(draftKey(t)) === null) setNotesStatus(t, '', true); }, 1500);
+            } else {
+                localStorage.setItem(draftKey(t), t.value);
+                setNotesStatus(t, navigator.onLine ? 'not saved — server error' : 'not saved — will retry when online', false);
+            }
+        };
+        document.addEventListener('input', function (e) {
+            if (isNotes(e.target)) localStorage.setItem(draftKey(e.target), e.target.value);
+        });
+        // Fires for every notes textarea htmx initialises: page load, swaps, and htmx.process().
+        document.body.addEventListener('htmx:afterProcessNode', function (e) {
+            var t = e.detail.elt;
+            if (!isNotes(t)) return;
+            var draft = localStorage.getItem(draftKey(t));
+            if (draft === null) return;
+            if (draft === t.value) { localStorage.removeItem(draftKey(t)); return; }
+            t.value = draft;
+            setNotesStatus(t, 'not saved yet', false);
+            if (navigator.onLine) setTimeout(function () { htmx.trigger(t, 'notes-retry'); }, 0);
+        });
+        window.addEventListener('online', function () {
+            pendingNotes().forEach(function (t) { htmx.trigger(t, 'notes-retry'); });
+        });
+        unsavedChecks.push(function () { return pendingNotes().length > 0; });
+        window.addEventListener('beforeunload', function (e) {
+            if (window.unsavedChecks.some(function (f) { return f(); })) e.preventDefault();
+        });
+    })();
+    </script>
 </body>
 </html>

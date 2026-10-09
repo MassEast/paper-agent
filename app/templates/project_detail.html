@@ -161,23 +161,33 @@
                     }
                     checkDirty();
 
-                    function saveResearchInterest(value, onDone) {
+                    function saveResearchInterest(value, onDone, onFail) {
                         const fd = new FormData();
                         fd.append('research_interest', value);
+                        function failed(reason) {
+                            // Leave the field dirty so the Save button stays active for a retry
+                            _setSaveBtnState(true);
+                            saveBtn.innerHTML = _xSvg + ' Not saved';
+                            showToast('Research interest ' + reason + ' — it was NOT saved. Click Save again once you\'re back online.');
+                            if (onFail) onFail();
+                        }
                         fetch(riForm.action, {
                             method: 'POST',
                             headers: { 'X-Requested-With': 'fetch' },
                             body: fd,
                         }).then(r => {
-                            if (r.ok || r.status === 204) {
+                            if (r.ok && !r.redirected) {
                                 _riSavedValue = value;
                                 _setSaveBtnState(false);
                                 saveBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
                                 setTimeout(() => { saveBtn.textContent = 'Save'; }, 2000);
                                 if (onDone) onDone();
+                            } else {
+                                failed(r.redirected ? '(logged out)' : '(server error ' + r.status + ')');
                             }
-                        }).catch(() => { });
+                        }).catch(() => failed('(no connection)'));
                     }
+                    unsavedChecks.push(() => riField.value !== _riSavedValue);
 
                     riForm.addEventListener('submit', function (e) {
                         e.preventDefault();
@@ -230,6 +240,10 @@
                                             btn.disabled = false;
                                             btn.style.opacity = '1';
                                         }, 2000);
+                                    }, () => {
+                                        btn.innerHTML = _genOrigHtml;
+                                        btn.disabled = false;
+                                        btn.style.opacity = '1';
                                     });
                                 } else {
                                     btn.innerHTML = _xSvg + ' ' + (d.error || 'Error');
@@ -494,7 +508,7 @@
                         btn.disabled = true;
                         const body = new URLSearchParams({ notification_emails: input.value });
                         fetch('/projects/' + slug + '/notification-emails', { method: 'POST', body, headers: { 'HX-Request': 'true' } })
-                            .then(r => r.text()).then(msg => {
+                            .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); }).then(msg => {
                                 if (msg.toLowerCase().includes('invalid')) {
                                     status.innerHTML = '<span style="color:var(--error);font-size:0.75rem;">' + msg.replace(/<[^>]+>/g, '') + '</span>';
                                     btn.disabled = false;
@@ -508,7 +522,10 @@
                                     btn.style.opacity = '0.55'; btn.style.cursor = 'not-allowed';
                                     setTimeout(() => { btn.textContent = 'Save'; setEmailDirty(pid); }, 2000);
                                 }
-                            }).catch(() => { status.textContent = 'Save failed'; setEmailDirty(pid); });
+                            }).catch(() => {
+                                status.innerHTML = '<span style="color:var(--error);font-size:0.75rem;">Not saved — check your connection and try again</span>';
+                                setEmailDirty(pid);
+                            });
                     }
                     window.saveNotificationEmails = saveNotificationEmails;
                     }) ();
@@ -554,6 +571,8 @@
                     function onCrawlToggle(event, pid) {
                         // Only flip the visual toggle if the server accepted the request.
                         // On error the server returns a data-error span — leave the knob alone.
+                        // No connection / server error: nothing was swapped and nothing changed server-side.
+                        if (!event.detail.successful) return;
                         var el = document.getElementById('crawl-schedule-text');
                         if (el && el.dataset.error) return;
                         var btn = document.getElementById('crawl-toggle-btn-' + pid);

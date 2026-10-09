@@ -359,9 +359,9 @@
             style="width: 100%; background-color: var(--paper-3); border: none; outline: none; border-radius: var(--radius-md); padding: 8px 12px; font-size: 0.75rem; color: var(--ink-1); resize: vertical; min-height: 2.5rem;{% if pp.notes_height %} height: {{ pp.notes_height }}px;{% endif %}"
             rows="2"
             hx-post="/paper/{{ pp.paper.arxiv_id }}/notes"
-            hx-trigger="keyup delay:1200ms, blur"
+            hx-trigger="keyup delay:1200ms, blur, notes-retry"
             hx-vals='{"project_id": {{ project.id }}}'
-            hx-on::after-request="document.getElementById('notes-saved-{{ pp.paper.arxiv_id }}-{{ project.id }}').style.display=''; setTimeout(()=>document.getElementById('notes-saved-{{ pp.paper.arxiv_id }}-{{ project.id }}').style.display='none', 1500)">{{ pp.notes or "" }}</textarea>
+            hx-on::after-request="notesAfterRequest(event)">{{ pp.notes or "" }}</textarea>
         <span id="notes-saved-{{ pp.paper.arxiv_id }}-{{ project.id }}"
             style="display:none;position:absolute;bottom:6px;right:8px;font-size:0.65rem;color:var(--success);pointer-events:none;">saved</span>
     </div>

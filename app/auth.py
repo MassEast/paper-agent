@@ -11,6 +11,10 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if "logged_in" not in session:
+            if request.headers.get("HX-Request"):
+                # A plain redirect would be followed by htmx and the login page swapped into a
+                # page fragment (e.g. #paper-list); HX-Redirect makes the whole tab navigate.
+                return "", 401, {"HX-Redirect": url_for("auth.login_page")}
             return redirect(url_for("auth.login_page"))
         return f(*args, **kwargs)
     return decorated_function
