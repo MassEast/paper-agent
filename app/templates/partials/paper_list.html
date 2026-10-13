@@ -11,11 +11,11 @@
                 New Papers ({{ new_papers|length }})
             </span>
             {% if project.research_interest %}
-            <button type="button" class="focus-ring" id="rescreen-btn"
-                title="Re-check every paper in New Papers against the saved research interest and My Collection, with the same two-step screen a crawl uses. Papers that no longer fit go to Trash (you can restore them)."
+            <button type="button" class="focus-ring rw-chip-btn" id="rescreen-btn"
+                data-tip="Re-check every paper in New Papers against the saved research interest and My Collection, with the same two-step screen a crawl uses. Papers that no longer fit go to Trash (you can restore them)."
                 hx-post="/projects/{{ project.slug }}/rescreen" hx-target="#rescreen-status" hx-swap="outerHTML"
                 hx-confirm="Re-screen all {{ new_papers|length }} New Papers against the saved research interest? Papers that no longer fit move to Trash (you can restore them). Papers already screened against this exact interest and collection are skipped."
-                style="font-size: 0.7rem; font-weight: 500; padding: 2px 8px; border-radius: var(--radius-md); border: 1px solid var(--border-default); background-color: transparent; color: var(--ink-3); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                style="font-size: 0.7rem; font-weight: 500; padding: 2px 8px; border-radius: var(--radius-md); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-rotate-ccw"></use></svg>
                 Re-screen
             </button>

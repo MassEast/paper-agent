@@ -14,6 +14,26 @@
     </script>
     <style>
         html, body { max-width: 100%; overflow-x: hidden; }
+        /* Tooltip for [data-tip] elements (see the script at the bottom): shows fast and in the app's style,
+           unlike the native title tooltip. Fixed-positioned, so scroll containers don't clip it. */
+        #rw-tip {
+            position: fixed; z-index: 80; max-width: 320px; padding: 8px 11px; pointer-events: none;
+            font-size: 0.75rem; line-height: 1.45; color: var(--ink-1);
+            background-color: color-mix(in oklch, var(--accent) 16%, var(--paper-2));
+            border: 1px solid color-mix(in oklch, var(--accent) 45%, transparent);
+            border-radius: var(--radius-md); box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+            opacity: 0; transform: translateY(2px); transition: opacity 120ms ease, transform 120ms ease;
+        }
+        #rw-tip.show { opacity: 1; transform: none; }
+        /* Small outlined header button (e.g. Re-screen) */
+        .rw-chip-btn {
+            color: var(--ink-3); background-color: transparent; border: 1px solid var(--border-default);
+            transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+        }
+        .rw-chip-btn:hover, .rw-chip-btn:focus-visible {
+            color: var(--ink-1); border-color: color-mix(in oklch, var(--accent) 60%, transparent);
+            background-color: color-mix(in oklch, var(--accent) 14%, transparent);
+        }
         @media (max-width: 640px) {
             .nav-inner { padding: 8px 12px !important; gap: 8px !important; }
             .nav-brand-text { display: none; }
@@ -61,9 +81,44 @@
     <div id="toast-stack" aria-live="assertive"
         style="position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 70; display: flex; flex-direction: column; gap: 8px; width: max-content; max-width: calc(100vw - 32px);"></div>
 
+    <div id="rw-tip" role="tooltip"></div>
+
     {% block content %}{% endblock %}
 
     <script>
+    // Tooltips for [data-tip]: shown 150 ms after hover/focus, below the element (above if no room).
+    (function () {
+        var tip = document.getElementById('rw-tip'), timer = null, current = null;
+        function hide() { clearTimeout(timer); timer = null; current = null; tip.classList.remove('show'); }
+        function show(el) {
+            tip.textContent = el.dataset.tip;
+            var r = el.getBoundingClientRect(), t = tip.getBoundingClientRect(), gap = 8;
+            var top = r.bottom + gap;
+            if (top + t.height > window.innerHeight - 8) top = r.top - t.height - gap;
+            var left = Math.min(Math.max(8, r.left + r.width / 2 - t.width / 2), window.innerWidth - t.width - 8);
+            tip.style.top = top + 'px';
+            tip.style.left = left + 'px';
+            tip.classList.add('show');
+        }
+        function enter(e) {
+            var el = e.target.closest && e.target.closest('[data-tip]');
+            if (!el || el === current) return;
+            hide();
+            current = el;
+            timer = setTimeout(function () { show(el); }, 150);
+        }
+        function leave(e) {
+            if (current && !current.contains(e.relatedTarget)) hide();
+        }
+        document.addEventListener('mouseover', enter);
+        document.addEventListener('mouseout', leave);
+        document.addEventListener('focusin', enter);
+        document.addEventListener('focusout', hide);
+        // Only a visible tooltip goes on scroll; a pending one is positioned when it shows anyway.
+        document.addEventListener('scroll', function () { if (tip.classList.contains('show')) hide(); }, true);
+        document.addEventListener('htmx:beforeSwap', hide);
+    })();
+
     // Connection-loss safety for every page. The UI never changes before the server confirms, so a
     // failed request leaves page and DB consistent — these handlers make the failure visible instead
     // of silent, and keep unsaved notes in localStorage until a save actually succeeds.

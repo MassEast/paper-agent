@@ -387,3 +387,15 @@ def test_regenerate_refreshes_summary_and_this_projects_why_line(app, logged_in,
     assert len(why_prompt) == 1 and "sparse attention" in why_prompt[0]  # this project's interest
     assert _link(ids["src"], ids["new"]).relevance_reason == "Fresh why."
     assert _link(ids["dst"], ids["new"]).relevance_reason == "other project's"  # other projects untouched
+
+
+@pytest.mark.slow
+def test_tooltips_show_fast_on_hover(app, page, two_projects):
+    tip = page.locator("#rw-tip")
+    for button, text in ((page.locator("#rescreen-btn"), "Re-check every paper"),
+                         (page.get_by_role("button", name="Regenerate").first, "Re-fetches the figure")):
+        button.hover()
+        page.wait_for_function("() => document.getElementById('rw-tip').classList.contains('show')", timeout=600)
+        assert text in tip.inner_text()
+        page.mouse.move(0, 0)
+        page.wait_for_function("() => !document.getElementById('rw-tip').classList.contains('show')", timeout=600)
