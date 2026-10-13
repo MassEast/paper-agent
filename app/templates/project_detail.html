@@ -93,7 +93,7 @@
         <button
             onclick="document.getElementById('onboarding-project').style.display='none';localStorage.setItem('ob-proj-{{ project.slug }}','1');"
             style="background:none;border:none;cursor:pointer;color:var(--ink-4);padding:0;flex-shrink:0;line-height:1;"
-            aria-label="Dismiss" data-tip="Dismiss">✕</button>
+            aria-label="Dismiss">✕</button>
     </div>
     <script>(function () { if (localStorage.getItem('ob-proj-{{ project.slug }}')) document.getElementById('onboarding-project').style.display = 'none'; })();</script>
     {% endif %}
@@ -374,7 +374,7 @@
                         All Papers ({{ new_papers|length + curated_papers|length }})
                     </h2>
                     <div class="flex items-center gap-2" style="flex-shrink: 0;">
-                        <a href="/project/{{ project.slug }}/export.csv" download data-tip="Download papers as CSV"
+                        <a href="/project/{{ project.slug }}/export.csv" download data-tip="New Papers and My Collection (not Trash) as CSV: title, authors, link, tag, abstract"
                             class="focus-ring"
                             style="height: var(--input-height); padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 600; color: var(--ink-2); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); text-decoration: none; white-space: nowrap;">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">

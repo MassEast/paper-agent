@@ -105,7 +105,6 @@
             </button>
             <button
                 style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; color: var(--ink-3); background-color: var(--paper-3); border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; gap: 6px; outline: none;"
-                data-tip="Remove from My Collection and move back to New Papers"
                 hx-post="/paper/{{ pp.paper.arxiv_id }}/tag" hx-vals='{"project_id": {{ project.id }}, "tag": ""}'
                 hx-target="#paper-list" hx-swap="innerHTML show:false">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -219,7 +218,6 @@
         {% endif %}
         {% if pp.paper.figure_url %}
         <span style="color: var(--accent); display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer;"
-              data-tip="Click to view figure"
               data-figure-url="{{ pp.paper.figure_url }}"
               data-figure-caption="{{ pp.paper.figure_caption or '' }}"
               onclick="openFigureLightbox(this.dataset.figureUrl, this.dataset.figureCaption || null)">
