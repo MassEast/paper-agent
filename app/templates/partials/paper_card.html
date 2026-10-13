@@ -64,19 +64,7 @@
                 </svg>
                 Restore
             </button>
-            {% elif show_curate %}
-            {# New Papers: single action — move to My Collection #}
-            <button class="focus-ring"
-                style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; border: 1px solid var(--border-default); color: var(--ink-2); background-color: var(--paper-3); display: inline-flex; align-items: center; gap: 6px;"
-                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
-                hx-vals='{"project_id": {{ project.id }}, "tag": "related"}'
-                hx-target="#paper-list" hx-swap="innerHTML show:false">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <use href="/static/icons.svg#icon-star"></use>
-                </svg>
-                Move to My Collection
-            </button>
-            {% else %}
+            {% elif not show_curate %}
             {# My Collection: toggle tag buttons (highlighted when active) + move back #}
             {% set _tags = pp.tags_list %}
             <button
@@ -128,6 +116,13 @@
             {% endif %}
         </div>
     </div>
+
+    {% if pp.relevance_reason %}
+    <div class="mb-3 border-l-2 relevance-reason" style="border-color: var(--warning); padding-left: 12px;">
+        <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Why it's relevant for this project</p>
+        <p class="text-sm" style="color: var(--ink-2); line-height: 1.5;">{{ pp.relevance_reason }}</p>
+    </div>
+    {% endif %}
 
     {% if pp.paper.summary %}
     <div class="mb-3 border-l-2" style="border-color: var(--accent); padding-left: 12px;">
@@ -261,7 +256,7 @@
             hx-disabled-elt="this"
             style="background: none; border: none; padding: 0; cursor: pointer; color: var(--ink-4); font-size: 0.75rem; display: inline-flex; align-items: center; gap: 3px; transition: color 150ms ease;"
             onmouseover="this.style.color='var(--ink-2)'" onmouseout="this.style.color='var(--ink-4)'"
-            title="Re-fetches the figure from arXiv and citation count from Semantic Scholar, then regenerates the AI summary from the abstract (not full paper text)">
+            title="Re-fetches the figure from arXiv and citation count from Semantic Scholar, then regenerates the AI summary and main contributions from the full paper text, and the &quot;Why it's relevant for this project&quot; line">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             <span class="htmx-request-hide">Regenerate</span>
             <span class="htmx-request-show" style="display:none;">Regenerating…</span>
@@ -299,7 +294,32 @@
             Retry
         </button>
         {% endif %}
-        <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px;">
+        <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end;">
+        {% if show_curate %}
+        <button class="focus-ring"
+            style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; border: 1px solid var(--border-default); color: var(--ink-2); background-color: var(--paper-3); display: inline-flex; align-items: center; gap: 6px;"
+            hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
+            hx-vals='{"project_id": {{ project.id }}, "tag": "related"}'
+            hx-target="#paper-list" hx-swap="innerHTML show:false">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color: var(--warning);">
+                <use href="/static/icons.svg#icon-star"></use>
+            </svg>
+            Move to My Collection
+        </button>
+        {% endif %}
+        {% if not show_restore %}
+        <button class="focus-ring"
+            style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3); display: inline-flex; align-items: center; gap: 6px;"
+            title="Copy or move this paper into the My Collection of another project"
+            hx-get="/paper/{{ pp.paper.arxiv_id }}/transfer-menu?project_id={{ project.id }}"
+            hx-target="#transfer-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
+            hx-swap="innerHTML">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-copy"></use>
+            </svg>
+            Copy / Move
+        </button>
+        {% endif %}
         {% if not show_restore %}
         <button class="focus-ring notify-btn"
             style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); background-color: var(--accent); color: var(--accent-ink); border: none; display: inline-flex; align-items: center; gap: 6px;"
@@ -351,6 +371,7 @@
         </button>
         </span>
     </div>
+    <div id="transfer-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" class="mb-3"></div>
 
     <div style="position:relative;">
         <textarea name="notes" placeholder="Notes... (auto-saved)"

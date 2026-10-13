@@ -7,8 +7,6 @@ shows and that the DB is untouched. They are `slow` because the page loads htmx/
 Playwright comes from requirements-dev.txt; its browser needs `python -m playwright install chromium`.
 """
 
-import threading
-
 import pytest
 
 from app import db
@@ -32,17 +30,6 @@ def test_logged_out_plain_request_still_redirects(client):
 SLUG = "offline-ui-test"
 NEW_ID = "2501.11111"
 COLL_ID = "2501.22222"
-
-
-@pytest.fixture(scope="module")
-def live_server(app):
-    from werkzeug.serving import make_server
-
-    server = make_server("127.0.0.1", 0, app, threaded=True)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
 
 
 @pytest.fixture
@@ -71,23 +58,6 @@ def _link(app, pid, arxiv_id):
     with app.app_context():
         paper = Paper.query.filter_by(arxiv_id=arxiv_id).one()
         return ProjectPaper.query.filter_by(project_id=pid, paper_id=paper.id).one()
-
-
-@pytest.fixture(scope="module")
-def browser_session(live_server):
-    """One browser + one login per module: /login is rate-limited to 5 per minute."""
-    sync_api = pytest.importorskip("playwright.sync_api")
-    with sync_api.sync_playwright() as p:
-        browser = p.chromium.launch()
-        context = browser.new_context()
-        pg = context.new_page()
-        pg.goto(f"{live_server}/login")
-        pg.fill("input[name=password]", "testpass")
-        pg.click("button[type=submit]")
-        state = context.storage_state()
-        context.close()
-        yield browser, state
-        browser.close()
 
 
 @pytest.fixture

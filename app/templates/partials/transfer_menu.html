@@ -1,0 +1,39 @@
+{# Copy / Move panel of a paper card, swapped into #transfer-<card id> (see paper_card.html). #}
+{% set _cid = paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') ~ '-' ~ project.id %}
+<div style="margin-top: 8px; padding: 10px 12px; background-color: var(--paper-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); font-size: 0.75rem; color: var(--ink-2);">
+    {% if copied_to %}
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+        <span style="color: var(--success);">✓ Copied to My Collection of <strong>{{ copied_to.name }}</strong></span>
+        <button type="button" onclick="document.getElementById('transfer-{{ _cid }}').innerHTML=''"
+            style="background: none; border: none; cursor: pointer; color: var(--ink-3); font-size: 0.75rem;">Close</button>
+    </div>
+    {% else %}
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+        <span style="color: var(--ink-3);">Add to the My Collection of another project. <em>Move</em> also puts it in this project's Trash.</span>
+        <button type="button" onclick="document.getElementById('transfer-{{ _cid }}').innerHTML=''"
+            style="background: none; border: none; cursor: pointer; color: var(--ink-3); font-size: 0.75rem;">Close</button>
+    </div>
+    {% for other, in_collection in targets %}
+    <div class="transfer-target" style="display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid var(--border-subtle);">
+        <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-1);">{{ other.name }}</span>
+        {% if in_collection %}
+        <span style="color: var(--ink-4);">already in its My Collection</span>
+        {% else %}
+        <button type="button" class="focus-ring"
+            style="height: 26px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; border: 1px solid var(--border-default); background-color: var(--paper-2); color: var(--ink-2);"
+            hx-post="/paper/{{ paper.arxiv_id }}/transfer"
+            hx-vals='{"project_id": {{ project.id }}, "target_project_id": {{ other.id }}, "mode": "copy"}'
+            hx-target="#transfer-{{ _cid }}" hx-swap="innerHTML">Copy</button>
+        <button type="button" class="focus-ring"
+            style="height: 26px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; border: 1px solid var(--border-default); background-color: var(--paper-2); color: var(--ink-2);"
+            title="Add to the My Collection of {{ other.name }} and put it in this project's Trash (so crawls here won't add it again)"
+            hx-post="/paper/{{ paper.arxiv_id }}/transfer"
+            hx-vals='{"project_id": {{ project.id }}, "target_project_id": {{ other.id }}, "mode": "move"}'
+            hx-target="#paper-list" hx-swap="innerHTML show:false">Move</button>
+        {% endif %}
+    </div>
+    {% else %}
+    <p style="color: var(--ink-4);">No other projects.</p>
+    {% endfor %}
+    {% endif %}
+</div>

@@ -10,7 +10,7 @@ _log = logging.getLogger(__name__)
 
 from app import db
 from app.auth import login_required
-from app.models import Paper, ProjectPaper, Project, CrawlLog
+from app.models import Paper, ProjectPaper, Project
 from app.routes import papers_bp
 from app.crawl import (
     generate_summary_with_full_content,
@@ -19,6 +19,10 @@ from app.crawl import (
     get_citation_count_by_scholar_id,
     enrich_institutions_from_scholar,
     _enrich_one_web_paper,
+    start_relevance_reason_async,
+    generate_relevance_reason,
+    get_paper_content,
+    extract_main_contributions,
 )
 from app.llm import LLMUnavailableError
 
@@ -27,13 +31,6 @@ MULTI_TAGS = {"important", "to_read", "to_discuss"}
 
 def _get_paper_lists(project):
     """Build new_papers / curated_papers / trashed_papers for a project (same logic as detail view)."""
-    recent_crawl = (
-        CrawlLog.query.filter_by(project_id=project.id)
-        .order_by(CrawlLog.started_at.desc())
-        .first()
-    )
-    last_crawl_time = recent_crawl.started_at if recent_crawl and recent_crawl.started_at else None
-
     all_pp = (
         ProjectPaper.query.filter_by(project_id=project.id)
         .order_by(ProjectPaper.added_at.desc())
@@ -57,82 +54,6 @@ def _paper_list_response(project_id):
     if not project:
         return ("", 204)
     new_papers, curated_papers, trashed_papers = _get_paper_lists(project)
-    return render_template(
-        "partials/paper_list.html",
-        project=project,
-        new_papers=new_papers,
-        curated_papers=curated_papers,
-        trashed_papers=trashed_papers,
-    )
-
-
-@papers_bp.route("/project/<slug>/papers")
-@login_required
-def list_papers(slug):
-    project = Project.query.filter_by(slug=slug).first_or_404()
-
-    last_crawl = (
-        CrawlLog.query.filter_by(project_id=project.id, status="success")
-        .order_by(CrawlLog.finished_at.desc())
-        .first()
-    )
-
-    last_crawl_time = last_crawl.finished_at if last_crawl else None
-
-    new_papers_query = (
-        ProjectPaper.query.filter_by(project_id=project.id, trashed_at=None)
-        .filter(ProjectPaper.manual_tag.is_(None))
-        .join(Paper)
-    )
-
-    if last_crawl_time:
-        new_papers_query = new_papers_query.filter(ProjectPaper.added_at >= last_crawl_time)
-
-    search_term = request.args.get("search", "")
-    if search_term:
-        new_papers_query = new_papers_query.filter(
-            Paper.title.ilike(f"%{search_term}%") | Paper.abstract.ilike(f"%{search_term}%")
-        )
-
-    new_papers = new_papers_query.order_by(ProjectPaper.added_at.desc()).all()
-
-    curated_papers = (
-        ProjectPaper.query.filter_by(project_id=project.id, trashed_at=None)
-        .filter(ProjectPaper.manual_tag.isnot(None))
-        .order_by(ProjectPaper.added_at.desc())
-        .all()
-    )
-
-    if search_term:
-        curated_papers = [
-            p
-            for p in curated_papers
-            if search_term.lower() in p.paper.title.lower()
-            or search_term.lower() in (p.paper.abstract or "").lower()
-        ]
-
-    trashed_papers = (
-        ProjectPaper.query.filter_by(project_id=project.id)
-        .filter(ProjectPaper.trashed_at.isnot(None))
-        .order_by(ProjectPaper.trashed_at.desc())
-        .all()
-    )
-
-    search_query = request.args.get("search", "").strip()
-    if search_query:
-        new_papers = [
-            p
-            for p in new_papers
-            if search_query.lower() in p.paper.title.lower()
-            or search_query.lower() in (p.paper.abstract or "").lower()
-        ]
-        curated_papers = [
-            p
-            for p in curated_papers
-            if search_query.lower() in p.paper.title.lower()
-            or search_query.lower() in (p.paper.abstract or "").lower()
-        ]
-
     return render_template(
         "partials/paper_list.html",
         project=project,
@@ -240,6 +161,67 @@ def restore_paper(arxiv_id):
     return ("", 204)
 
 
+@papers_bp.route("/paper/<arxiv_id>/transfer-menu")
+@login_required
+def transfer_menu(arxiv_id):
+    """The card's Copy / Move panel: every other (non-trashed) project, with where the paper
+    already is there."""
+    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
+    project = Project.query.get_or_404(request.args.get("project_id", type=int))
+    targets = []
+    for other in Project.query.filter(Project.id != project.id, Project.trashed_at.is_(None)).order_by(Project.name):
+        link = ProjectPaper.query.filter_by(project_id=other.id, paper_id=paper.id).first()
+        in_collection = link is not None and link.manual_tag is not None and not link.trashed_at
+        targets.append((other, in_collection))
+    return render_template("partials/transfer_menu.html", paper=paper, project=project, targets=targets)
+
+
+@papers_bp.route("/paper/<arxiv_id>/transfer", methods=["POST"])
+@login_required
+def transfer_paper(arxiv_id):
+    """Copy or move a paper into another project's My Collection. Tags and notes come along
+    (notes only if the target has none). Move also puts the paper in this project's Trash, not
+    a hard delete, so this project's crawls don't add it again. The target gets its own
+    "why it's relevant" line in the background if it has none yet."""
+    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
+    project_id = request.form.get("project_id", type=int)
+    target_id = request.form.get("target_project_id", type=int)
+    mode = request.form.get("mode")
+    if mode not in ("copy", "move") or target_id == project_id:
+        return ("Invalid transfer", 400)
+    source = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first_or_404()
+    target_project = Project.query.get_or_404(target_id)
+
+    now = datetime.utcnow()
+    target = ProjectPaper.query.filter_by(project_id=target_id, paper_id=paper.id).first()
+    if target is None:
+        target = ProjectPaper(project_id=target_id, paper_id=paper.id, added_at=now)
+        db.session.add(target)
+    target.trashed_at = None
+    if target.manual_tag is None:
+        target.manual_tag = "related"
+        target.collected_at = now
+    tags = target.tags_list
+    for tag in source.tags_list or ["to_read"]:  # same default as "Move to My Collection"
+        if tag not in tags:
+            tags.append(tag)
+    target.paper_tags = json.dumps(tags)
+    if not target.notes and source.notes:
+        target.notes = source.notes
+    if mode == "move":
+        source.trashed_at = now
+    db.session.commit()
+    _log.info("[transfer] %s %s from project %s to %s", mode, arxiv_id, project_id, target_id)
+
+    if not target.relevance_reason:
+        start_relevance_reason_async(target_id, paper.id)
+
+    if mode == "move":
+        return _paper_list_response(project_id)
+    return render_template("partials/transfer_menu.html", paper=paper, project=Project.query.get(project_id),
+                           copied_to=target_project)
+
+
 @papers_bp.route("/paper/<arxiv_id>/tag-and-notify", methods=["POST"])
 @login_required
 def tag_and_notify(arxiv_id):
@@ -288,65 +270,12 @@ def tag_and_notify(arxiv_id):
     return ("", 204)
 
 
-@papers_bp.route("/paper/<arxiv_id>/regenerate-summary", methods=["POST"])
-@login_required
-def regenerate_summary(arxiv_id):
-    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
-    project_id = request.form.get("project_id", type=int)
-    project = Project.query.get(project_id) if project_id else None
-
-    try:
-        summary_data, model, elapsed, tokens = generate_summary_with_full_content(
-            title=paper.title,
-            abstract=paper.abstract or "",
-            paper_content=paper.abstract,
-            research_interest=project.research_interest if project else "",
-        )
-    except LLMUnavailableError as e:
-        return (f"LLM unavailable: {str(e)}", 503)
-
-    if paper.summary:
-        paper.summary.summary_text = summary_data.get("summary", "")
-        paper.summary.model_used = model
-        paper.summary.introduces_dataset = summary_data.get("introduces_dataset", False)
-        paper.summary.introduces_architecture = summary_data.get("introduces_architecture", False)
-        paper.summary.introduces_method = summary_data.get("introduces_method", False)
-        paper.summary.is_survey = summary_data.get("is_survey", False)
-        paper.summary.is_benchmark = summary_data.get("is_benchmark", False)
-        paper.summary.elapsed_ms = elapsed
-        paper.summary.tokens_used = (paper.summary.tokens_used or 0) + tokens
-    else:
-        from app.models import PaperSummary
-
-        summary = PaperSummary(
-            paper_id=paper.id,
-            summary_text=summary_data.get("summary", ""),
-            model_used=model,
-            introduces_dataset=summary_data.get("introduces_dataset", False),
-            introduces_architecture=summary_data.get("introduces_architecture", False),
-            introduces_method=summary_data.get("introduces_method", False),
-            is_survey=summary_data.get("is_survey", False),
-            is_benchmark=summary_data.get("is_benchmark", False),
-            elapsed_ms=elapsed,
-            tokens_used=tokens,
-        )
-        db.session.add(summary)
-
-    db.session.commit()
-
-    if request.headers.get("HX-Request") and project_id:
-        pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
-        if pp:
-            show_curate = pp.manual_tag is None
-            return render_template("partials/paper_card.html", pp=pp, project=project, show_curate=show_curate)
-
-    return ("", 204)
-
-
 @papers_bp.route("/paper/<arxiv_id>/regenerate", methods=["POST"])
 @login_required
 def regenerate_paper(arxiv_id):
-    """Re-fetch figure, citations, institutions and regenerate summary for a single paper."""
+    """Re-fetch figure + citations (arXiv) or citations + institutions (Scholar-only paper), then
+    regenerate the shared summary + main contributions (full text, like a crawl) and this project's
+    why-relevant line (abstract)."""
     paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
     project_id = request.form.get("project_id", type=int)
     project = Project.query.get(project_id) if project_id else None
@@ -391,16 +320,22 @@ def regenerate_paper(arxiv_id):
         except Exception as e:
             _log.warning("[regenerate] institution enrich failed for %s: %s", arxiv_id, e)
 
-    # Summary
+    # Summary + main contributions, from the full text like a crawl (abstract if there is none)
+    content = (get_paper_content(arxiv_id) if paper.is_arxiv else None) or paper.abstract or ""
     try:
         summary_data, model, elapsed, tokens = generate_summary_with_full_content(
             title=paper.title,
             abstract=paper.abstract or "",
-            paper_content=paper.abstract,
-            research_interest=project.research_interest if project else "",
+            paper_content=content,
         )
+        contributions, _, contrib_elapsed, contrib_tokens = extract_main_contributions(
+            title=paper.title, paper_content=content, abstract=paper.abstract or "",
+        )
+        elapsed, tokens = elapsed + contrib_elapsed, tokens + contrib_tokens
         from app.models import PaperSummary
         if paper.summary:
+            if contributions:
+                paper.summary.main_contributions = contributions
             paper.summary.summary_text = summary_data.get("summary", "")
             paper.summary.model_used = model
             paper.summary.introduces_dataset = summary_data.get("introduces_dataset", False)
@@ -414,6 +349,7 @@ def regenerate_paper(arxiv_id):
             db.session.add(PaperSummary(
                 paper_id=paper.id,
                 summary_text=summary_data.get("summary", ""),
+                main_contributions=contributions,
                 model_used=model,
                 introduces_dataset=summary_data.get("introduces_dataset", False),
                 introduces_architecture=summary_data.get("introduces_architecture", False),
@@ -425,6 +361,16 @@ def regenerate_paper(arxiv_id):
             ))
     except LLMUnavailableError as e:
         _log.warning("[regenerate] LLM unavailable for %s: %s", arxiv_id, e)
+
+    # This project's why-relevant line (the summary above is shared by all projects)
+    pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first() if project_id else None
+    if pp and project and (project.research_interest or "").strip():
+        try:
+            why = generate_relevance_reason(paper.title, paper.abstract or "", project.research_interest)
+            if why:
+                pp.relevance_reason = why
+        except LLMUnavailableError as e:
+            _log.warning("[regenerate] LLM unavailable for why-line of %s: %s", arxiv_id, e)
 
     db.session.commit()
 

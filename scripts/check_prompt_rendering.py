@@ -110,7 +110,7 @@ def main():
     print(rendered)
     ok &= _check_no_placeholders(rendered, "KEYWORD_EXTRACTION")
 
-    # --- RELEVANCE_QUICK (mirrors is_paper_relevant's ref_text construction) ---
+    # --- RELEVANCE_QUICK (mirrors crawl._relevance_ref_text) ---
     collection_ref_dicts = [
         {"title": pp.paper.title, "abstract": (pp.paper.abstract or "")[:400]}
         for pp in selected

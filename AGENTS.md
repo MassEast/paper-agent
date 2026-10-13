@@ -58,8 +58,8 @@ Model cascade: tries each model in `LLM_MODELS` (comma-separated env var) in ord
 
 1. Extract/reuse keywords from research interest via LLM — if `project.saved_keywords` is set, uses those directly (no LLM call). Auto-saves keywords after first successful generation. The LLM prompt also gets titles+abstract excerpts from up to `REFERENCE_PAPERS_LIMIT` "My Collection" papers (`_select_reference_papers`) as domain-vocabulary context.
 2. Search arXiv by keyword (`abs:"phrase"` for multi-word) with a server-side `submittedDate` filter. arXiv caps a query at 200 results, newest first, so when a query hits the cap the search continues from the oldest paper's date back to the start of the window (`_collect_arxiv_keyword`); a single day over the cap or a timeout is surfaced as a warning in the UI. A query that errors out (429/503) counts as a failed keyword: all keywords failing marks the crawl `error`, some failing sets a warning in `error_message`, and the nightly script retries failed keywords once at the end of the run (`NIGHTLY_RETRY_WAIT_S`, default 600). One email per project per night: when keywords failed, the first pass defers its email (`defer_notification`/`notify_carry`) and the retry pass sends a combined one, with an "Incomplete search" banner naming failed/ok keywords if some still failed (`send_carry_notification` covers a retry that can't send). The featured-paper pick considers all papers added. arXiv ids are stored unversioned (`abs/<id>` always resolves to the latest version), and duplicate checks ignore any version suffix (`base_arxiv_id`).. Separately, if the project has any "My Collection" papers, seed Semantic Scholar's `/recommendations` API with their arXiv IDs (`get_semantic_scholar_recommendations`) — **not** keyword-driven; skipped entirely if the Collection is empty. Uses all Collection papers, not the capped selection below.
-3. For each candidate paper: quick relevance check (abstract only) → deep check (full PDF content) — both LLM calls in parallel across up to 10 workers, both also given titles+abstract excerpts from up to `REFERENCE_PAPERS_LIMIT` "My Collection" papers as calibration context
-4. For accepted papers: fetch figure URL/caption from arXiv HTML `<figcaption>` and citation count, then generate summary + contributions via LLM
+3. For each candidate paper: quick relevance check (abstract only) → deep check (full text, fetched only for papers that passed the quick check; also returns a one-sentence "why it's relevant", stored per project in `ProjectPaper.relevance_reason`) — both LLM calls in parallel across up to 10 workers, both also given titles+abstract excerpts from up to `REFERENCE_PAPERS_LIMIT` "My Collection" papers as calibration context
+4. For accepted papers: fetch figure URL/caption from arXiv HTML `<figcaption>` and citation count, then generate summary + contributions via LLM. `PaperSummary` is one row per paper, shared by every project the paper is in, so `SUMMARY_WITH_FULL_CONTENT` deliberately gets no research interest; project-specific relevance lives in `ProjectPaper.relevance_reason`
 5. After all workers finish: batch-enrich institutions via the Semantic Scholar graph API, fall back to LLM per-paper
 6. LLM picks the "featured paper" for the crawl-complete email (`select_featured_paper_llm`)
 7. Send notification email (if configured)
@@ -83,7 +83,7 @@ Two `ProjectPaper` fields together decide where a paper appears:
 - `paper_tags` — a JSON list of visible label badges (`"important"` / `"to_read"` / `"to_discuss"`) shown on a My Collection paper; toggling one on auto-sets `manual_tag = "related"` if it wasn't already set, but toggling the last one off does **not** move the paper back to New Papers — only the explicit "Move to New Papers" action clears both fields (`manual_tag = None`, `paper_tags = []`)
 - `trashed_at` set → "Trash" (independent of the above)
 
-Papers do **not** automatically move between sections — only explicit user actions do.
+Papers do **not** automatically move between sections — only explicit user actions do. Two of those act on more than one card: "Re-screen" in New Papers (`run_rescreen` in `crawl.py`, background thread, progress in `_rescreen_tasks` polled via `/projects/<slug>/rescreen-status`) runs the crawl's quick → deep screen on every New Papers paper against the current context and moves clear rejects to Trash (parse failures are kept; papers already judged relevant under the same `screening_hash` are skipped); and "Copy / Move" on a card (`/paper/<id>/transfer`) puts the paper into another project's My Collection, carrying tags and notes — Move also trashes it in the source project (not a hard delete, so the source's crawls won't re-add it). A transferred paper gets its target-project `relevance_reason` from `RELEVANCE_REASON` in a background thread.
 
 `Paper.arxiv_id` doubles as the identity key for non-arXiv papers too: anything added via "paste any URL" that isn't an arXiv paper gets a synthetic `"web:..."`-prefixed id (`Paper.is_arxiv` is `False` for these). Code that builds arXiv URLs/links from `arxiv_id`, or does citation/Scholar lookups keyed on it, needs to branch on `is_arxiv` first — this has broken UI targeting before (a literal `:` in the id collided with card-selector parsing).
 
@@ -108,9 +108,8 @@ Toggle is in the project sidebar (UI POST to `/projects/<slug>/toggle-nightly-cr
 
 | Blueprint     | Prefix      | File                     |
 | ------------- | ----------- | ------------------------ |
-| `projects_bp` | `/projects` | `app/routes/projects.py` |
+| `projects_bp` | `/projects` | `app/routes/projects.py` (+ crawl-status in `app/routes/crawl.py`) |
 | `papers_bp`   | (none)      | `app/routes/papers.py`   |
-| `crawl_bp`    | (none)      | `app/routes/crawl.py`    |
 | `auth_bp`     | (none)      | `app/auth.py`            |
 
 `/login` is rate-limited (Flask-Limiter, 20/hour + 5/minute per IP) — nothing else in the app is.
@@ -151,3 +150,4 @@ See `README.md` for the full deploy walkthrough and `k8s/*.yaml.example` for man
 - `scripts/check_email.py` — sends a real test email via your configured notifier. `TEST_NOTIFY_EMAIL=you@example.com python scripts/check_email.py`
 - `scripts/check_figure_fetch.py` — reports what figure (if any) would be extracted for given arXiv IDs, or a few papers from your DB if none are passed
 - `scripts/check_prompt_rendering.py` — renders every collection-aware prompt template (`KEYWORD_EXTRACTION`, `RELEVANCE_QUICK`, `RESEARCH_INTEREST_FROM_COLLECTION`, `RESEARCH_INTEREST_IMPROVE`) through the real `_select_reference_papers`/`_collection_context_text` code against a synthetic collection, and prints the fully-substituted text for visual review. No LLM call, no network, no DB.
+- `scripts/backfill_relevance_reasons.py` — one-off: fills `ProjectPaper.relevance_reason` for papers from before it existed, only in projects with the nightly crawl on and only for papers not in Trash (`RELEVANCE_REASON`, title + abstract, one LLM call per paper). `--dry-run` prints counts; re-runs skip filled papers.

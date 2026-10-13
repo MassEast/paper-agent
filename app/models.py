@@ -123,6 +123,9 @@ class ProjectPaper(db.Model):
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
     collected_at = db.Column(db.DateTime, nullable=True)
     trashed_at = db.Column(db.DateTime, nullable=True)
+    # Per project (the summary is shared across projects): one or two sentences from the
+    # screening LLM on why this paper matters for this project's research interest.
+    relevance_reason = db.Column(db.Text, nullable=True)
 
     __table_args__ = (
         db.UniqueConstraint("project_id", "paper_id"),

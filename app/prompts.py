@@ -47,10 +47,17 @@ Abstract: {abstract}
 Full content (key sections - intro, methods, conclusion):
 {paper_content}
 
-Return JSON only: {{"relevant": true}} or {{"relevant": false}}"""
+If it is relevant, also say why: one sentence of at most 30 words, addressed to the researcher \
+("you"), naming the concrete problem, method, or finding of the paper that connects to their \
+research interest. No praise, no restating the title.
 
+Return JSON only: {{"relevant": true, "reason": "<why>"}} or {{"relevant": false}}"""
+
+# Deliberately without the research interest: a paper's summary is stored once and shared by
+# every project the paper is in. Why it matters for one project lives in
+# ProjectPaper.relevance_reason (RELEVANCE_DEEP / RELEVANCE_REASON).
 SUMMARY_WITH_FULL_CONTENT = """\
-Analyze this paper for a research project on: {research_interest}
+Analyze this paper.
 
 Title: {title}
 
@@ -61,14 +68,26 @@ Full paper content (intro, methods, results, conclusion):
 
 Return JSON with:
 - "summary": 3-sentence key-contribution summary
-- "key_findings": list of 3-5 main findings
-- "methodology": brief description of approach
-- "limitations": potential weaknesses if any
 - "introduces_dataset": bool - does it introduce a new dataset?
 - "introduces_architecture": bool - does it propose new model architecture?
 - "introduces_method": bool - does it introduce new methodology?
 - "is_survey": bool - is it a survey/review paper?
 - "is_benchmark": bool - does it propose benchmarks?"""
+
+RELEVANCE_REASON = """\
+This paper is on a researcher's reading list for the project below. In one sentence of at most \
+30 words, addressed to the researcher ("you"), name the concrete problem, method, or finding of the \
+paper that connects to their research interest. If the connection is only loose, start with \
+"Loosely related:" and name the actual overlap instead of stretching it. No praise, no restating the title.
+
+Research interest:
+{research_interest}
+
+Paper:
+Title: {title}
+Abstract: {abstract}
+
+Return JSON only: {{"reason": "<why>"}}"""
 
 MAIN_CONTRIBUTIONS = """\
 Extract the MAIN CONTRIBUTIONS of this paper. Look in the introduction and conclusion/discussion sections for what the authors claim as their key contributions.

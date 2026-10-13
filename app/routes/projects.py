@@ -22,6 +22,9 @@ from app.crawl import (
     arxiv_queue_depth,
     start_collection_add_async,
     start_web_paper_add_async,
+    start_rescreen_async,
+    rescreen_state,
+    REFERENCE_PAPERS_LIMIT,
 )
 from app.llm import LLMUnavailableError, MODELS as LLM_MODELS
 from app.models import slugify, compute_screening_hash
@@ -201,6 +204,9 @@ def detail(slug):
         crawl_logs_js=crawl_logs_js,
         prompt_relevance_quick=_prompts.RELEVANCE_QUICK,
         prompt_relevance_deep=_prompts.RELEVANCE_DEEP,
+        prompt_summary=_prompts.SUMMARY_WITH_FULL_CONTENT,
+        reference_papers_limit=REFERENCE_PAPERS_LIMIT,
+        rescreen=rescreen_state(project.id),
         prompt_keyword_extraction=_prompts.KEYWORD_EXTRACTION,
         prompt_research_interest=_prompts.RESEARCH_INTEREST_IMPROVE,
         llm_model=LLM_MODELS[0],
@@ -540,6 +546,29 @@ def trigger_crawl(slug):
     return redirect(url_for("projects.detail", slug=slug))
 
 
+@projects_bp.route("/<slug>/rescreen", methods=["POST"])
+@login_required
+def rescreen(slug):
+    """Re-check all New Papers against the current research interest (crawl.run_rescreen)."""
+    project = Project.query.filter_by(slug=slug).first_or_404()
+    if not (project.research_interest or "").strip():
+        return ("Set a research interest first", 400)
+    start_rescreen_async(project.id)  # no-op if one is already running; the status shows it
+    return render_template("partials/rescreen_status.html", project=project, state=rescreen_state(project.id))
+
+
+@projects_bp.route("/<slug>/rescreen-status")
+@login_required
+def rescreen_status(slug):
+    project = Project.query.filter_by(slug=slug).first_or_404()
+    state = rescreen_state(project.id)
+    # Refresh the paper list exactly once, on the first poll that sees the re-screen finished
+    refresh = bool(state) and state["status"] != "running" and not state.get("list_refreshed")
+    if refresh:
+        state["list_refreshed"] = True
+    return render_template("partials/rescreen_status.html", project=project, state=state, refresh=refresh)
+
+
 @projects_bp.route("/<slug>/papers")
 @login_required
 def papers_partial(slug):
@@ -547,11 +576,6 @@ def papers_partial(slug):
     project = Project.query.filter_by(slug=slug).first_or_404()
 
     search_query = request.args.get("search", "").strip()
-
-    recent_crawl = (
-        CrawlLog.query.filter_by(project_id=project.id).order_by(CrawlLog.started_at.desc()).first()
-    )
-    last_crawl_time = recent_crawl.started_at if recent_crawl and recent_crawl.started_at else None
 
     query = ProjectPaper.query.filter_by(project_id=project.id)
     if search_query:

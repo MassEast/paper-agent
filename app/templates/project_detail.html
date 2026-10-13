@@ -273,8 +273,9 @@
                         output will not mention specific papers or authors, only ideas, problems, methods, and goals.
                     </p>
                     <p style="margin-top: 6px;">If the box is empty, the LLM reads <strong>titles and abstracts of all
-                            papers in My Collection</strong> (up to 15, priority-ordered by tag) and synthesises a
-                        first-person research interest from scratch.</p>
+                            papers in My Collection</strong> (up to {{ reference_papers_limit }}, priority-ordered by tag) and
+                        writes a research interest from scratch.</p>
+                    <p style="margin-top: 6px;">Only My Collection is used: New Papers and Trash are ignored.</p>
                     <p style="margin-top: 6px; color: var(--ink-4);">Tip: the more diverse and well-tagged your
                         collection, the more precise the generated description.</p>
                     <button type="button" onclick="document.getElementById('prompt-ri').classList.toggle('hidden')"
@@ -320,10 +321,14 @@
                                 <li>If no arXiv link but a DOI is present (<code>citation_doi</code> meta tag) →
                                     Semantic Scholar is queried. If Scholar knows an arXiv preprint for that DOI → full
                                     arXiv enrichment.</li>
+                                <li>Otherwise arXiv is searched for the page's title; a matching title → full
+                                    arXiv enrichment.</li>
                                 <li>If no arXiv match → stored as a web paper. Title, authors, abstract (from
                                     <code>citation_abstract</code> only — not site taglines), and the stripped page body
                                     are extracted. LLM generates a summary from the full page text. No figure, no
-                                    citation count.</li>
+                                    citation count. The PDF (for page count and institutions) is only downloaded from
+                                    open-access hosts (arXiv, ACL Anthology, PMLR, OpenReview, NeurIPS, CVF, AAAI,
+                                    IJCAI, JMLR).</li>
                             </ol>
                         </li>
                     </ol>
@@ -384,6 +389,9 @@
                     </div>
                 </div>
 
+                {% with state=rescreen if rescreen and rescreen.status == 'running' else None %}
+                {% include "partials/rescreen_status.html" %}
+                {% endwith %}
                 <div id="paper-list">
                     {% include "partials/paper_list.html" %}
                 </div>
@@ -623,7 +631,7 @@
                     style="margin-bottom: 12px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
                     <p style="font-weight: 600; color: var(--ink-1); margin-bottom: 6px;">How keywords work</p>
                     <p>An LLM reads your <strong>research interest</strong> + <strong>titles and abstracts of all papers
-                            in My Collection</strong> (up to 10, priority-ordered by tag), then outputs 3–6 short arXiv
+                            in My Collection</strong> (up to {{ reference_papers_limit }}, priority-ordered by tag), then outputs 3–6 short arXiv
                         search phrases. The more papers you have tagged, the better the vocabulary.</p>
                     <p style="margin-top: 6px; color: var(--ink-3);">Keywords are saved and reused by the nightly crawl
                         automatically. Regenerate only when your research focus changes significantly.</p>
@@ -706,20 +714,18 @@
                         style="list-style: decimal; padding-left: 16px; color: var(--ink-2); display: flex; flex-direction: column; gap: 8px;">
                         <li>
                             <strong>arXiv keyword search:</strong> Queries arXiv for each keyword phrase from the
-                            Keywords
-                            widget above; deduplicates results by ID. Results are returned newest-first, so the search
-                            stops
-                            as soon as papers fall before your start date — no unnecessary pagination. A global lock
-                            ensures only one arXiv session runs at a time (rate limit: 1 request / 3 s, single
-                            connection).
-                            If another crawl or search is active you'll see "Waiting for arXiv…" below.
+                            Keywords widget above, restricted to your date range; deduplicates results by ID. arXiv
+                            returns at most 200 results per query, so a keyword that hits that cap is searched again
+                            further back in the date range. Every request to arXiv (search, HTML, PDF) goes through
+                            one global lock with at least 5 s between requests. If another crawl or search is active
+                            you'll see "Waiting for arXiv…" below. A keyword arXiv can't answer (rate limit, outage)
+                            is reported as a warning; the nightly crawl retries it once at the end of the run.
                         </li>
                         <li>
                             <strong>Semantic Scholar recommendations</strong> (if you have papers in My
-                            Collection papers):
-                            Fetches papers similar to your existing collection via the SemanticScholar recommendations
-                            API.
-                            Results are merged and deduplicated with the arXiv search results.
+                            Collection): fetches papers similar to your collection via the Semantic Scholar
+                            recommendations API. Only recommendations that have an arXiv version and fall in your
+                            date range are kept, merged with the arXiv results.
                         </li>
                         <li>
                             <strong>Quick relevance filter:</strong> LLM receives your research interest + My Collection
@@ -733,8 +739,10 @@
                                 style="margin-top: 6px; white-space: pre-wrap; font-size: 0.68rem; background-color: var(--paper-2); border-radius: 4px; padding: 8px; color: var(--ink-3); font-family: monospace; line-height: 1.4;">{{ prompt_relevance_quick }}</pre>
                         </li>
                         <li>
-                            <strong>Deep relevance check</strong> (papers that pass quick filter): same prompt but adds
-                            the full paper content (intro, methods, conclusion).
+                            <strong>Deep relevance check</strong> (only papers that pass the quick filter, so full
+                            texts are only fetched for those): same prompt plus the full paper content. For a relevant
+                            paper it also says <em>why</em> it matters for your research interest; that is shown on
+                            the card as "Why it's relevant".
                             <button type="button"
                                 onclick="document.getElementById('prompt-deep').classList.toggle('hidden')"
                                 style="margin-left: 4px; font-size: 0.7rem; color: var(--accent-muted); text-decoration: underline; background: none; border: none; cursor: pointer; padding: 0;">show
@@ -742,28 +750,40 @@
                             <pre id="prompt-deep" class="hidden"
                                 style="margin-top: 6px; white-space: pre-wrap; font-size: 0.68rem; background-color: var(--paper-2); border-radius: 4px; padding: 8px; color: var(--ink-3); font-family: monospace; line-height: 1.4;">{{ prompt_relevance_deep }}</pre>
                         </li>
-                        <li><strong>Screening cache:</strong> Before calling the LLM, each crawl computes a
-                            short hash of your research interest + My Collection titles.
-                            Papers already screened with the same hash are skipped instantly — no LLM call needed.
-                            The hash changes (and screening reruns) only when you edit the research interest
-                            or tag/untag a paper in My Collection.</li>
-                        <li><strong>Summary:</strong> For papers that pass both filters, LLM generates a 3-sentence
-                            summary, key findings, and main contributions.</li>
+                        <li><strong>Screening cache:</strong> Papers already in this project (New Papers, My
+                            Collection or Trash) are never added again. Before calling the LLM, each crawl also
+                            computes a short hash of your research interest + the titles of your My Collection
+                            papers; papers already rejected under the same hash are skipped without an LLM call.
+                            The hash changes (and rejected papers get a new chance) when you edit the research
+                            interest or add/remove a paper in My Collection. To re-check papers already in New
+                            Papers after such a change, use <em>Re-screen</em> there.</li>
+                        <li><strong>Summary:</strong> For papers that pass both checks, the LLM writes a neutral
+                            3-sentence summary plus the badges (dataset, method, …), and in a second call the main
+                            contributions. A paper's summary is shared by every project it is in, so it does not
+                            use your research interest; the per-project "Why it's relevant" line does.
+                            <button type="button"
+                                onclick="document.getElementById('prompt-summary').classList.toggle('hidden')"
+                                style="margin-left: 4px; font-size: 0.7rem; color: var(--accent-muted); text-decoration: underline; background: none; border: none; cursor: pointer; padding: 0;">show
+                                prompt</button>
+                            <pre id="prompt-summary" class="hidden"
+                                style="margin-top: 6px; white-space: pre-wrap; font-size: 0.68rem; background-color: var(--paper-2); border-radius: 4px; padding: 8px; color: var(--ink-3); font-family: monospace; line-height: 1.4;">{{ prompt_summary }}</pre></li>
                         <li><strong>Institutions:</strong> A single batch call to the Semantic Scholar graph API
                             fetches author affiliations for all newly added papers. Falls back to LLM extraction from
                             page 1 of the PDF (which contains author/affiliation headers and footnotes) if Semantic
                             Scholar returns nothing.</li>
                         <li><strong>Featured paper:</strong> LLM picks the single most relevant paper from all newly
-                            added ones — considering your research interest — to highlight in the crawl-complete
-                            email.</li>
+                            added ones — considering your research interest, and preferring papers with a figure —
+                            to highlight in the crawl-complete email.</li>
                         <li><strong>Email:</strong> If any new papers were added, a crawl-complete notification is
-                            sent with stats and the featured paper. You can also manually notify for any paper using the
-                            bell icon.</li>
+                            sent with stats and the featured paper (one email per project per night, with a warning
+                            if some keywords couldn't be searched). You can also email any single paper with its
+                            <em>Notify</em> button.</li>
                     </ol>
                     <div
                         style="margin-top: 10px; padding: 10px; background-color: color-mix(in oklch, var(--accent) 15%, var(--paper-1)); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
                         <p style="font-weight: 600; color: var(--accent);">How tagging improves future crawls</p>
-                        <p style="margin-top: 4px; color: var(--ink-3);">Papers in My Collection are used as reference
+                        <p style="margin-top: 4px; color: var(--ink-3);">Papers in My Collection (up to
+                            {{ reference_papers_limit }}, Important first, then Discuss, then To Read) are used as reference
                             context in the relevance check prompts. The more you curate, the more precisely the LLM
                             understands your research scope. They also seed the Semantic Scholar recommendations
                             — more tagged papers means better discovery of related work.</p>

@@ -8,6 +8,7 @@ same DB connection.
 
 import os
 import tempfile
+import threading
 
 # Must be set before any app.* import — llm.py raises EnvironmentError otherwise
 os.environ.setdefault("LLM_API_KEY", "test-key-not-real")
@@ -67,6 +68,36 @@ def project(app):
         _db.session.commit()
 
 
+# ── Browser tests (slow): live server + one logged-in browser per module ────────
+
+@pytest.fixture(scope="module")
+def live_server(app):
+    from werkzeug.serving import make_server
+
+    server = make_server("127.0.0.1", 0, app, threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.fixture(scope="module")
+def browser_session(live_server):
+    """One browser + one login per module: /login is rate-limited to 5 per minute."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    with sync_api.sync_playwright() as p:
+        browser = p.chromium.launch()
+        context = browser.new_context()
+        pg = context.new_page()
+        pg.goto(f"{live_server}/login")
+        pg.fill("input[name=password]", "testpass")
+        pg.click("button[type=submit]")
+        state = context.storage_state()
+        context.close()
+        yield browser, state
+        browser.close()
+
+
 # ── LLM response factories ────────────────────────────────────────────────────
 
 def make_llm_json_response(payload: dict, model="test-model", elapsed=42, tokens=100):
@@ -82,9 +113,6 @@ FAKE_RELEVANCE_NO = {"relevant": False, "reason": "Unrelated to attention or tra
 
 FAKE_SUMMARY = {
     "summary": "This paper proposes XYZ attention.",
-    "key_findings": ["Finding 1", "Finding 2"],
-    "methodology": "Sparse attention with linear complexity.",
-    "limitations": "Only tested on language tasks.",
     "introduces_dataset": False,
     "introduces_architecture": True,
     "introduces_method": True,

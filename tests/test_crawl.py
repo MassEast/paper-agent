@@ -57,7 +57,8 @@ class MockPatches:
         ))
         s.enter_context(patch(
             "app.crawl._screen_paper_deep",
-            return_value=(self._relevant, "reason", "test-model", 100, 60),
+            return_value=(self._relevant, "reason", "test-model", 100, 60,
+                          "Matches your work on efficient attention." if self._relevant else ""),
         ))
         s.enter_context(patch(
             "app.crawl.generate_summary_with_full_content",
@@ -326,7 +327,20 @@ class TestRunCrawl:
                 run_crawl(project.id, date(2025, 12, 1), date(2025, 12, 28), keywords_override=["test"])
 
         assert len(summary_calls) == 0, "Should not re-summarize a paper already in DB"
-        assert ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper_id).first() is not None
+        link = ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper_id).first()
+        assert link is not None
+        # Shared summary reused, but the why-relevant line is this project's own
+        assert link.relevance_reason == "Matches your work on efficient attention."
+
+    def test_new_paper_gets_relevance_reason_for_this_project(self, app, project):
+        from app.models import Paper, ProjectPaper
+
+        papers = _papers(1, "2501.WHY")
+        run(project.id, papers, date_suffix="07")
+
+        paper = Paper.query.filter_by(arxiv_id=papers[0]["arxiv_id"]).first()
+        link = ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper.id).first()
+        assert link.relevance_reason == "Matches your work on efficient attention."
 
 
 def _existing_paper(arxiv_id, title):

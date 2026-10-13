@@ -36,11 +36,11 @@ flowchart TD
 
     subgraph Phase2["2. Screen & enrich"]
         direction LR
-        Q{Relevant?} -- yes --> DEEP["LLM: deep relevance check<br/>(full PDF content)"]
+        Q{Relevant?} -- yes --> DEEP["LLM: deep relevance check<br/>(full text) + why it's relevant"]
         Q -- no --> DROP["Discarded"]
         DEEP -- no --> DROP
         DEEP -- yes --> FIG["Figure, citation count<br/>+ institutions<br/>(arXiv / Semantic Scholar)"]
-        FIG --> SUM["LLM: summary +<br/>main contributions"]
+        FIG --> SUM["LLM: neutral summary +<br/>main contributions"]
     end
 
     subgraph Phase3["3. Store & notify"]
@@ -49,6 +49,7 @@ flowchart TD
         NEW -->|"user tags"| COLL["My Collection<br/>(Important / To Read / Discuss)"]
         COLL --> TRASH["Trash"]
         NEW --> TRASH
+        NEW -->|"Re-screen<br/>(after interest change)"| TRASH
         DB -->|"LLM: pick featured paper"| MAIL["Notification email"]
     end
 
@@ -62,13 +63,15 @@ flowchart TD
     classDef endpoint fill:#16a34a,color:#fff,stroke:#15803d,stroke-width:1px
     classDef dropped fill:#64748b,color:#e2e8f0,stroke:#334155,stroke-width:1px,stroke-dasharray:3 3
     class ARX,SS external
-    class Q,SUM llm
+    class Q,DEEP,SUM llm
     class DB store
     class RI,NEW,COLL,MAIL endpoint
     class DROP,TRASH dropped
 ```
 
 The dashed edge is a feedback loop: papers you've already curated into My Collection seed Semantic Scholar's recommendations directly. Collection papers also quietly inform two LLM steps not drawn above — keyword extraction and relevance screening both get calibration excerpts from your Collection too — so **the tool gets better targeted the more you curate**.
+
+Each paper card shows a neutral AI summary (shared by every project the paper is in) and, per project, a short **"Why it's relevant"** line that the deep relevance check writes against that project's research interest. A paper that fits a different project can be **copied or moved** into that project's My Collection from its card. After you change the research interest, **Re-screen** in New Papers re-checks the papers still waiting there and moves the ones that no longer fit to Trash, where you can restore them.
 
 You can also add any paper directly by pasting its URL. It first tries to resolve the paper to its arXiv version — an explicit arXiv link on the page, a DOI match, or (as a last resort) a title search on arXiv itself — and if found, treats it as a regular arXiv paper with full enrichment. If no arXiv version exists, the landing page's title/abstract/authors are still read regardless of domain, but the actual PDF (used for page count and author-institution extraction) is only downloaded from a small allowlist of open-access hosts — arXiv, ACL Anthology, PMLR, OpenReview, NeurIPS Proceedings, CVF (CVPR/ICCV/ECCV), AAAI, IJCAI, JMLR — out of respect for publisher licensing terms. For anything else, you still get the metadata, just not a downloaded PDF.
 
@@ -93,13 +96,14 @@ Return JSON only: {"relevant": true} or {"relevant": false}
 
 | Diagram step                                                   | Prompt                                                                                                 |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Research interest from Collection                              | [`RESEARCH_INTEREST_FROM_COLLECTION`](app/prompts.py#L86-L101)                                         |
+| Research interest from Collection / refine existing text      | [`RESEARCH_INTEREST_FROM_COLLECTION`](app/prompts.py#L105-L120) / [`RESEARCH_INTEREST_IMPROVE`](app/prompts.py#L147-L163) |
 | Extract keywords                                               | [`KEYWORD_EXTRACTION`](app/prompts.py#L6-L18)                                                          |
 | Quick relevance check                                          | [`RELEVANCE_QUICK`](app/prompts.py#L20-L32)                                                            |
-| Deep relevance check                                           | [`RELEVANCE_DEEP`](app/prompts.py#L34-L50)                                                             |
-| Summary + main contributions                                   | [`SUMMARY_WITH_FULL_CONTENT`](app/prompts.py#L52-L71) / [`MAIN_CONTRIBUTIONS`](app/prompts.py#L73-L84) |
-| Institutions (LLM fallback, batched after all papers screened) | [`INSTITUTION_EXTRACTION`](app/prompts.py#L117-L126)                                                   |
-| Pick featured paper                                            | [`FEATURED_PAPER_SELECTION`](app/prompts.py#L103-L115)                                                 |
+| Deep relevance check + why it's relevant                       | [`RELEVANCE_DEEP`](app/prompts.py#L34-L54)                                                             |
+| Summary + main contributions                                   | [`SUMMARY_WITH_FULL_CONTENT`](app/prompts.py#L59-L75) / [`MAIN_CONTRIBUTIONS`](app/prompts.py#L92-L103) |
+| Why it's relevant, for copied/moved papers + the one-off refill | [`RELEVANCE_REASON`](app/prompts.py#L77-L90)                                                        |
+| Institutions (LLM fallback, batched after all papers screened) | [`INSTITUTION_EXTRACTION`](app/prompts.py#L136-L145)                                                   |
+| Pick featured paper                                            | [`FEATURED_PAPER_SELECTION`](app/prompts.py#L122-L134)                                                 |
 
 ## Quick start
 

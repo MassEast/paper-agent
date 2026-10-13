@@ -1,5 +1,7 @@
 """
-Tests for paper relevance screening (app/crawl.py::is_paper_relevant).
+Tests for the two relevance-screening phases (app/crawl.py::_screen_paper_quick / _screen_paper_deep).
+How they are chained (deep only after quick passes) is covered in test_crawl.py and
+test_paper_actions.py (re-screen).
 
 Mocks _llm_json — no network calls.
 """
@@ -14,110 +16,49 @@ CONTENT = "Introduction: We contribute a novel sparse attention pattern..."
 RESEARCH = "efficient transformer attention for long-context LLMs"
 
 
-class TestIsPaperRelevant:
-    def test_relevant_paper_returns_true(self, app):
-        with app.app_context():
-            from app.crawl import is_paper_relevant
-            with patch("app.crawl._llm_json", return_value=make_llm_json_response(FAKE_RELEVANCE_YES)):
-                relevant, reason, model, elapsed, tokens = is_paper_relevant(
-                    TITLE, ABSTRACT, CONTENT, RESEARCH, []
-                )
-            assert relevant is True
-            assert isinstance(reason, str) and len(reason) > 0
+class TestQuickCheck:
+    def test_relevant(self, app):
+        from app.crawl import _screen_paper_quick
+        with patch("app.crawl._llm_json", return_value=make_llm_json_response(FAKE_RELEVANCE_YES, tokens=77)):
+            relevant, reason, model, elapsed, tokens = _screen_paper_quick(TITLE, ABSTRACT, RESEARCH, [])
+        assert (relevant, reason, tokens) == (True, "relevant", 77)
 
-    def test_irrelevant_paper_returns_false(self, app):
-        with app.app_context():
-            from app.crawl import is_paper_relevant
-            with patch("app.crawl._llm_json", return_value=make_llm_json_response(FAKE_RELEVANCE_NO)):
-                relevant, reason, model, elapsed, tokens = is_paper_relevant(
-                    "Quantum Chemistry Methods",
-                    "We study molecular bond energies.",
-                    "",
-                    RESEARCH,
-                    [],
-                )
-            assert relevant is False
+    def test_not_relevant(self, app):
+        from app.crawl import _screen_paper_quick
+        with patch("app.crawl._llm_json", return_value=make_llm_json_response(FAKE_RELEVANCE_NO)):
+            relevant, reason, *_ = _screen_paper_quick("Quantum Chemistry", "Bond energies.", RESEARCH, [])
+        assert (relevant, reason) == (False, "not-relevant")
 
-    def test_return_signature_is_five_tuple(self, app):
-        with app.app_context():
-            from app.crawl import is_paper_relevant
-            with patch("app.crawl._llm_json", return_value=make_llm_json_response(FAKE_RELEVANCE_YES, tokens=77)):
-                result = is_paper_relevant(TITLE, ABSTRACT, CONTENT, RESEARCH, [])
-            assert len(result) == 5
-            relevant, reason, model, elapsed, tokens = result
-            assert isinstance(relevant, bool)
-            assert isinstance(tokens, int)
-            assert tokens > 0
+    def test_unparseable_answer_skips_paper(self, app):
+        from app.crawl import _screen_paper_quick
+        with patch("app.crawl._llm_json", return_value=make_llm_json_response({})):
+            relevant, reason, *_ = _screen_paper_quick(TITLE, ABSTRACT, RESEARCH, [])
+        assert (relevant, reason) == (False, "parse-failed")
 
-    def test_invalid_llm_response_skips_paper(self, app):
-        with app.app_context():
-            from app.crawl import is_paper_relevant
-            # LLM returns garbage (empty dict, no "relevant" key) — paper is skipped (not relevant)
-            with patch("app.crawl._llm_json", return_value=make_llm_json_response({})):
-                relevant, reason, model, elapsed, tokens = is_paper_relevant(TITLE, ABSTRACT, CONTENT, RESEARCH, [])
-            assert relevant is False
+    def test_prompt_has_no_full_text(self, app):
+        from app.crawl import _screen_paper_quick
+        with patch("app.crawl._llm_json", return_value=make_llm_json_response(FAKE_RELEVANCE_YES)) as llm:
+            _screen_paper_quick(TITLE, ABSTRACT, RESEARCH, [{"title": "Ref paper", "abstract": "Ref abstract"}])
+        prompt = llm.call_args[0][0][0]["content"]
+        assert ABSTRACT in prompt and "Ref paper" in prompt and CONTENT not in prompt
 
-    def test_quick_check_only_when_not_relevant(self, app):
-        """If quick check says not relevant, deep check should not be called."""
-        with app.app_context():
-            from app.crawl import is_paper_relevant
-            call_count = 0
 
-            def counting_llm_json(messages, **kwargs):
-                nonlocal call_count
-                call_count += 1
-                return make_llm_json_response(FAKE_RELEVANCE_NO)
+class TestDeepCheck:
+    def test_relevant_with_why(self, app):
+        from app.crawl import _screen_paper_deep
+        with patch("app.crawl._llm_json", return_value=make_llm_json_response(FAKE_RELEVANCE_YES)) as llm:
+            relevant, reason, _, _, tokens, why = _screen_paper_deep(TITLE, ABSTRACT, CONTENT, RESEARCH, [])
+        assert (relevant, reason, why) == (True, "relevant", FAKE_RELEVANCE_YES["reason"])
+        assert CONTENT in llm.call_args[0][0][0]["content"]
 
-            with patch("app.crawl._llm_json", side_effect=counting_llm_json):
-                relevant, *_ = is_paper_relevant(TITLE, ABSTRACT, CONTENT, RESEARCH, [])
+    def test_not_relevant_has_no_why(self, app):
+        from app.crawl import _screen_paper_deep
+        with patch("app.crawl._llm_json", return_value=make_llm_json_response(FAKE_RELEVANCE_NO)):
+            relevant, reason, _, _, _, why = _screen_paper_deep(TITLE, ABSTRACT, CONTENT, RESEARCH, [])
+        assert (relevant, reason, why) == (False, "not-relevant", "")
 
-            assert not relevant
-            assert call_count == 1, "Deep check should be skipped when quick says irrelevant"
-
-    def test_deep_check_triggered_when_relevant_and_has_content(self, app):
-        """If quick check says relevant and content is available, deep check fires."""
-        with app.app_context():
-            from app.crawl import is_paper_relevant
-            call_count = 0
-
-            def counting_llm_json(messages, **kwargs):
-                nonlocal call_count
-                call_count += 1
-                return make_llm_json_response(FAKE_RELEVANCE_YES)
-
-            with patch("app.crawl._llm_json", side_effect=counting_llm_json):
-                is_paper_relevant(TITLE, ABSTRACT, CONTENT, RESEARCH, [])
-
-            assert call_count == 2, "Deep check should fire when quick says relevant and content exists"
-
-    def test_skip_deep_check_flag(self, app):
-        """skip_deep_check=True should suppress phase 2 even with content."""
-        with app.app_context():
-            from app.crawl import is_paper_relevant
-            call_count = 0
-
-            def counting_llm_json(messages, **kwargs):
-                nonlocal call_count
-                call_count += 1
-                return make_llm_json_response(FAKE_RELEVANCE_YES)
-
-            with patch("app.crawl._llm_json", side_effect=counting_llm_json):
-                is_paper_relevant(TITLE, ABSTRACT, CONTENT, RESEARCH, [], skip_deep_check=True)
-
-            assert call_count == 1
-
-    def test_no_content_skips_deep_check(self, app):
-        """Empty paper_content should skip phase 2."""
-        with app.app_context():
-            from app.crawl import is_paper_relevant
-            call_count = 0
-
-            def counting_llm_json(messages, **kwargs):
-                nonlocal call_count
-                call_count += 1
-                return make_llm_json_response(FAKE_RELEVANCE_YES)
-
-            with patch("app.crawl._llm_json", side_effect=counting_llm_json):
-                is_paper_relevant(TITLE, ABSTRACT, "", RESEARCH, [])
-
-            assert call_count == 1
+    def test_unparseable_answer_is_not_relevant(self, app):
+        from app.crawl import _screen_paper_deep
+        with patch("app.crawl._llm_json", return_value=make_llm_json_response({})):
+            relevant, reason, *_ = _screen_paper_deep(TITLE, ABSTRACT, CONTENT, RESEARCH, [])
+        assert (relevant, reason) == (False, "deep-parse-failed")

@@ -38,17 +38,27 @@ def test_relevance_deep_format():
     )
     assert "Full text here" in result
     assert "long-context LLMs" in result
+    assert '"reason"' in result  # why-relevant line, stored per project
+
+
+def test_relevance_reason_format():
+    result = prompts.RELEVANCE_REASON.format(
+        research_interest="long-context LLMs", title="Some Paper", abstract="Some abstract."
+    )
+    assert "long-context LLMs" in result
+    assert "Some Paper" in result
+    assert '{"reason"' in result
 
 
 def test_summary_format():
+    # No research interest: the summary is shared by every project the paper is in
+    assert "{research_interest}" not in prompts.SUMMARY_WITH_FULL_CONTENT
     result = prompts.SUMMARY_WITH_FULL_CONTENT.format(
-        research_interest="efficient attention",
         title="Fast Attention",
         abstract="We propose...",
         content="Introduction...",
     )
     assert "Fast Attention" in result
-    assert "efficient attention" in result
     assert "introduces_dataset" in result
 
 
@@ -71,7 +81,20 @@ def test_research_interest_from_collection_format():
 
 def test_all_prompts_are_nonempty():
     for name in ["KEYWORD_EXTRACTION", "RELEVANCE_QUICK", "RELEVANCE_DEEP",
-                 "SUMMARY_WITH_FULL_CONTENT", "MAIN_CONTRIBUTIONS",
+                 "SUMMARY_WITH_FULL_CONTENT", "MAIN_CONTRIBUTIONS", "RELEVANCE_REASON",
                  "RESEARCH_INTEREST_FROM_COLLECTION"]:
         tmpl = getattr(prompts, name)
         assert isinstance(tmpl, str) and len(tmpl) > 50, f"{name} is too short"
+
+
+def test_readme_prompt_links_point_at_the_prompts():
+    """README links each prompt as app/prompts.py#L<start>-L<end>; editing prompts.py shifts them."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    lines = (root / "app" / "prompts.py").read_text().split("\n")
+    links = re.findall(r"\[`([A-Z_]+)`\]\(app/prompts\.py#L(\d+)-L(\d+)\)", (root / "README.md").read_text())
+    assert links
+    for name, start, end in links:
+        assert lines[int(start) - 1].startswith(f'{name} = """'), f"README link for {name} starts at the wrong line"
+        assert lines[int(end) - 1].rstrip().endswith('"""'), f"README link for {name} ends at the wrong line"

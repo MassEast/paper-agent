@@ -75,24 +75,6 @@ class TestArxivSearch:
         ids = [p["arxiv_id"] for p in results]
         assert len(ids) == len(set(ids)), "Duplicate arxiv IDs found after dedup"
 
-    def test_timeout_does_not_hang(self):
-        """search_arxiv_with_timeout should return (possibly empty) within timeout_seconds."""
-        import time
-        from app.crawl import search_arxiv_with_timeout
-        today = date.today()
-        t0 = time.time()
-        # Use a very specific obscure query unlikely to return many results
-        results = search_arxiv_with_timeout(
-            "xyzzy_nonexistent_query_abc123",
-            max_results=10,
-            date_from=today - timedelta(days=7),
-            date_to=today,
-            timeout_seconds=30,
-        )
-        elapsed = time.time() - t0
-        assert elapsed < 35, f"Search took {elapsed:.1f}s — should not exceed timeout by much"
-        assert isinstance(results, list)
-
     def test_fetch_specific_paper_by_id(self):
         """Fetching attention paper 1706.03762 should return the right title."""
         import arxiv

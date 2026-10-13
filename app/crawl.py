@@ -3,7 +3,6 @@ import logging
 import re
 import threading
 import os
-import signal
 import time
 import html
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -224,13 +223,11 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                 _log.info("[collection-add] summary already exists for %s, skipping", arxiv_id)
             else:
                 try:
-                    project = Project.query.get(project_id)
                     paper_content = get_paper_content(arxiv_id) or paper.abstract or ""
                     summary_data, summary_model, summary_elapsed, summary_tokens = generate_summary_with_full_content(
                         title=paper.title,
                         abstract=paper.abstract or "",
                         paper_content=paper_content,
-                        research_interest=(project.research_interest or "") if project else "",
                     )
                     contributions, _, contrib_elapsed, contrib_tokens = extract_main_contributions(
                         title=paper.title,
@@ -433,12 +430,10 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
             # Use full_text (stripped body) so blogs/articles get a real summary, not meta noise.
             if page_full_text:
                 try:
-                    project = Project.query.get(project_id)
                     summary_data, _, _, _ = generate_summary_with_full_content(
                         title=page_title,
                         abstract=page_abstract,
                         paper_content=page_full_text,
-                        research_interest=(project.research_interest or "") if project else "",
                     )
                     contributions, _, _, _ = extract_main_contributions(
                         title=page_title,
@@ -484,53 +479,6 @@ _crawl_in_flight: dict[int, int] = {}
 
 class TimeoutError(Exception):
     pass
-
-
-def timeout_handler(signum, frame):
-    raise TimeoutError("arXiv API request timed out")
-
-
-def search_arxiv_with_timeout(
-    keyword: str, max_results: int, date_from: date, date_to: date, timeout_seconds: int = 30
-) -> list:
-    """Search arXiv with a timeout to prevent hanging."""
-    search = arxiv.Search(
-        query=keyword, max_results=max_results, sort_by=arxiv.SortCriterion.SubmittedDate
-    )
-    client = arxiv.Client(delay_seconds=3.1)
-
-    papers = []
-    try:
-        # Set alarm for timeout
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(timeout_seconds)
-
-        for result in client.results(search):
-            pub_date = result.published.date()
-            if pub_date < date_from or pub_date > date_to:
-                continue
-            papers.append(
-                {
-                    "arxiv_id": base_arxiv_id(result.entry_id.split("/")[-1]),
-                    "title": result.title,
-                    "authors": [str(a) for a in result.authors],
-                    "abstract": result.summary,
-                    "published_date": pub_date.isoformat(),
-                    "pdf_url": result.pdf_url,
-                    "year": pub_date.year,
-                }
-            )
-
-        signal.alarm(0)  # Cancel alarm
-
-    except TimeoutError:
-        signal.alarm(0)
-        print(f"[arXiv] Timeout searching for '{keyword}' after {timeout_seconds}s")
-    except Exception as e:
-        signal.alarm(0)
-        print(f"[arXiv] Error searching for '{keyword}': {e}")
-
-    return papers
 
 
 def _titles_match(t1: str, t2: str) -> bool:
@@ -1528,16 +1476,6 @@ def extract_keywords(research_interest: str, collection_papers: list) -> list[st
     return keywords
 
 
-def get_relevant_papers(project_id: int) -> list[str]:
-    """Return "title\\nabstract" strings for up to 10 tagged (My Collection) papers in the project."""
-    important_papers = (
-        ProjectPaper.query.filter_by(project_id=project_id)
-        .filter(ProjectPaper.manual_tag.isnot(None))
-        .all()
-    )
-    return [link.paper.title + "\n" + (link.paper.abstract or "") for link in important_papers[:10]]
-
-
 def _fetch_arxiv_window(keyword: str, d_from: date, d_to: date, max_results: int) -> tuple[list[dict], bool, bool, bool]:
     """One arXiv query for `keyword` restricted server-side to submittedDate in [d_from, d_to].
 
@@ -2103,21 +2041,11 @@ def get_citation_count_by_scholar_id(scholar_id: str) -> Optional[int]:
 
 
 def get_paper_content(arxiv_id: str) -> Optional[str]:
-    """Return the paper's full text if available, else just its abstract, else None."""
+    """Return the paper's full text (arXiv HTML), or None. Every caller already has the abstract
+    and falls back to it, so there is no extra arXiv API request for it here."""
     from app.utils import fetch_paper_full_text
 
-    full_text = fetch_paper_full_text(arxiv_id)
-    if full_text:
-        return full_text
-    try:
-        client = arxiv.Client(delay_seconds=3.1)
-        search = arxiv.Search(id_list=[arxiv_id])
-        results = list(client.results(search))
-        if results:
-            return results[0].summary
-    except Exception:
-        pass
-    return None
+    return fetch_paper_full_text(arxiv_id) or None
 
 
 def _relevance_ref_text(collection_papers: list[dict]) -> str:
@@ -2176,8 +2104,10 @@ def _screen_paper_deep(
     paper text. Only meaningful to call for a candidate that already passed the quick
     check — see _screen_paper_quick.
 
-    Returns (is_relevant, reason, model_used, elapsed_ms, tokens_used). reason is one of
-    "not-relevant", "relevant", "deep-parse-failed".
+    Returns (is_relevant, reason, model_used, elapsed_ms, tokens_used, why). reason is one of
+    "not-relevant", "relevant", "deep-parse-failed"; why is the LLM's one sentence on why the
+    paper matters for this research interest ("" if not relevant or not given), stored per
+    project as ProjectPaper.relevance_reason.
     """
     ref_text = _relevance_ref_text(collection_papers)
 
@@ -2196,43 +2126,11 @@ def _screen_paper_deep(
 
     if not isinstance(result, dict) or "relevant" not in result:
         print(f"[relevance] Deep check parse failed for '{title[:80]}' — treating as not relevant. result={result!r}")
-        return False, "deep-parse-failed", model, elapsed, tokens_used
+        return False, "deep-parse-failed", model, elapsed, tokens_used, ""
 
     relevant = bool(result.get("relevant"))
-    return relevant, ("relevant" if relevant else "not-relevant"), model, elapsed, tokens_used
-
-
-def is_paper_relevant(
-    title: str,
-    abstract: str,
-    paper_content: str,
-    research_interest: str,
-    collection_papers: list[dict],
-    skip_deep_check: bool = False,
-) -> tuple[bool, str, str, int, int]:
-    """Two-phase LLM relevance screen for a candidate paper — composes _screen_paper_quick
-    and _screen_paper_deep for callers that already have paper_content in hand (e.g. the
-    collection-add / web-add paths, which fetch content unconditionally for a single known
-    paper). The main crawl loop fetches paper_content lazily instead — see _process_one in
-    run_crawl — so it can skip the ar5iv fetch entirely for candidates the quick check
-    already rejects.
-
-    Returns (is_relevant, reason, model_used, elapsed_ms, tokens_used). reason is one
-    of "not-relevant", "relevant", "parse-failed", "deep-parse-failed".
-    """
-    relevant, reason, model, elapsed, tokens_used = _screen_paper_quick(
-        title, abstract, research_interest, collection_papers
-    )
-    if not relevant:
-        return relevant, reason, model, elapsed, tokens_used
-
-    if not paper_content or skip_deep_check:
-        return True, "relevant", model, elapsed, tokens_used
-
-    d_relevant, d_reason, d_model, d_elapsed, d_tokens = _screen_paper_deep(
-        title, abstract, paper_content, research_interest, collection_papers
-    )
-    return d_relevant, d_reason, d_model, elapsed + d_elapsed, tokens_used + d_tokens
+    why = str(result.get("reason") or "").strip() if relevant else ""
+    return relevant, ("relevant" if relevant else "not-relevant"), model, elapsed, tokens_used, why
 
 
 def extract_main_contributions(
@@ -2268,17 +2166,16 @@ def extract_main_contributions(
 
 
 def generate_summary_with_full_content(
-    title: str, abstract: str, paper_content: str, research_interest: str
+    title: str, abstract: str, paper_content: str
 ) -> tuple[dict, str, int, int]:
     """Returns (summary_dict, model, elapsed_ms, tokens). summary_dict has keys:
-    summary, key_findings, methodology, limitations, introduces_dataset,
+    summary, introduces_dataset,
     introduces_architecture, introduces_method, is_survey, is_benchmark
     (see prompts.SUMMARY_WITH_FULL_CONTENT). On failure, returns that same shape
     with empty/False defaults rather than raising (except LLMUnavailableError)."""
     content = paper_content if paper_content and len(paper_content) > len(abstract) else abstract
 
     prompt = prompts.SUMMARY_WITH_FULL_CONTENT.format(
-        research_interest=research_interest,
         title=title,
         abstract=abstract,
         content=(content[:150000] if content else abstract),
@@ -2297,9 +2194,6 @@ def generate_summary_with_full_content(
         return (
             {
                 "summary": "",
-                "key_findings": [],
-                "methodology": "",
-                "limitations": "",
                 "introduces_dataset": False,
                 "introduces_architecture": False,
                 "introduces_method": False,
@@ -2594,7 +2488,7 @@ def run_crawl(
                     # papers that get rejected immediately.
                     paper_content = get_paper_content(arxiv_id)
 
-                    deep_relevant, _reason, _, _, deep_tokens = _screen_paper_deep(
+                    deep_relevant, _reason, _, _, deep_tokens, why = _screen_paper_deep(
                         title=pd["title"],
                         abstract=pd["abstract"],
                         paper_content=paper_content or pd["abstract"],
@@ -2609,7 +2503,7 @@ def run_crawl(
                         return None
 
                     if pd.get("existing_paper_id"):
-                        return {"relevant": True, "paper_data": pd, "tokens": rel_tokens}
+                        return {"relevant": True, "paper_data": pd, "tokens": rel_tokens, "why": why}
 
                     figure_url, figure_caption = get_paper_figure(arxiv_id)
                     citation_count = get_citation_count(arxiv_id)
@@ -2617,7 +2511,6 @@ def run_crawl(
                         title=pd["title"],
                         abstract=pd["abstract"],
                         paper_content=paper_content,
-                        research_interest=_research_interest,
                     )
                     contributions, _, contrib_time, contrib_tokens = extract_main_contributions(
                         title=pd["title"],
@@ -2636,6 +2529,7 @@ def run_crawl(
                         "total_elapsed": sum_elapsed + contrib_time,
                         "contributions": contributions,
                         "tokens": rel_tokens + sum_tokens + contrib_tokens,
+                        "why": why,
                     }
                 finally:
                     _crawl_in_flight[_crawl_log_id] = max(0, _crawl_in_flight.get(_crawl_log_id, 1) - 1)
@@ -2692,7 +2586,8 @@ def run_crawl(
                     pd = result["paper_data"]
                     if pd.get("existing_paper_id"):
                         paper = Paper.query.get(pd["existing_paper_id"])
-                        db.session.add(ProjectPaper(project_id=project_id, paper_id=paper.id))
+                        db.session.add(ProjectPaper(project_id=project_id, paper_id=paper.id,
+                                                    relevance_reason=result["why"] or None))
                         newly_added_papers.append(paper)
                         papers_added += 1
                         crawl_log.papers_added = papers_added
@@ -2743,7 +2638,8 @@ def run_crawl(
 
                     link = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
                     if not link:
-                        link = ProjectPaper(project_id=project_id, paper_id=paper.id)
+                        link = ProjectPaper(project_id=project_id, paper_id=paper.id,
+                                            relevance_reason=result["why"] or None)
                         db.session.add(link)
                         newly_added_papers.append(paper)
                     db.session.commit()
@@ -2843,6 +2739,180 @@ def run_crawl(
 
     crawl_log.failed_keywords = failed_keywords  # transient attr, read by the nightly retry pass
     return crawl_log
+
+
+def generate_relevance_reason(title: str, abstract: str, research_interest: str) -> str:
+    """One sentence on why a paper matters for a research interest — for papers that reach a
+    project without being screened (copied/moved from another project). Screened papers get
+    theirs from the deep relevance check instead. "" if the LLM answer can't be parsed."""
+    prompt = prompts.RELEVANCE_REASON.format(
+        research_interest=research_interest, title=title, abstract=abstract or ""
+    )
+    result, _, _, _ = _llm_json([{"role": "user", "content": prompt}], temperature=0.3, max_tokens=4096)
+    if not isinstance(result, dict):
+        _log.warning("[relevance-reason] unparseable answer for %r: %r", title[:80], result)
+        return ""
+    return str(result.get("reason") or "").strip()
+
+
+def start_relevance_reason_async(project_id: int, paper_id: int, app=None) -> threading.Thread:
+    """Fill ProjectPaper.relevance_reason for one link in a background thread (fire-and-forget,
+    like retry-web-enrich): the card shows it after the next reload."""
+    if app is None:
+        from flask import current_app
+
+        app = current_app._get_current_object()
+
+    def _run():
+        with app.app_context():
+            project = db.session.get(Project, project_id)
+            pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper_id).first()
+            if not project or not pp or not (project.research_interest or "").strip():
+                return
+            try:
+                why = generate_relevance_reason(pp.paper.title, pp.paper.abstract, project.research_interest)
+            except Exception:
+                _log.exception("[relevance-reason] failed for paper %s in project %s", paper_id, project_id)
+                return
+            pp.relevance_reason = why or None
+            db.session.commit()
+            _log.info("[relevance-reason] stored for paper %s in project %s", paper_id, project_id)
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    return thread
+
+
+# Re-screen of New Papers, per project, in this (single) web process: project_id -> state dict.
+# Polled by the UI through /projects/<slug>/rescreen-status.
+_rescreen_tasks: dict[int, dict] = {}
+
+
+def rescreen_state(project_id: int) -> Optional[dict]:
+    return _rescreen_tasks.get(project_id)
+
+
+def start_rescreen_async(project_id: int, app=None) -> bool:
+    """Start run_rescreen in a daemon thread. False if one is already running for the project."""
+    state = _rescreen_tasks.get(project_id)
+    if state and state["status"] == "running":
+        return False
+    if app is None:
+        from flask import current_app
+
+        app = current_app._get_current_object()
+    _rescreen_tasks[project_id] = {
+        "status": "running", "total": 0, "checked": 0, "kept": 0, "trashed": 0, "skipped": 0,
+        "error": None,
+    }
+
+    def _run():
+        with app.app_context():
+            try:
+                run_rescreen(project_id)
+            except Exception as e:
+                _log.exception("[rescreen] project %s failed", project_id)
+                _rescreen_tasks[project_id].update(status="error", error=str(e))
+
+    threading.Thread(target=_run, daemon=True).start()
+    return True
+
+
+def run_rescreen(project_id: int) -> dict:
+    """Re-check every New Papers paper against the project's current research interest and My
+    Collection, with the same quick → deep screen a crawl uses. Papers that no longer pass go
+    to Trash (restorable); papers that pass get a fresh relevance_reason. Papers already judged
+    relevant under the current screening context (same hash) are skipped, and so is a paper
+    the user collected or trashed while the re-screen ran. A parse failure keeps the paper:
+    only a clear "not relevant" moves it to Trash."""
+    state = _rescreen_tasks.setdefault(project_id, {
+        "status": "running", "total": 0, "checked": 0, "kept": 0, "trashed": 0, "skipped": 0,
+        "error": None,
+    })
+    project = db.session.get(Project, project_id)
+    research_interest = project.research_interest or ""
+    links = ProjectPaper.query.filter_by(project_id=project_id).all()
+    collection = sorted(
+        [pp for pp in links if pp.manual_tag and not pp.trashed_at and pp.paper], key=_collection_tag_tier
+    )
+    ref_dicts = [
+        {"title": pp.paper.title, "abstract": (pp.paper.abstract or "")[:400]}
+        for pp in _select_reference_papers(collection, limit=REFERENCE_PAPERS_LIMIT)
+    ]
+    context_hash = compute_screening_hash(research_interest, collection)
+    already_relevant = {
+        sp.arxiv_id for sp in ScreenedPaper.query.filter_by(
+            project_id=project_id, screening_hash=context_hash, is_relevant=True
+        ).all()
+    }
+
+    todo = []
+    for pp in links:
+        if pp.manual_tag is not None or pp.trashed_at or not pp.paper:
+            continue
+        if base_arxiv_id(pp.paper.arxiv_id) in already_relevant:
+            state["skipped"] += 1
+            continue
+        todo.append({
+            "link_id": pp.id, "arxiv_id": pp.paper.arxiv_id, "is_arxiv": pp.paper.is_arxiv,
+            "title": pp.paper.title, "abstract": pp.paper.abstract or "",
+        })
+    state["total"] = len(todo)
+    _log.info("[rescreen] project %s: %d New Papers to screen, %d already screened against this context",
+              project.name, len(todo), state["skipped"])
+    started = time.time()
+
+    def _screen(item):
+        relevant, reason, _, _, _ = _screen_paper_quick(
+            item["title"], item["abstract"], research_interest, ref_dicts
+        )
+        if not relevant:
+            return item, reason, ""
+        content = get_paper_content(item["arxiv_id"]) if item["is_arxiv"] else None
+        _, reason, _, _, _, why = _screen_paper_deep(
+            item["title"], item["abstract"], content or item["abstract"], research_interest, ref_dicts
+        )
+        return item, reason, why
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(_screen, item) for item in todo]
+        try:
+            for future in as_completed(futures):
+                item, reason, why = future.result()
+                # Fresh read: the user may have collected/trashed it from the UI meanwhile
+                pp = db.session.get(ProjectPaper, item["link_id"], populate_existing=True)
+                untouched = pp is not None and pp.manual_tag is None and not pp.trashed_at
+                if untouched and reason == "not-relevant":
+                    pp.trashed_at = datetime.utcnow()
+                    state["trashed"] += 1
+                    verdict = "trashed"
+                elif untouched:
+                    if why:
+                        pp.relevance_reason = why
+                    state["kept"] += 1
+                    verdict = "kept" if reason == "relevant" else f"kept ({reason})"
+                else:
+                    verdict = "left alone (collected/trashed meanwhile)"
+                if reason in ("relevant", "not-relevant"):
+                    db.session.add(ScreenedPaper(
+                        project_id=project_id, arxiv_id=base_arxiv_id(item["arxiv_id"]),
+                        screening_hash=context_hash, is_relevant=(reason == "relevant"),
+                    ))
+                db.session.commit()
+                state["checked"] += 1
+                elapsed = time.time() - started
+                eta = elapsed / state["checked"] * (state["total"] - state["checked"])
+                _log.info("[rescreen] %d/%d %s: %s (%.0fs elapsed, ~%.0fs left)",
+                          state["checked"], state["total"], verdict, item["title"][:80], elapsed, eta)
+        except BaseException:
+            for f in futures:
+                f.cancel()
+            raise
+
+    state["status"] = "done"
+    _log.info("[rescreen] project %s done: %d screened, %d kept, %d moved to Trash, %d skipped",
+              project.name, state["checked"], state["kept"], state["trashed"], state["skipped"])
+    return state
 
 
 def start_crawl_async(
