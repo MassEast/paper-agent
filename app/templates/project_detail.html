@@ -93,7 +93,7 @@
         <button
             onclick="document.getElementById('onboarding-project').style.display='none';localStorage.setItem('ob-proj-{{ project.slug }}','1');"
             style="background:none;border:none;cursor:pointer;color:var(--ink-4);padding:0;flex-shrink:0;line-height:1;"
-            title="Dismiss">✕</button>
+            aria-label="Dismiss" data-tip="Dismiss">✕</button>
     </div>
     <script>(function () { if (localStorage.getItem('ob-proj-{{ project.slug }}')) document.getElementById('onboarding-project').style.display = 'none'; })();</script>
     {% endif %}
@@ -114,7 +114,7 @@
                             How it works</button>
                         <button class="focus-ring" type="button" id="generate-btn"
                             style="font-size: 0.75rem; color: var(--accent); height: var(--button-height); padding: 0 12px; border-radius: var(--radius-md); background-color: color-mix(in oklch, var(--accent) 12%, var(--paper-2)); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent); cursor: pointer; width: fit-content; display: inline-flex; align-items: center; gap: 6px; transition: background-color 150ms ease, color 150ms ease;"
-                            title="Let AI generate or improve the research interest from My Collection papers"
+                            data-tip="Let AI generate or improve the research interest from My Collection papers"
                             onmouseover="if(!this.disabled) { this.style.backgroundColor='color-mix(in oklch, var(--accent) 22%, var(--paper-2))'; }"
                             onmouseout="if(!this.disabled) { this.style.backgroundColor='color-mix(in oklch, var(--accent) 12%, var(--paper-2))'; }"
                             onclick="generateResearchInterest()">
@@ -374,7 +374,7 @@
                         All Papers ({{ new_papers|length + curated_papers|length }})
                     </h2>
                     <div class="flex items-center gap-2" style="flex-shrink: 0;">
-                        <a href="/project/{{ project.slug }}/export.csv" download title="Download papers as CSV"
+                        <a href="/project/{{ project.slug }}/export.csv" download data-tip="Download papers as CSV"
                             class="focus-ring"
                             style="height: var(--input-height); padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 600; color: var(--ink-2); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); text-decoration: none; white-space: nowrap;">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1322,7 +1322,7 @@
 
                             let dot = '';
                             if (hasPapers) dot += '<span style="position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; background-color: var(--accent); border-radius: 9999px;"></span>';
-                            if (hasEpoch) dot += '<span title="Screening context changed (v' + (epochIdx + 1) + ')" style="position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 6px solid var(--warning, #f59e0b);"></span>';
+                            if (hasEpoch) dot += '<span data-tip="Screening context changed (v' + (epochIdx + 1) + ')" style="position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 6px solid var(--warning, #f59e0b);"></span>';
 
                             html += '<div style="' + style + '" onclick="showCrawlDetails(\'' + dateStr + '\')">' + day + dot + '</div>';
                         }

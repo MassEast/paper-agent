@@ -276,7 +276,7 @@ def test_new_papers_card_has_its_actions_together_in_the_bottom_row(app, logged_
         db.session.commit()
     html = logged_in.get("/projects/pa-source/papers").get_data(as_text=True)
     new_card = html[html.index('id="paper-card-2601-00001'):html.index('id="paper-card-2601-00002')]
-    order = [new_card.index(s) for s in ("Move to My Collection", "Copy / Move", "Notify", 'title="Trash"')]
+    order = [new_card.index(s) for s in ("Move to My Collection", "Copy / Move", "Notify", '/trash"')]
     assert order == sorted(order)
     assert 'style="color: var(--warning);"' in new_card  # yellow star
     assert "Why it's relevant for this project" in new_card and "It uses sparse attention." in new_card

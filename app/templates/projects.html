@@ -10,16 +10,16 @@
         <button type="button" id="svc-test-btn"
             style="font-size:0.72rem;color:var(--accent-ink);background:var(--accent);border:none;cursor:pointer;padding:2px 10px;border-radius:var(--radius-md);font-weight:600;line-height:1.6;"
             onclick="runServiceCheck()">Test</button>
-        <span id="svc-llm" title="LLM ({{ llm_model }})" style="display:inline-flex;align-items:center;gap:4px;">
+        <span id="svc-llm" data-tip="LLM ({{ llm_model }})" style="display:inline-flex;align-items:center;gap:4px;">
             <span style="width:8px;height:8px;border-radius:50%;background:var(--ink-4);display:inline-block;" id="dot-llm"></span>{{ llm_model }}
         </span>
-        <span id="svc-arxiv" title="arXiv search" style="display:inline-flex;align-items:center;gap:4px;">
+        <span id="svc-arxiv" data-tip="arXiv search" style="display:inline-flex;align-items:center;gap:4px;">
             <span style="width:8px;height:8px;border-radius:50%;background:var(--ink-4);display:inline-block;" id="dot-arxiv"></span>arXiv
         </span>
-        <span id="svc-scholar" title="Semantic Scholar recommendations" style="display:inline-flex;align-items:center;gap:4px;">
+        <span id="svc-scholar" data-tip="Semantic Scholar recommendations" style="display:inline-flex;align-items:center;gap:4px;">
             <span style="width:8px;height:8px;border-radius:50%;background:var(--ink-4);display:inline-block;" id="dot-scholar"></span>Semantic Scholar
         </span>
-        <span id="svc-fig" title="arXiv figure fetch" style="display:inline-flex;align-items:center;gap:4px;">
+        <span id="svc-fig" data-tip="arXiv figure fetch" style="display:inline-flex;align-items:center;gap:4px;">
             <span style="width:8px;height:8px;border-radius:50%;background:var(--ink-4);display:inline-block;" id="dot-fig"></span>Figures
         </span>
         <span style="flex:1;"></span>
@@ -110,7 +110,7 @@
         </div>
         <button onclick="document.getElementById('onboarding-projects').style.display='none';localStorage.setItem('ob-projects','1');"
                 style="background:none;border:none;cursor:pointer;color:var(--ink-4);padding:0;flex-shrink:0;line-height:1;"
-                title="Dismiss">✕</button>
+                aria-label="Dismiss" data-tip="Dismiss">✕</button>
     </div>
     <script>(function(){if(localStorage.getItem('ob-projects'))document.getElementById('onboarding-projects').style.display='none';})();</script>
 
@@ -149,7 +149,7 @@
                                 <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">Last crawl</div>
                                 <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">{{ project.crawl_logs[0].started_at.strftime('%b %d') if project.crawl_logs else 'Never' }}</div>
                             </div>
-                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" title="{% if project.crawl_hour %}Nightly crawl on — {{ '%02d:00'|format(project.crawl_hour) }} UTC{% else %}Nightly crawl off{% endif %}">
+                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" data-tip="{% if project.crawl_hour %}Nightly crawl on — {{ '%02d:00'|format(project.crawl_hour) }} UTC{% else %}Nightly crawl off{% endif %}">
                                 <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">Nightly</div>
                                 <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">
                                     <span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle;background-color:{% if project.crawl_hour %}var(--success, #16a34a){% else %}var(--error){% endif %};{% if not project.crawl_hour %}opacity:0.7;{% endif %}"></span>{% if project.crawl_hour %}On{% else %}Off{% endif %}
@@ -158,7 +158,7 @@
                             {% set ns = namespace(total_tokens=0, total_cost=0.0) %}
                             {% for log in project.crawl_logs %}{% if log.total_tokens %}{% set ns.total_tokens = ns.total_tokens + log.total_tokens %}{% set ns.total_cost = ns.total_cost + log.estimated_cost %}{% endif %}{% endfor %}
                             {% if ns.total_tokens > 0 %}
-                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" title="Total LLM tokens used across all crawls (estimated Sonnet 4.6 pricing)">
+                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" data-tip="Total LLM tokens used across all crawls (estimated Sonnet 4.6 pricing)">
                                 <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">LLM usage</div>
                                 <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">~${{ "%.2f"|format(ns.total_cost) }} <span style="font-weight: 400; font-size: 0.75rem; color: var(--ink-4);">{% if ns.total_tokens >= 1000000000 %}{{ (ns.total_tokens / 1000000000)|round(2) }}B{% elif ns.total_tokens >= 1000000 %}{{ (ns.total_tokens / 1000000)|round(2) }}M{% else %}{{ (ns.total_tokens / 1000)|round(1) }}k{% endif %} tok</span></div>
                             </div>
@@ -173,7 +173,7 @@
                 style="position: absolute; bottom: 10px; right: 14px; opacity: 0; transition: opacity 150ms;"
                 onsubmit="return confirm('Move \'{{ project.name }}\' to trash?');"
                 onclick="event.stopPropagation();">
-                <button type="submit" title="Move to trash"
+                <button type="submit" data-tip="Move to trash"
                     style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: none; border: none; cursor: pointer; color: var(--ink-4); border-radius: var(--radius-md);"
                     onmouseover="this.style.color='var(--error)'"
                     onmouseout="this.style.color='var(--ink-4)'">

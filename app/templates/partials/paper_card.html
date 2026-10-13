@@ -18,7 +18,7 @@
                 {% if n <= 4 %}
                     <span>{{ authors|join(', ') }}</span>
                 {% else %}
-                    <span>{{ authors[:3]|join(', ') }} <span style="color:var(--ink-4);" title="{{ authors[3:-1]|join(', ') }}">… (+{{ n - 4 }}) …</span> {{ authors[-1] }}</span>
+                    <span>{{ authors[:3]|join(', ') }} <span style="color:var(--ink-4);" data-tip="{{ authors[3:-1]|join(', ') }}">… (+{{ n - 4 }}) …</span> {{ authors[-1] }}</span>
                 {% endif %}
                 {% if pp.paper.published_date %}<span>·</span><span>{{ pp.paper.published_date.strftime('%b %Y') }}</span>{% elif pp.paper.year %}<span>·</span><span>{{ pp.paper.year }}</span>{% endif %}
                 {% if pp.paper.is_arxiv or pp.paper.citation_fetched_at is not none %}
@@ -27,7 +27,7 @@
                 <span id="cit-disp-{{ _cid }}-{{ project.id }}" data-arxiv-id="{{ pp.paper.arxiv_id }}"
                       style="display:inline-flex;align-items:center;gap:3px;">
                     <span class="cit-text">{% if pp.paper.citation_fetched_at is not none %}{{ pp.paper.citation_count }} citation{{ 's' if pp.paper.citation_count != 1 else '' }} (as of {{ pp.paper.citation_fetched_at.strftime('%b %Y') }}){% else %}? citations{% endif %}</span>
-                    <button title="Edit citation count"
+                    <button aria-label="Edit citation count" data-tip="Edit citation count"
                             onclick="openCitEdit('{{ _cid }}',{{ project.id }},{{ pp.paper.citation_count or 0 }})"
                             style="background:none;border:none;padding:0 0 0 2px;cursor:pointer;color:var(--ink-4);opacity:0.5;display:inline-flex;align-items:center;"
                             onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">
@@ -47,7 +47,7 @@
                 {% if pp.paper.page_count %}<span>·</span><span>{{ pp.paper.page_count }} pages</span>{% endif %}
                 {% set insts = pp.paper.institutions_list %}
                 {% if insts %}
-                <span>·</span><span style="color:var(--ink-4);" title="{{ insts|join(', ') }}">{{ insts[:2]|join(', ') }}{% if insts|length > 2 %} +{{ insts|length - 2 }}{% endif %}</span>
+                <span>·</span><span style="color:var(--ink-4);" data-tip="{{ insts|join(', ') }}">{{ insts[:2]|join(', ') }}{% if insts|length > 2 %} +{{ insts|length - 2 }}{% endif %}</span>
                 {% endif %}
             </div>
         </div>
@@ -105,7 +105,7 @@
             </button>
             <button
                 style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; color: var(--ink-3); background-color: var(--paper-3); border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; gap: 6px; outline: none;"
-                title="Remove from My Collection and move back to New Papers"
+                data-tip="Remove from My Collection and move back to New Papers"
                 hx-post="/paper/{{ pp.paper.arxiv_id }}/tag" hx-vals='{"project_id": {{ project.id }}, "tag": ""}'
                 hx-target="#paper-list" hx-swap="innerHTML show:false">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -215,11 +215,11 @@
         <a href="https://arxiv.org/abs/{{ pp.paper.arxiv_id }}" target="_blank" style="color: var(--ink-3);">arXiv</a>
         <a href="https://arxiv.org/pdf/{{ pp.paper.arxiv_id }}.pdf" target="_blank" style="color: var(--ink-3);">PDF</a>
         {% elif pp.paper.pdf_url %}
-        <a href="{{ pp.paper.pdf_url }}" target="_blank" style="color: var(--ink-3);" title="{{ pp.paper.pdf_url }}">Source ↗</a>
+        <a href="{{ pp.paper.pdf_url }}" target="_blank" style="color: var(--ink-3);" data-tip="{{ pp.paper.pdf_url }}">Source ↗</a>
         {% endif %}
         {% if pp.paper.figure_url %}
         <span style="color: var(--accent); display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer;"
-              title="Click to view figure"
+              data-tip="Click to view figure"
               data-figure-url="{{ pp.paper.figure_url }}"
               data-figure-caption="{{ pp.paper.figure_caption or '' }}"
               onclick="openFigureLightbox(this.dataset.figureUrl, this.dataset.figureCaption || null)">
@@ -231,7 +231,7 @@
         {% endif %}
         {% if pp.added_at or pp.collected_at %}
         <span class="text-xs" style="color: var(--ink-4); display: inline-flex; align-items: center; gap: 6px;"
-            title="{% if pp.added_at %}Added to New Papers {{ pp.added_at.strftime('%b %-d, %Y') }}{% endif %}{% if pp.collected_at %}{% if pp.added_at %} | {% endif %}Added to My Collection {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}">
+            data-tip="{% if pp.added_at %}Added to New Papers {{ pp.added_at.strftime('%b %-d, %Y') }}{% endif %}{% if pp.collected_at %}{% if pp.added_at %} | {% endif %}Added to My Collection {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <use href="/static/icons.svg#icon-calendar"></use>
             </svg>
@@ -240,7 +240,7 @@
         {% endif %}
         {% if pp.paper.summary and pp.paper.summary.elapsed_ms is not none %}
         <span class="text-xs" style="color: var(--ink-4); display: inline-flex; align-items: center; gap: 6px;"
-            title="Model used | Processing time | Tokens used">
+            data-tip="Model used | Processing time | Tokens used">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <use href="/static/icons.svg#icon-cpu"></use>
             </svg>
@@ -263,7 +263,7 @@
         </button>
         {% elif not pp.paper.is_arxiv and pp.paper.web_enrich_attempts and pp.paper.web_enrich_attempts >= max_web_enrich_attempts and (not pp.paper.page_count or not pp.paper.institutions_list) %}
         <span style="color: var(--error); font-size: 0.75rem;"
-            title="Page count / institutions could not be fetched from this paper's PDF after {{ pp.paper.web_enrich_attempts }} attempt{{ 's' if pp.paper.web_enrich_attempts != 1 else '' }}{% if pp.paper.web_enrich_last_attempt_at %} (last tried {{ pp.paper.web_enrich_last_attempt_at.strftime('%b %-d, %Y') }}){% endif %} — either the domain isn't on the open-access allowlist, or the fetch failed (403, dead link, etc).">
+            data-tip="Page count / institutions could not be fetched from this paper's PDF after {{ pp.paper.web_enrich_attempts }} attempt{{ 's' if pp.paper.web_enrich_attempts != 1 else '' }}{% if pp.paper.web_enrich_last_attempt_at %} (last tried {{ pp.paper.web_enrich_last_attempt_at.strftime('%b %-d, %Y') }}){% endif %} — either the domain isn't on the open-access allowlist, or the fetch failed (403, dead link, etc).">
             PDF metadata failed ({{ pp.paper.web_enrich_attempts }}/{{ max_web_enrich_attempts }} attempts)
         </span>
         <button
@@ -290,7 +290,7 @@
                 });
             })(this)"
             style="background: none; border: none; padding: 0; cursor: pointer; color: var(--accent); font-size: 0.75rem; text-decoration: underline;"
-            title="Reset attempt counter and retry PDF metadata fetch in the background — reload the page in a moment to see the result">
+            data-tip="Reset attempt counter and retry PDF metadata fetch in the background — reload the page in a moment to see the result">
             Retry
         </button>
         {% endif %}
@@ -310,7 +310,7 @@
         {% if not show_restore %}
         <button class="focus-ring"
             style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3); display: inline-flex; align-items: center; gap: 6px;"
-            title="Copy or move this paper into the My Collection of another project"
+            data-tip="Copy or move this paper into the My Collection of another project"
             hx-get="/paper/{{ pp.paper.arxiv_id }}/transfer-menu?project_id={{ project.id }}"
             hx-target="#transfer-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
             hx-swap="innerHTML">
@@ -323,7 +323,7 @@
         {% if not show_restore %}
         <button class="focus-ring notify-btn"
             style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); background-color: var(--accent); color: var(--accent-ink); border: none; display: inline-flex; align-items: center; gap: 6px;"
-            title="Send email notification to {{ project.notification_emails or 'configured addresses' }}"
+            data-tip="Send email notification to {{ project.notification_emails or 'configured addresses' }}"
             data-emails="{{ project.notification_emails or '' }}"
             onclick="(function(btn){
                 var svg='<svg width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\'><use href=\'/static/icons.svg#icon-send\'/></svg>';
@@ -361,7 +361,6 @@
         {% endif %}
         <button
             style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); background-color: var(--error-bg); color: var(--error); border: 1px solid color-mix(in oklch, var(--error) 50%, transparent); display: inline-flex; align-items: center; gap: 6px; outline: none;"
-            title="Trash"
             hx-post="/paper/{{ pp.paper.arxiv_id }}/trash" hx-vals='{"project_id": {{ project.id }}}'
             hx-target="#paper-list" hx-swap="innerHTML show:false">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">

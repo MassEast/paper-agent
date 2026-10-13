@@ -22,11 +22,12 @@
         <button type="button" class="focus-ring"
             style="height: 26px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; border: 1px solid var(--border-default); background-color: var(--paper-2); color: var(--ink-2);"
             hx-post="/paper/{{ paper.arxiv_id }}/transfer"
+            data-tip="Add to the My Collection of {{ other.name }}; it also stays here"
             hx-vals='{"project_id": {{ project.id }}, "target_project_id": {{ other.id }}, "mode": "copy"}'
             hx-target="#transfer-{{ _cid }}" hx-swap="innerHTML">Copy</button>
         <button type="button" class="focus-ring"
             style="height: 26px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; border: 1px solid var(--border-default); background-color: var(--paper-2); color: var(--ink-2);"
-            title="Add to the My Collection of {{ other.name }} and put it in this project's Trash (so crawls here won't add it again)"
+            data-tip="Add to the My Collection of {{ other.name }} and put it in this project's Trash (so crawls here won't add it again)"
             hx-post="/paper/{{ paper.arxiv_id }}/transfer"
             hx-vals='{"project_id": {{ project.id }}, "target_project_id": {{ other.id }}, "mode": "move"}'
             hx-target="#paper-list" hx-swap="innerHTML show:false">Move</button>

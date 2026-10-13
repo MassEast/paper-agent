@@ -65,11 +65,11 @@
                 {% if 'to_read' in pp.tags_list %}{% set ns2.n_read = ns2.n_read + 1 %}{% endif %}
                 {% if 'to_discuss' in pp.tags_list %}{% set ns2.n_discuss = ns2.n_discuss + 1 %}{% endif %}
             {% endfor %}
-            <button type="button" id="tagpill-curated-list-important" onclick="toggleTagFilter('curated-list','important')" title="Click to filter My Collection to this tag"
+            <button type="button" id="tagpill-curated-list-important" onclick="toggleTagFilter('curated-list','important')" data-tip="Click to filter My Collection to this tag"
                 style="font-size: 0.75rem; background-color: var(--tag-important-bg); color: var(--tag-important-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_important }} important</button>
-            <button type="button" id="tagpill-curated-list-to_read" onclick="toggleTagFilter('curated-list','to_read')" title="Click to filter My Collection to this tag"
+            <button type="button" id="tagpill-curated-list-to_read" onclick="toggleTagFilter('curated-list','to_read')" data-tip="Click to filter My Collection to this tag"
                 style="font-size: 0.75rem; background-color: var(--tag-related-bg); color: var(--tag-related-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_read }} to read</button>
-            <button type="button" id="tagpill-curated-list-to_discuss" onclick="toggleTagFilter('curated-list','to_discuss')" title="Click to filter My Collection to this tag"
+            <button type="button" id="tagpill-curated-list-to_discuss" onclick="toggleTagFilter('curated-list','to_discuss')" data-tip="Click to filter My Collection to this tag"
                 style="font-size: 0.75rem; background-color: var(--tag-discuss-bg); color: var(--tag-discuss-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_discuss }} to discuss</button>
             <span style="font-size: 0.7rem; color: var(--ink-4); font-weight: 400;">(click to filter)</span>
             <span style="margin-left: auto; display: inline-flex; gap: 4px; align-items: center;">
@@ -77,7 +77,7 @@
                     <button id="col-sort-added" onclick="sortPaperList('curated-list','added')" style="padding: 2px 8px; background-color: var(--accent); color: #fff; border: none; cursor: pointer;">Date added</button>
                     <button id="col-sort-pub" onclick="sortPaperList('curated-list','pub')" style="padding: 2px 8px; background-color: transparent; color: var(--ink-3); border: none; cursor: pointer;">Release date</button>
                 </span>
-                <button id="col-sort-group" onclick="toggleGroupBy('curated-list')" title="Group by tag: to read → to discuss → important" style="padding: 2px 8px; font-size: 0.7rem; font-weight: 500; background-color: transparent; color: var(--ink-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); cursor: pointer;">Group by tag</button>
+                <button id="col-sort-group" onclick="toggleGroupBy('curated-list')" data-tip="Group by tag: to read → to discuss → important" style="padding: 2px 8px; font-size: 0.7rem; font-weight: 500; background-color: transparent; color: var(--ink-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); cursor: pointer;">Group by tag</button>
             </span>
         </h3>
         {% if curated_papers %}

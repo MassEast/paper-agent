@@ -98,3 +98,13 @@ def test_readme_prompt_links_point_at_the_prompts():
     for name, start, end in links:
         assert lines[int(start) - 1].startswith(f'{name} = """'), f"README link for {name} starts at the wrong line"
         assert lines[int(end) - 1].rstrip().endswith('"""'), f"README link for {name} ends at the wrong line"
+
+
+def test_templates_use_app_tooltips_not_native_title():
+    """Hover hints use data-tip (fast, app-styled tooltip in base.html), never the native title attribute."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "app" / "templates"
+    offenders = [f"{p.name}:{i}" for p in root.rglob("*.html")
+                 for i, line in enumerate(p.read_text().split("\n"), 1) if re.search(r'\stitle="', line)]
+    assert not offenders, f"use data-tip instead of title= in {offenders}"
