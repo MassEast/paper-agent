@@ -1,0 +1,16 @@
+{# One page of a section's list, plus the sentinel that loads the next page when it scrolls into view.
+   Expects: project, section ('new'|'col'|'trash'), papers (the whole sorted list), offset, page_size. #}
+{% for pp in papers[offset:offset + page_size] %}
+{% if section == 'trash' %}
+{% include "partials/trash_row.html" %}
+{% else %}
+{% with show_curate=(section == 'new') %}
+{% include "partials/paper_card.html" %}
+{% endwith %}
+{% endif %}
+{% endfor %}
+{% if papers|length > offset + page_size %}
+<div class="list-more" hx-get="/projects/{{ project.slug }}/papers/more?section={{ section }}&offset={{ offset + page_size }}"
+    hx-trigger="intersect once" hx-swap="outerHTML"
+    style="text-align: center; padding: 10px 0; font-size: 0.75rem; color: var(--ink-4);">Loading more… ({{ papers|length - offset - page_size }} left)</div>
+{% endif %}

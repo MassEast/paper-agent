@@ -49,3 +49,12 @@ def test_export_links_each_paper_like_its_card(client, export_project):
         "New Style": "https://arxiv.org/abs/2601.00042",
         "Web Paper": "https://aclanthology.org/x.pdf",
     }
+
+
+def test_html_responses_are_compressed(client, export_project):
+    """Project pages are several MB raw; phones must get them compressed."""
+    with client.session_transaction() as sess:
+        sess["logged_in"] = True
+    resp = client.get("/projects/ex-proj", headers={"Accept-Encoding": "gzip"})
+    assert resp.status_code == 200
+    assert resp.headers.get("Content-Encoding") == "gzip"

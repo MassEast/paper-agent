@@ -1,0 +1,36 @@
+{# New Papers section. Expects: project, s (paper_lists.sections), state, page_size; oob for an out-of-band swap. #}
+{% if s.new %}
+<div id="new-section" {% if oob %}hx-swap-oob="true"{% endif %}>
+    <div
+        style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">
+        <h3
+            style="font-size: 1rem; font-weight: 600; color: var(--ink-2); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span style="display: inline-flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-inbox"></use>
+                </svg>
+                New Papers <span id="new-count">({{ s.new|length }})</span>
+            </span>
+            {% if project.research_interest %}
+            <button type="button" class="focus-ring rw-chip-btn" id="rescreen-btn"
+                data-tip="Re-check every paper in New Papers against the saved research interest and My Collection, with the same two-step screen a crawl uses. Papers that no longer fit go to Trash (you can restore them)."
+                hx-post="/projects/{{ project.slug }}/rescreen" hx-target="#rescreen-status" hx-swap="outerHTML"
+                hx-confirm="Re-screen all New Papers against the saved research interest? Papers that no longer fit move to Trash (you can restore them). Papers already screened against this exact interest and collection are skipped."
+                style="font-size: 0.7rem; font-weight: 500; padding: 2px 8px; border-radius: var(--radius-md); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-rotate-ccw"></use></svg>
+                Re-screen
+            </button>
+            {% endif %}
+            <span style="margin-left: auto;">
+                {% with sec='new', by=state.new_by, dir=state.new_dir %}{% include "partials/_sort_buttons.html" %}{% endwith %}
+            </span>
+        </h3>
+        <div id="new-papers-list" class="space-y-3" style="max-height: 52vh; overflow-y: auto; padding-right: 4px;">
+            {% with section='new', papers=s.new, offset=0 %}{% include "partials/paper_page.html" %}{% endwith %}
+        </div>
+    </div>
+    <div style="height: 5px; border-radius: 9999px; background: var(--accent); opacity: 0.5; margin: 28px 0 4px;"></div>
+</div>
+{% else %}
+<div id="new-section" {% if oob %}hx-swap-oob="true"{% endif %}></div>
+{% endif %}

@@ -1,0 +1,8 @@
+{# Date added / Release date toggle for one list. Expects: sec ('new'|'col'), by, dir. #}
+{% set _arrow = ' ↑' if dir == 'asc' else ' ↓' %}
+<span style="display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; font-size: 0.7rem; font-weight: 500;">
+    {% for key, label in [('added', 'Date added'), ('pub', 'Release date')] %}
+    <button type="button" id="{{ sec }}-sort-{{ key }}" onclick="sortPaperList('{{ sec }}','{{ key }}')"
+        style="padding: 2px 8px; border: none; cursor: pointer; {% if by == key %}background-color: var(--accent); color: #fff;{% else %}background-color: transparent; color: var(--ink-3);{% endif %}">{{ label }}{% if by == key %}{{ _arrow }}{% endif %}</button>
+    {% endfor %}
+</span>

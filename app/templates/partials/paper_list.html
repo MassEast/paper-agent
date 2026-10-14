@@ -1,271 +1,63 @@
-<div class="space-y-6">
-    {% if new_papers %}
-    <div
-        style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">
-        <h3
-            style="font-size: 1rem; font-weight: 600; color: var(--ink-2); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span style="display: inline-flex; align-items: center; gap: 8px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <use href="/static/icons.svg#icon-inbox"></use>
-                </svg>
-                New Papers ({{ new_papers|length }})
-            </span>
-            {% if project.research_interest %}
-            <button type="button" class="focus-ring rw-chip-btn" id="rescreen-btn"
-                data-tip="Re-check every paper in New Papers against the saved research interest and My Collection, with the same two-step screen a crawl uses. Papers that no longer fit go to Trash (you can restore them)."
-                hx-post="/projects/{{ project.slug }}/rescreen" hx-target="#rescreen-status" hx-swap="outerHTML"
-                hx-confirm="Re-screen all {{ new_papers|length }} New Papers against the saved research interest? Papers that no longer fit move to Trash (you can restore them). Papers already screened against this exact interest and collection are skipped."
-                style="font-size: 0.7rem; font-weight: 500; padding: 2px 8px; border-radius: var(--radius-md); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-rotate-ccw"></use></svg>
-                Re-screen
-            </button>
-            {% endif %}
-            <span style="margin-left: auto; display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; font-size: 0.7rem; font-weight: 500;">
-                <button id="new-sort-added" onclick="sortPaperList('new-papers-list','added')" style="padding: 2px 8px; background-color: var(--accent); color: #fff; border: none; cursor: pointer;">Date added</button>
-                <button id="new-sort-pub" onclick="sortPaperList('new-papers-list','pub')" style="padding: 2px 8px; background-color: transparent; color: var(--ink-3); border: none; cursor: pointer;">Release date</button>
-            </span>
-        </h3>
-        <div id="new-papers-list" class="space-y-3" style="max-height: 52vh; overflow-y: auto; padding-right: 4px;">
-            {% for pp in new_papers %}
-            {% with project=project, show_curate=True %}
-            {% include "partials/paper_card.html" %}
-            {% endwith %}
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-    {% if new_papers %}
-    <div style="height: 5px; border-radius: 9999px; background: var(--accent); opacity: 0.5; margin: 4px 0;"></div>
-    {% endif %}
-
-    <div
-        style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">
-        <h3
-            style="font-size: 1rem; font-weight: 600; color: var(--ink-2); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span style="display: inline-flex; align-items: center; gap: 8px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <use href="/static/icons.svg#icon-star"></use>
-                </svg>
-                My Collection ({{ curated_papers|length }})
-                <span style="position: relative; display: inline-flex; align-items: center; color: var(--ink-4); cursor: help; flex-shrink: 0;"
-                    onmouseenter="this.querySelector('.col-tip').style.display='block'"
-                    onmouseleave="this.querySelector('.col-tip').style.display='none'">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <use href="/static/icons.svg#icon-info"></use>
-                    </svg>
-                    <div class="col-tip" style="display: none; position: absolute; left: 0; top: 100%; z-index: 50; width: 280px; background-color: var(--paper-1); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 10px 12px; font-size: 0.75rem; font-weight: 400; color: var(--ink-2); line-height: 1.5; margin-top: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-                        Citation counts for papers in My Collection are refreshed automatically every month during the nightly crawl. Works for arXiv papers and non-arXiv papers that have a Semantic Scholar ID.
-                    </div>
-                </span>
-            </span>
-            {% set ns2 = namespace(n_important=0, n_read=0, n_discuss=0) %}
-            {% for pp in curated_papers %}
-                {% if 'important' in pp.tags_list %}{% set ns2.n_important = ns2.n_important + 1 %}{% endif %}
-                {% if 'to_read' in pp.tags_list %}{% set ns2.n_read = ns2.n_read + 1 %}{% endif %}
-                {% if 'to_discuss' in pp.tags_list %}{% set ns2.n_discuss = ns2.n_discuss + 1 %}{% endif %}
-            {% endfor %}
-            <button type="button" id="tagpill-curated-list-important" onclick="toggleTagFilter('curated-list','important')"
-                style="font-size: 0.75rem; background-color: var(--tag-important-bg); color: var(--tag-important-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_important }} important</button>
-            <button type="button" id="tagpill-curated-list-to_read" onclick="toggleTagFilter('curated-list','to_read')"
-                style="font-size: 0.75rem; background-color: var(--tag-related-bg); color: var(--tag-related-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_read }} to read</button>
-            <button type="button" id="tagpill-curated-list-to_discuss" onclick="toggleTagFilter('curated-list','to_discuss')"
-                style="font-size: 0.75rem; background-color: var(--tag-discuss-bg); color: var(--tag-discuss-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;">{{ ns2.n_discuss }} to discuss</button>
-            <span style="font-size: 0.7rem; color: var(--ink-4); font-weight: 400;">(click to filter)</span>
-            <span style="margin-left: auto; display: inline-flex; gap: 4px; align-items: center;">
-                <span style="display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; font-size: 0.7rem; font-weight: 500;">
-                    <button id="col-sort-added" onclick="sortPaperList('curated-list','added')" style="padding: 2px 8px; background-color: var(--accent); color: #fff; border: none; cursor: pointer;">Date added</button>
-                    <button id="col-sort-pub" onclick="sortPaperList('curated-list','pub')" style="padding: 2px 8px; background-color: transparent; color: var(--ink-3); border: none; cursor: pointer;">Release date</button>
-                </span>
-                <button id="col-sort-group" onclick="toggleGroupBy('curated-list')" data-tip="Group by tag: to read → to discuss → important" style="padding: 2px 8px; font-size: 0.7rem; font-weight: 500; background-color: transparent; color: var(--ink-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); cursor: pointer;">Group by tag</button>
-            </span>
-        </h3>
-        {% if curated_papers %}
-        <div id="curated-list-filter-empty" class="hidden" style="text-align: center; padding: 16px 0; color: var(--ink-4); font-size: 0.875rem;">
-            No papers match the selected tag filter(s).
-            <button type="button" onclick="clearTagFilter('curated-list')" style="background: none; border: none; color: var(--accent); cursor: pointer; text-decoration: underline; font-size: 0.875rem;">Clear filter</button>
-        </div>
-        <div id="curated-list" class="space-y-3" style="max-height: 70vh; overflow-y: auto; padding-right: 4px;">
-            {% for pp in curated_papers %}
-            {% with project=project %}
-            {% include "partials/paper_card.html" %}
-            {% endwith %}
-            {% endfor %}
-        </div>
-        {% else %}
-        <div class="text-center py-8" style="color: var(--ink-4);">
-            <p>No curated papers yet</p>
-            <p class="text-xs mt-1">Move papers here from "New Papers" above</p>
-        </div>
-        {% endif %}
-    </div>
-
-    <div
-        style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid color-mix(in oklch, var(--error) 30%, transparent); padding: var(--space-md);">
-        <h3 style="font-size: 1rem; font-weight: 600; color: var(--error); margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer;"
-            onclick="document.getElementById('trash-list-{{ project.id }}').classList.toggle('hidden')">
-            <span style="display: inline-flex; align-items: center; gap: 8px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <use href="/static/icons.svg#icon-trash-2"></use>
-                </svg>
-                Trash ({{ trashed_papers|length }})
-            </span>
-            <span style="font-size: 0.75rem; color: var(--ink-4);">Click to expand</span>
-        </h3>
-        <div id="trash-list-{{ project.id }}" class="hidden">
-            <p style="font-size: 0.75rem; color: var(--ink-3); margin-bottom: 10px;">Papers stay in Trash on purpose: a crawl never adds a paper that is already in this project, so
-                keeping them here is what stops the same papers from coming back as New Papers. That's why there is no "Empty trash".</p>
-            {% if trashed_papers %}
-            <div class="space-y-2">
-                {% for pp in trashed_papers %}
-                <div
-                    style="display: flex; align-items: center; justify-content: space-between; background-color: var(--paper-3); border-radius: var(--radius-md); padding: 12px 16px; opacity: 0.7;">
-                    <div class="flex-1 min-w-0">
-                        <span style="font-size: 0.875rem; color: var(--ink-3);" class="line-clamp-1">{{ pp.paper.title
-                            }}</span>
-                        <span style="font-size: 0.75rem; color: var(--ink-4); margin-left: 8px;">Trashed {{
-                            pp.trashed_at | berlin_time if pp.trashed_at else '' }}</span>
-                    </div>
-                    <button type="button" class="focus-ring"
-                        style="margin-left: 12px; height: 32px; padding: 0 12px; font-size: 0.75rem; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md);"
-                        hx-post="/paper/{{ pp.paper.arxiv_id }}/restore" hx-vals='{"project_id": {{ project.id }}}'
-                        hx-target="#paper-list" hx-swap="innerHTML">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                            <use href="/static/icons.svg#icon-rotate-ccw"></use>
-                        </svg>
-                        Restore
-                    </button>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="text-center" style="color: var(--ink-4); font-size: 0.875rem; padding: 16px 0;">Trash is empty</p>
-            {% endif %}
-        </div>
-    </div>
+{# The project page's three paper sections. Sorting and tag filtering happen on the server (app/paper_lists.py);
+   each list shows page_size cards and loads more as you scroll. Expects: project, s, state, page_size. #}
+<div class="space-y-6" data-slug="{{ project.slug }}">
+    {% with oob=False %}
+    {% include "partials/section_new.html" %}
+    {% include "partials/section_col.html" %}
+    {% include "partials/section_trash.html" %}
+    {% endwith %}
 </div>
 <script>
-// Persist sort/filter state across HTMX swaps on window (survives partial re-render)
-window._paperSort = window._paperSort || {};
-window._paperFilter = window._paperFilter || {};
+// Sort/filter state lives here (survives htmx swaps) and goes out with every htmx request from this page,
+// so any list the server renders (a page, a section, a card action's out-of-band update) uses it.
+window._paperSort = window._paperSort || {
+    new: { by: '{{ state.new_by }}', dir: '{{ state.new_dir }}' },
+    col: { by: '{{ state.col_by }}', dir: '{{ state.col_dir }}', grouped: {{ 'true' if state.col_group else 'false' }} },
+};
+window._paperFilter = window._paperFilter || {{ state.col_tags | tojson }};
+window._paperSlug = '{{ project.slug }}';
 
-var _TAG_GROUP_ORDER = { 'to_read': 0, 'to_discuss': 1, 'important': 2 };
-function _tagPriority(card) {
-    const tags = (card.dataset.tags || '').split(',').filter(Boolean);
-    if (!tags.length) return 3;
-    return Math.min(...tags.map(t => _TAG_GROUP_ORDER[t] ?? 3));
-}
-
-function _applySort(listId) {
-    const list = document.getElementById(listId);
-    if (!list) return;
-    const s = window._paperSort[listId] || { by: 'added', dir: 'desc', grouped: false };
-    const cards = Array.from(list.querySelectorAll(':scope > .paper-card'));
-    const dateKey = s.by === 'pub' ? 'pubDate' : 'addedAt';
-    const asc = s.dir === 'asc';
-    cards.sort((a, b) => {
-        if (s.grouped) {
-            const tDiff = _tagPriority(a) - _tagPriority(b);
-            if (tDiff !== 0) return tDiff;
-        }
-        const cmp = (b.dataset[dateKey] || '').localeCompare(a.dataset[dateKey] || '');
-        return asc ? -cmp : cmp;
+if (!window._paperStateHooked) {
+    window._paperStateHooked = true;
+    document.body.addEventListener('htmx:configRequest', function (e) {
+        var s = window._paperSort, p = e.detail.parameters;
+        if (!s) return;
+        p.new_by = s.new.by; p.new_dir = s.new.dir;
+        p.col_by = s.col.by; p.col_dir = s.col.dir; p.col_group = s.col.grouped ? '1' : '';
+        p.col_tags = (window._paperFilter || []).join(',');
+        var search = document.querySelector('input[name="search"]');
+        if (search && p.search === undefined) p.search = search.value;
     });
-    cards.forEach(c => list.appendChild(c));
 }
 
-function _syncButtons(listId) {
-    const s = window._paperSort[listId] || { by: 'added', dir: 'desc', grouped: false };
-    const prefix = listId === 'curated-list' ? 'col' : 'new';
-    const btnAdded = document.getElementById(prefix + '-sort-added');
-    const btnPub   = document.getElementById(prefix + '-sort-pub');
-    const btnGroup = document.getElementById(prefix + '-sort-group');
-    const arrow = s.dir === 'asc' ? ' ↑' : ' ↓';
-    if (btnAdded) {
-        const active = s.by === 'added';
-        btnAdded.style.backgroundColor = active ? 'var(--accent)' : 'transparent';
-        btnAdded.style.color = active ? '#fff' : 'var(--ink-3)';
-        btnAdded.textContent = 'Date added' + (active ? arrow : '');
-    }
-    if (btnPub) {
-        const active = s.by === 'pub';
-        btnPub.style.backgroundColor = active ? 'var(--accent)' : 'transparent';
-        btnPub.style.color = active ? '#fff' : 'var(--ink-3)';
-        btnPub.textContent = 'Release date' + (active ? arrow : '');
-    }
-    if (btnGroup) { btnGroup.style.backgroundColor = s.grouped ? 'var(--accent-muted)' : 'transparent'; btnGroup.style.color = s.grouped ? 'var(--accent-hover)' : 'var(--ink-3)'; }
+function _reloadSection(section) {
+    htmx.ajax('GET', '/projects/' + window._paperSlug + '/papers/section?section=' + section,
+              { target: '#' + section + '-section', swap: 'outerHTML' });
 }
 
-function sortPaperList(listId, by) {
-    window._paperSort[listId] = window._paperSort[listId] || { by: 'added', dir: 'desc', grouped: false };
-    const s = window._paperSort[listId];
-    if (s.by === by) {
-        s.dir = s.dir === 'desc' ? 'asc' : 'desc';
-    } else {
-        s.by = by;
-        s.dir = 'desc';
-    }
-    _applySort(listId);
-    _syncButtons(listId);
+function sortPaperList(section, by) {
+    var s = window._paperSort[section];
+    if (s.by === by) s.dir = s.dir === 'desc' ? 'asc' : 'desc';
+    else { s.by = by; s.dir = 'desc'; }
+    _reloadSection(section);
 }
 
-function toggleGroupBy(listId) {
-    window._paperSort[listId] = window._paperSort[listId] || { by: 'added', dir: 'desc', grouped: false };
-    window._paperSort[listId].grouped = !window._paperSort[listId].grouped;
-    _applySort(listId);
-    _syncButtons(listId);
+function toggleGroupBy() {
+    window._paperSort.col.grouped = !window._paperSort.col.grouped;
+    _reloadSection('col');
 }
 
-// Re-apply saved state after every render (including HTMX swaps)
-['new-papers-list', 'curated-list'].forEach(function(id) {
-    _applySort(id);
-    _syncButtons(id);
-});
-_applyFilter('curated-list');
-_syncFilterPills('curated-list');
-
-// Tag filter for My Collection — click-to-toggle multi-select (union: show a card
-// if it has ANY of the active tags; no active tags means show everything).
-function toggleTagFilter(listId, tag) {
-    const arr = window._paperFilter[listId] || (window._paperFilter[listId] = []);
-    const idx = arr.indexOf(tag);
+// Tag filter for My Collection — click-to-toggle multi-select (union: show a paper if it has ANY of
+// the active tags; no active tags means show everything).
+function toggleTagFilter(tag) {
+    var arr = window._paperFilter, idx = arr.indexOf(tag);
     if (idx === -1) arr.push(tag); else arr.splice(idx, 1);
-    _applyFilter(listId);
-    _syncFilterPills(listId);
+    _reloadSection('col');
 }
 
-function clearTagFilter(listId) {
-    window._paperFilter[listId] = [];
-    _applyFilter(listId);
-    _syncFilterPills(listId);
-}
-
-function _applyFilter(listId) {
-    const list = document.getElementById(listId);
-    if (!list) return;
-    const active = window._paperFilter[listId] || [];
-    const cards = Array.from(list.querySelectorAll(':scope > .paper-card'));
-    let visibleCount = 0;
-    cards.forEach(function(c) {
-        const tags = (c.dataset.tags || '').split(',').filter(Boolean);
-        const show = active.length === 0 || tags.some(t => active.includes(t));
-        c.style.display = show ? '' : 'none';
-        if (show) visibleCount++;
-    });
-    const emptyEl = document.getElementById(listId + '-filter-empty');
-    if (emptyEl) emptyEl.classList.toggle('hidden', !(active.length > 0 && visibleCount === 0));
-}
-
-function _syncFilterPills(listId) {
-    const active = window._paperFilter[listId] || [];
-    ['important', 'to_read', 'to_discuss'].forEach(function(tag) {
-        const el = document.getElementById('tagpill-' + listId + '-' + tag);
-        if (!el) return;
-        const isActive = active.includes(tag);
-        el.style.outline = isActive ? '2px solid var(--ink-1)' : 'none';
-        el.style.outlineOffset = isActive ? '1px' : '0';
-        el.style.opacity = (active.length > 0 && !isActive) ? '0.45' : '1';
-    });
+function clearTagFilter() {
+    window._paperFilter.length = 0;
+    _reloadSection('col');
 }
 
 function openCitEdit(cid, pid, cur) {

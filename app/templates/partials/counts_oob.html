@@ -1,0 +1,5 @@
+{# Header counts after a card moved between sections (sent out of band next to the moved card's removal). #}
+<span id="new-count" hx-swap-oob="true">({{ s.new|length }})</span>
+<span id="col-count" hx-swap-oob="true">({{ s.col_total }})</span>
+<span id="trash-count" hx-swap-oob="true">({{ s.trash|length }})</span>
+{% with oob=True %}{% include "partials/_tag_pills.html" %}{% endwith %}

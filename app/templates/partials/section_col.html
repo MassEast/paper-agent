@@ -1,0 +1,44 @@
+{# My Collection section. Expects: project, s (paper_lists.sections), state, page_size; oob for an out-of-band swap. #}
+<div id="col-section" {% if oob %}hx-swap-oob="true"{% endif %}
+    style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">
+    <h3
+        style="font-size: 1rem; font-weight: 600; color: var(--ink-2); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span style="display: inline-flex; align-items: center; gap: 8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-star"></use>
+            </svg>
+            My Collection <span id="col-count">({{ s.col_total }})</span>
+            <span style="position: relative; display: inline-flex; align-items: center; color: var(--ink-4); cursor: help; flex-shrink: 0;"
+                onmouseenter="this.querySelector('.col-tip').style.display='block'"
+                onmouseleave="this.querySelector('.col-tip').style.display='none'">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <use href="/static/icons.svg#icon-info"></use>
+                </svg>
+                <div class="col-tip" style="display: none; position: absolute; left: 0; top: 100%; z-index: 50; width: 280px; background-color: var(--paper-1); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 10px 12px; font-size: 0.75rem; font-weight: 400; color: var(--ink-2); line-height: 1.5; margin-top: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                    Citation counts for papers in My Collection are refreshed automatically every month during the nightly crawl. Works for arXiv papers and non-arXiv papers that have a Semantic Scholar ID.
+                </div>
+            </span>
+        </span>
+        {% with oob=False %}{% include "partials/_tag_pills.html" %}{% endwith %}
+        <span style="margin-left: auto; display: inline-flex; gap: 4px; align-items: center;">
+            {% with sec='col', by=state.col_by, dir=state.col_dir %}{% include "partials/_sort_buttons.html" %}{% endwith %}
+            <button type="button" id="col-sort-group" onclick="toggleGroupBy()" data-tip="Group by tag: to read → to discuss → important"
+                style="padding: 2px 8px; font-size: 0.7rem; font-weight: 500; border: 1px solid var(--border-default); border-radius: var(--radius-md); cursor: pointer; {% if state.col_group %}background-color: var(--accent-muted); color: var(--accent-hover);{% else %}background-color: transparent; color: var(--ink-3);{% endif %}">Group by tag</button>
+        </span>
+    </h3>
+    {% if s.col %}
+    <div id="curated-list" class="space-y-3" style="max-height: 70vh; overflow-y: auto; padding-right: 4px;">
+        {% with section='col', papers=s.col, offset=0 %}{% include "partials/paper_page.html" %}{% endwith %}
+    </div>
+    {% elif s.col_total %}
+    <div id="curated-list-filter-empty" style="text-align: center; padding: 16px 0; color: var(--ink-4); font-size: 0.875rem;">
+        No papers match the selected tag filter(s).
+        <button type="button" onclick="clearTagFilter()" style="background: none; border: none; color: var(--accent); cursor: pointer; text-decoration: underline; font-size: 0.875rem;">Clear filter</button>
+    </div>
+    {% else %}
+    <div class="text-center py-8" style="color: var(--ink-4);">
+        <p>No curated papers yet</p>
+        <p class="text-xs mt-1">Move papers here from "New Papers" above</p>
+    </div>
+    {% endif %}
+</div>

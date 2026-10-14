@@ -1,0 +1,16 @@
+<div class="trash-row"
+    style="display: flex; align-items: center; justify-content: space-between; background-color: var(--paper-3); border-radius: var(--radius-md); padding: 12px 16px; opacity: 0.7;">
+    <div class="flex-1 min-w-0">
+        <span style="font-size: 0.875rem; color: var(--ink-3);" class="line-clamp-1">{{ pp.paper.title }}</span>
+        <span style="font-size: 0.75rem; color: var(--ink-4); margin-left: 8px;">Trashed {{ pp.trashed_at | berlin_time if pp.trashed_at else '' }}</span>
+    </div>
+    <button type="button" class="focus-ring"
+        style="margin-left: 12px; height: 32px; padding: 0 12px; font-size: 0.75rem; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md);"
+        hx-post="/paper/{{ pp.paper.arxiv_id }}/restore" hx-vals='{"project_id": {{ project.id }}}'
+        hx-target="closest .trash-row" hx-swap="outerHTML">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <use href="/static/icons.svg#icon-rotate-ccw"></use>
+        </svg>
+        Restore
+    </button>
+</div>

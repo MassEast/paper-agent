@@ -1,0 +1,25 @@
+{# Trash section; rows load a page at a time once it is expanded. Expects: project, s, page_size; oob for an out-of-band swap. #}
+<div id="trash-section" {% if oob %}hx-swap-oob="true"{% endif %}
+    style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid color-mix(in oklch, var(--error) 30%, transparent); padding: var(--space-md);">
+    <h3 style="font-size: 1rem; font-weight: 600; color: var(--error); margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer;"
+        onclick="document.getElementById('trash-list-{{ project.id }}').classList.toggle('hidden')">
+        <span style="display: inline-flex; align-items: center; gap: 8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <use href="/static/icons.svg#icon-trash-2"></use>
+            </svg>
+            Trash <span id="trash-count">({{ s.trash|length }})</span>
+        </span>
+        <span style="font-size: 0.75rem; color: var(--ink-4);">Click to expand</span>
+    </h3>
+    <div id="trash-list-{{ project.id }}" class="hidden">
+        <p style="font-size: 0.75rem; color: var(--ink-3); margin-bottom: 10px;">Papers stay in Trash on purpose: a crawl never adds a paper that is already in this project, so
+            keeping them here is what stops the same papers from coming back as New Papers. That's why there is no "Empty trash".</p>
+        {% if s.trash %}
+        <div class="space-y-2">
+            {% with section='trash', papers=s.trash, offset=0 %}{% include "partials/paper_page.html" %}{% endwith %}
+        </div>
+        {% else %}
+        <p class="text-center" style="color: var(--ink-4); font-size: 0.875rem; padding: 16px 0;">Trash is empty</p>
+        {% endif %}
+    </div>
+</div>

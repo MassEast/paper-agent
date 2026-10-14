@@ -119,7 +119,7 @@ Toggle is in the project sidebar (UI POST to `/projects/<slug>/toggle-nightly-cr
 - `base.html` — layout, nav, CSS tokens
 - `projects.html` — project list; the star on a card keeps that project on top, stored per browser in `localStorage` (`starred-projects`), not in the DB, since everyone shares one site login
 - `project_detail.html` — the main working page; large file with inline `<script>` blocks for HTMX orchestration of the crawl count → crawl start flow
-- `partials/paper_list.html` — HTMX-swappable paper list (New Papers + My Collection + Trash)
+- `partials/paper_list.html` — the three sections (`section_new.html`, `section_col.html`, `section_trash.html`). Sorting and the My Collection tag filter run on the server (`app/paper_lists.py`); the page keeps the state in JS and sends it with every htmx request (`htmx:configRequest`), and each list renders `PAGE_SIZE` (10) cards plus a sentinel that loads the next page when it scrolls into view (`/projects/<slug>/papers/more`). A card action that moves a paper (collect, move back, trash, restore, Copy / Move's Move) removes that card and re-renders only the destination section plus the header counts out of band (`_moved_response` in `routes/papers.py`), so the reader keeps their place. "Date added" in My Collection means `collected_at`. Responses are compressed (Flask-Compress): a big project page was ~5 MB raw.
 - `partials/paper_card.html` — single paper with tag buttons, notes, notify bell
 - `partials/crawl_status.html` — live crawl progress, auto-polls via HTMX
 

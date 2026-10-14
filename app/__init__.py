@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from flask_compress import Compress
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -70,6 +71,9 @@ def create_app():
 
     db.init_app(app)
     limiter.init_app(app)
+    # gzip/brotli for HTML and htmx partials: a project page with a few hundred cards is ~5 MB raw, ~0.5 MB
+    # compressed, and phones were downloading the raw size on every load and every list re-render
+    Compress(app)
 
     from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog
     from sqlalchemy import event as _sa_event

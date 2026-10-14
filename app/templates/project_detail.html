@@ -424,24 +424,6 @@
                             .observe(paperList, { childList: true, subtree: true });
                     }
 
-                    // Full swaps of #paper-list (5s pending-abstract poll, search, restore/trash/move)
-                    // replace #new-papers-list / #curated-list with brand-new DOM nodes, resetting their
-                    // internal scroll (overflow-y: auto) back to 0. Preserve it across the swap.
-                    var savedScroll = {};
-                    document.body.addEventListener('htmx:beforeSwap', function(evt) {
-                        if (evt.detail.target !== paperList) return;
-                        ['new-papers-list', 'curated-list'].forEach(function(id) {
-                            var el = document.getElementById(id);
-                            if (el) savedScroll[id] = el.scrollTop;
-                        });
-                    });
-                    document.body.addEventListener('htmx:afterSwap', function(evt) {
-                        if (evt.detail.target !== paperList) return;
-                        ['new-papers-list', 'curated-list'].forEach(function(id) {
-                            var el = document.getElementById(id);
-                            if (el && savedScroll[id]) el.scrollTop = savedScroll[id];
-                        });
-                    });
                 })();
                 </script>
             </div>

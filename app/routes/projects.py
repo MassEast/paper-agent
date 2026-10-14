@@ -10,6 +10,7 @@ from flask import current_app, render_template, request, redirect, url_for, json
 from app import db
 from app.auth import login_required
 from app.models import Project, ProjectPaper, Paper, CrawlLog, ScreenedPaper
+from app import paper_lists
 from app.routes import projects_bp
 from app.crawl import (
     start_crawl_async,
@@ -92,65 +93,13 @@ def detail(slug):
     if project.trashed_at:
         return redirect(url_for("projects.index"))
 
-    tag_filter = request.args.get("tag")
-    search_query = request.args.get("search", "").strip()
-    date_from = request.args.get("date_from")
-    date_to = request.args.get("date_to")
-
-    query = ProjectPaper.query.filter_by(project_id=project.id)
-
-    if tag_filter:
-        query = query.filter(ProjectPaper.manual_tag == tag_filter)
-
-    if search_query:
-        query = query.join(Paper).filter(
-            Paper.title.ilike(f"%{search_query}%")
-            | Paper.abstract.ilike(f"%{search_query}%")
-            | Paper.authors.ilike(f"%{search_query}%")
-            | Paper.institutions.ilike(f"%{search_query}%")
-            | ProjectPaper.notes.ilike(f"%{search_query}%")
-        )
-
-    if date_from:
-        query = query.join(Paper).filter(Paper.published_date >= date.fromisoformat(date_from))
-
-    if date_to:
-        query = query.join(Paper).filter(Paper.published_date <= date.fromisoformat(date_to))
-
-    papers = query.order_by(ProjectPaper.added_at.desc()).all()
+    state = paper_lists.list_state(request.args)
+    sections = paper_lists.sections(project, state)
+    papers = ProjectPaper.query.filter_by(project_id=project.id).all()  # every paper: calendar dots
 
     recent_crawl = (
         CrawlLog.query.filter_by(project_id=project.id).order_by(CrawlLog.started_at.desc()).first()
     )
-
-    last_crawl_time = None
-    if recent_crawl and recent_crawl.started_at:
-        last_crawl_time = recent_crawl.started_at
-
-    new_papers = []
-    curated_papers = []
-    trashed_papers = []
-
-    for pp in papers:
-        if pp.trashed_at:
-            trashed_papers.append(pp)
-        elif pp.manual_tag is None:
-            new_papers.append(pp)
-        else:
-            curated_papers.append(pp)
-
-    trashed_papers.sort(key=lambda pp: pp.trashed_at or datetime.min, reverse=True)
-
-    _TAG_PRIORITY = {"to_discuss": 0, "important": 1, "to_read": 2, "related": 3}
-
-    def _detail_tag_key(pp):
-        tags = pp.tags_list
-        for tag in ("to_discuss", "important", "to_read"):
-            if tag in tags:
-                return (_TAG_PRIORITY[tag], -(pp.paper.citation_count or 0))
-        return (_TAG_PRIORITY.get("related", 3), -(pp.paper.citation_count or 0))
-
-    curated_papers.sort(key=_detail_tag_key)
 
     # Context-hash epochs: first date each unique screening context was used
     from sqlalchemy import func as _func
@@ -191,14 +140,13 @@ def detail(slug):
         "project_detail.html",
         project=project,
         papers=papers,
-        new_papers=new_papers,
-        curated_papers=curated_papers,
-        trashed_papers=trashed_papers,
+        new_papers=sections["new"],
+        curated_papers=sections["col"],
+        s=sections,
+        state=state,
+        page_size=paper_lists.PAGE_SIZE,
         recent_crawl=recent_crawl,
-        tag_filter=tag_filter,
-        search_query=search_query,
-        date_from=date_from,
-        date_to=date_to,
+        search_query=state["search"],
         context_epochs=context_epochs,
         crawl_logs_js=crawl_logs_js,
         prompt_relevance_quick=_prompts.RELEVANCE_QUICK,
@@ -563,50 +511,39 @@ def rescreen_status(slug):
 @projects_bp.route("/<slug>/papers")
 @login_required
 def papers_partial(slug):
-    """Return the paper-list partial for HTMX refresh after crawl completes."""
+    """All three sections (first page each) — after a crawl, a re-screen, or a search."""
     project = Project.query.filter_by(slug=slug).first_or_404()
+    state = paper_lists.list_state(request.args)
+    return render_template("partials/paper_list.html", project=project, s=paper_lists.sections(project, state),
+                           state=state, page_size=paper_lists.PAGE_SIZE)
 
-    search_query = request.args.get("search", "").strip()
 
-    query = ProjectPaper.query.filter_by(project_id=project.id)
-    if search_query:
-        query = query.join(Paper).filter(
-            Paper.title.ilike(f"%{search_query}%")
-            | Paper.abstract.ilike(f"%{search_query}%")
-            | Paper.authors.ilike(f"%{search_query}%")
-            | Paper.institutions.ilike(f"%{search_query}%")
-            | ProjectPaper.notes.ilike(f"%{search_query}%")
-        )
-    all_pp = query.order_by(ProjectPaper.added_at.desc()).all()
+@projects_bp.route("/<slug>/papers/section")
+@login_required
+def papers_section(slug):
+    """One section re-rendered from its first page — after the sort or the tag filter changed."""
+    project = Project.query.filter_by(slug=slug).first_or_404()
+    section = request.args.get("section")
+    if section not in paper_lists.SECTIONS:
+        return ("unknown section", 400)
+    state = paper_lists.list_state(request.args)
+    return render_template(f"partials/section_{section}.html", project=project, oob=False,
+                           s=paper_lists.sections(project, state), state=state, page_size=paper_lists.PAGE_SIZE)
 
-    new_papers, curated_papers, trashed_papers = [], [], []
-    for pp in all_pp:
-        if pp.trashed_at:
-            trashed_papers.append(pp)
-        elif pp.manual_tag is None:
-            new_papers.append(pp)
-        else:
-            curated_papers.append(pp)
 
-    _TAG_PRIORITY = {"to_discuss": 0, "important": 1, "to_read": 2, "related": 3}
-
-    def _partial_tag_key(pp):
-        tags = pp.tags_list
-        for tag in ("to_discuss", "important", "to_read"):
-            if tag in tags:
-                return (_TAG_PRIORITY[tag], -(pp.paper.citation_count or 0))
-        return (_TAG_PRIORITY.get("related", 3), -(pp.paper.citation_count or 0))
-
-    curated_papers.sort(key=_partial_tag_key)
-
-    return render_template(
-        "partials/paper_list.html",
-        project=project,
-        new_papers=new_papers,
-        curated_papers=curated_papers,
-        trashed_papers=trashed_papers,
-        search_query=search_query,
-    )
+@projects_bp.route("/<slug>/papers/more")
+@login_required
+def papers_more(slug):
+    """The next page of one section's list (requested by the sentinel at the end of the list)."""
+    project = Project.query.filter_by(slug=slug).first_or_404()
+    section = request.args.get("section")
+    offset = request.args.get("offset", type=int)
+    if section not in paper_lists.SECTIONS or offset is None or offset < 0:
+        return ("bad section or offset", 400)
+    state = paper_lists.list_state(request.args)
+    s = paper_lists.sections(project, state)
+    return render_template("partials/paper_page.html", project=project, section=section, papers=s[section],
+                           offset=offset, page_size=paper_lists.PAGE_SIZE)
 
 
 @projects_bp.route("/<slug>/generate-keywords", methods=["POST"])

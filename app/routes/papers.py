@@ -11,6 +11,7 @@ _log = logging.getLogger(__name__)
 from app import db
 from app.auth import login_required
 from app.models import Paper, ProjectPaper, Project
+from app import paper_lists
 from app.routes import papers_bp
 from app.utils import base_arxiv_id
 from app.crawl import (
@@ -30,38 +31,28 @@ from app.llm import LLMUnavailableError
 MULTI_TAGS = {"important", "to_read", "to_discuss"}
 
 
-def _get_paper_lists(project):
-    """Build new_papers / curated_papers / trashed_papers for a project (same logic as detail view)."""
-    all_pp = (
-        ProjectPaper.query.filter_by(project_id=project.id)
-        .order_by(ProjectPaper.added_at.desc())
-        .all()
-    )
-
-    new_papers, curated_papers, trashed_papers = [], [], []
-    for pp in all_pp:
-        if pp.trashed_at:
-            trashed_papers.append(pp)
-        elif pp.manual_tag is None:
-            new_papers.append(pp)
-        else:
-            curated_papers.append(pp)
-
-    return new_papers, curated_papers, trashed_papers
-
-
-def _paper_list_response(project_id):
+def _moved_response(project_id, dest):
+    """A card left its section (the request targets that card or trash row, outerHTML): the empty main
+    response removes it, and out-of-band swaps update the header counts, re-render the section it moved
+    into (so it shows up there at once, in the current sort), and any section it left empty.
+    Only the destination is re-rendered, so the reader keeps their place in the list they were working in."""
     project = Project.query.get(project_id)
     if not project:
         return ("", 204)
-    new_papers, curated_papers, trashed_papers = _get_paper_lists(project)
-    return render_template(
-        "partials/paper_list.html",
-        project=project,
-        new_papers=new_papers,
-        curated_papers=curated_papers,
-        trashed_papers=trashed_papers,
-    )
+    state = paper_lists.list_state(request.values)
+    s = paper_lists.sections(project, state)
+    ctx = dict(project=project, s=s, state=state, page_size=paper_lists.PAGE_SIZE, oob=True)
+    redraw = [dest] + [sec for sec in paper_lists.SECTIONS if sec != dest and not s[sec]]
+    return render_template("partials/counts_oob.html", **ctx) + "".join(
+        render_template(f"partials/section_{sec}.html", **ctx) for sec in redraw)
+
+
+def _card_response(pp, project):
+    """A card changed in place (a tag toggled): the card itself, plus the tag counts out of band."""
+    state = paper_lists.list_state(request.values)
+    s = paper_lists.sections(project, state)
+    return (render_template("partials/paper_card.html", pp=pp, project=project, show_curate=False)
+            + render_template("partials/counts_oob.html", project=project, s=s, state=state))
 
 
 @papers_bp.route("/paper/<arxiv_id>/tag", methods=["POST"])
@@ -98,12 +89,9 @@ def tag_paper(arxiv_id):
             db.session.commit()
 
     if request.headers.get("HX-Request") and project_id:
-        hx_target = request.headers.get("HX-Target", "")
-        if hx_target.startswith("paper-card-") and pp is not None:
-            project = Project.query.get(project_id)
-            if project:
-                return render_template("partials/paper_card.html", pp=pp, project=project, show_curate=False)
-        return _paper_list_response(project_id)
+        if tag in MULTI_TAGS and pp is not None:
+            return _card_response(pp, Project.query.get(project_id))
+        return _moved_response(project_id, "col" if tag == "related" else "new")
     return ("", 204)
 
 
@@ -139,7 +127,7 @@ def trash_paper(arxiv_id):
             db.session.commit()
 
     if request.headers.get("HX-Request") and project_id:
-        return _paper_list_response(project_id)
+        return _moved_response(project_id, "trash")
     return ("", 204)
 
 
@@ -158,7 +146,7 @@ def restore_paper(arxiv_id):
             db.session.commit()
 
     if request.headers.get("HX-Request") and project_id:
-        return _paper_list_response(project_id)
+        return _moved_response(project_id, "new")
     return ("", 204)
 
 
@@ -218,7 +206,7 @@ def transfer_paper(arxiv_id):
         start_relevance_reason_async(target_id, paper.id)
 
     if mode == "move":
-        return _paper_list_response(project_id)
+        return _moved_response(project_id, "trash")
     return render_template("partials/transfer_menu.html", paper=paper, project=Project.query.get(project_id),
                            copied_to=target_project)
 
@@ -264,10 +252,9 @@ def tag_and_notify(arxiv_id):
             )
 
     if request.headers.get("HX-Request") and project_id:
-        hx_target = request.headers.get("HX-Target", "")
-        if hx_target.startswith("paper-card-") and pp is not None and project is not None:
-            return render_template("partials/paper_card.html", pp=pp, project=project, show_curate=False)
-        return _paper_list_response(project_id)
+        if pp is not None and project is not None:
+            return _card_response(pp, project)
+        return ("", 204)
     return ("", 204)
 
 
@@ -477,7 +464,8 @@ def update_citation_count(arxiv_id):
 @login_required
 def export_csv(slug):
     project = Project.query.filter_by(slug=slug).first_or_404()
-    new_papers, curated_papers, _ = _get_paper_lists(project)
+    s = paper_lists.sections(project, paper_lists.list_state({}))
+    new_papers, curated_papers = s["new"], s["col"]
 
     buf = io.StringIO()
     writer = csv.writer(buf)

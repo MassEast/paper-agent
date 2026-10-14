@@ -60,7 +60,7 @@
             <button
                 style="height: 32px; padding: 0 12px; border-radius: var(--radius-md); font-size: 0.75rem; font-weight: 600; background-color: var(--accent); color: var(--accent-ink); display: inline-flex; align-items: center; gap: 6px; outline: none;"
                 hx-post="/paper/{{ pp.paper.arxiv_id }}/restore" hx-vals='{"project_id": {{ project.id }}}'
-                hx-target="#paper-list" hx-swap="innerHTML show:false">
+                hx-target="closest .paper-card" hx-swap="outerHTML">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <use href="/static/icons.svg#icon-rotate-ccw"></use>
                 </svg>
@@ -108,7 +108,7 @@
             <button
                 style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; color: var(--ink-3); background-color: var(--paper-3); border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; gap: 6px; outline: none;"
                 hx-post="/paper/{{ pp.paper.arxiv_id }}/tag" hx-vals='{"project_id": {{ project.id }}, "tag": ""}'
-                hx-target="#paper-list" hx-swap="innerHTML show:false">
+                hx-target="closest .paper-card" hx-swap="outerHTML">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <use href="/static/icons.svg#icon-corner-up-left"></use>
                 </svg>
@@ -300,7 +300,7 @@
             style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; border: 1px solid var(--border-default); color: var(--ink-2); background-color: var(--paper-3); display: inline-flex; align-items: center; gap: 6px;"
             hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
             hx-vals='{"project_id": {{ project.id }}, "tag": "related"}'
-            hx-target="#paper-list" hx-swap="innerHTML show:false">
+            hx-target="closest .paper-card" hx-swap="outerHTML">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color: var(--warning);">
                 <use href="/static/icons.svg#icon-star"></use>
             </svg>
@@ -362,7 +362,7 @@
         <button
             style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); background-color: var(--error-bg); color: var(--error); border: 1px solid color-mix(in oklch, var(--error) 50%, transparent); display: inline-flex; align-items: center; gap: 6px; outline: none;"
             hx-post="/paper/{{ pp.paper.arxiv_id }}/trash" hx-vals='{"project_id": {{ project.id }}}'
-            hx-target="#paper-list" hx-swap="innerHTML show:false">
+            hx-target="closest .paper-card" hx-swap="outerHTML">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <use href="/static/icons.svg#icon-trash-2"></use>
             </svg>

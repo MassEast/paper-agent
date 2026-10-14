@@ -1,0 +1,9 @@
+{# My Collection tag counts; clicking one filters the list. Expects: s, state; oob for an out-of-band swap. #}
+<span id="col-tag-pills" {% if oob %}hx-swap-oob="true"{% endif %} style="display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+    {% for tag, label, color in [('important', 'important', 'important'), ('to_read', 'to read', 'related'), ('to_discuss', 'to discuss', 'discuss')] %}
+    {% set _on = tag in state.col_tags %}
+    <button type="button" id="tagpill-{{ tag }}" onclick="toggleTagFilter('{{ tag }}')"
+        style="font-size: 0.75rem; background-color: var(--tag-{{ color }}-bg); color: var(--tag-{{ color }}-ink); padding: 2px 8px; border-radius: 9999px; border: none; cursor: pointer;{% if _on %} outline: 2px solid var(--ink-1); outline-offset: 1px;{% elif state.col_tags %} opacity: 0.45;{% endif %}">{{ s.tag_counts[tag] }} {{ label }}</button>
+    {% endfor %}
+    <span style="font-size: 0.7rem; color: var(--ink-4); font-weight: 400;">(click to filter)</span>
+</span>

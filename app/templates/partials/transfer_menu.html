@@ -30,7 +30,7 @@
             data-tip="Add to the My Collection of {{ other.name }} and put it in this project's Trash (so crawls here won't add it again)"
             hx-post="/paper/{{ paper.arxiv_id }}/transfer"
             hx-vals='{"project_id": {{ project.id }}, "target_project_id": {{ other.id }}, "mode": "move"}'
-            hx-target="#paper-list" hx-swap="innerHTML show:false">Move</button>
+            hx-target="closest .paper-card" hx-swap="outerHTML">Move</button>
         {% endif %}
     </div>
     {% else %}
