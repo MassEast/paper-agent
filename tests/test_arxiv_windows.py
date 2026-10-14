@@ -2,7 +2,9 @@
 from datetime import date
 from unittest.mock import patch
 
-from app.crawl import _collect_arxiv_keyword, search_arxiv_with_full_papers
+import pytest
+
+from app.crawl import _collect_arxiv, search_arxiv_with_full_papers
 from app.utils import base_arxiv_id
 
 
@@ -38,7 +40,7 @@ def test_cap_hit_continues_from_oldest_date():
 
     warnings = []
     with patch("app.crawl._fetch_arxiv_window", side_effect=fake_fetch):
-        papers = _collect_arxiv_keyword("kw", date(2026, 9, 1), date(2026, 9, 10), 2, warnings)
+        papers = _collect_arxiv(["kw"], date(2026, 9, 1), date(2026, 9, 10), 2, warnings)
     assert calls == [(date(2026, 9, 1), date(2026, 9, 10)), (date(2026, 9, 1), date(2026, 9, 8)), (date(2026, 9, 1), date(2026, 9, 5))]
     assert [p["arxiv_id"] for p in papers] == ["a", "b", "c", "d"]  # "b" not duplicated
     assert not warnings
@@ -48,7 +50,7 @@ def test_single_day_over_cap_warns_and_moves_on():
     warnings = []
     day = date(2026, 9, 3)
     with patch("app.crawl._fetch_arxiv_window", side_effect=[([_pd("a", day)] * 5, True, False, False), ([], False, False, False)]) as m:
-        _collect_arxiv_keyword("kw", date(2026, 9, 1), day, 5, warnings)
+        _collect_arxiv(["kw"], date(2026, 9, 1), day, 5, warnings)
     assert len(warnings) == 1 and "kw" in warnings[0] and "cut off" in warnings[0]
     assert m.call_args_list[1].args[1:3] == (date(2026, 9, 1), date(2026, 9, 2))
 
@@ -56,27 +58,68 @@ def test_single_day_over_cap_warns_and_moves_on():
 def test_timeout_warns():
     warnings = []
     with patch("app.crawl._fetch_arxiv_window", return_value=([_p("a")], False, True, False)):
-        _collect_arxiv_keyword("kw", date(2026, 9, 1), date(2026, 9, 3), 200, warnings)
+        _collect_arxiv(["kw"], date(2026, 9, 1), date(2026, 9, 3), 200, warnings)
     assert len(warnings) == 1 and "timed out" in warnings[0]
 
 
-def test_search_dedups_across_keywords_and_reports_warnings():
-    def fake_collect(kw, d_from, d_to, max_results, warnings, failed=None):
-        warnings.append(f"w-{kw}")
-        return [_p("1"), _p(f"2-{kw}")]
+def test_all_keywords_go_into_one_or_query():
+    """One arXiv request per window for all keywords (fewer requests, fewer 429s), multi-word ones as phrases."""
+    captured = []
+
+    class FakeClient:
+        def __init__(self, **kw):
+            pass
+
+        def results(self, search):
+            captured.append(search.query)
+            return iter([])
+
+    with patch("app.crawl.arxiv.Client", FakeClient), patch("app.crawl._ArxivLockCtx"):
+        papers = search_arxiv_with_full_papers(["slot attention", "vlm"], date(2026, 9, 1), date(2026, 9, 2))
+    assert papers == []
+    assert captured == ['(abs:"slot attention" OR vlm) AND submittedDate:[202609010000 TO 202609022359]']
+
+
+def test_search_dedups_and_reports_warnings():
+    def fake_collect(keywords, d_from, d_to, max_results, warnings, failed=None):
+        warnings.append("w")
+        return [_p("1"), _p("2"), _p("1")]
 
     w = []
-    with patch("app.crawl._collect_arxiv_keyword", side_effect=fake_collect):
+    with patch("app.crawl._collect_arxiv", side_effect=fake_collect):
         papers = search_arxiv_with_full_papers(["a", "b"], date(2026, 9, 1), date(2026, 9, 2), warnings=w)
-    assert [p["arxiv_id"] for p in papers] == ["1", "2-a", "2-b"]
-    assert w == ["w-a", "w-b"]
+    assert [p["arxiv_id"] for p in papers] == ["1", "2"]
+    assert w == ["w"]
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_rate_limit_and_busy_answers_are_waited_out(status):
+    import arxiv
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **kw):
+            pass
+
+        def results(self, search):
+            calls.append(1)
+            if len(calls) == 1:
+                raise arxiv.HTTPError("url", 0, status)
+            return iter([])
+
+    with patch("app.crawl.arxiv.Client", FakeClient), patch("app.crawl._ArxivLockCtx"), \
+         patch("app.crawl.time.sleep") as sleep:
+        failed = []
+        search_arxiv_with_full_papers(["a"], date(2026, 9, 1), date(2026, 9, 2), failed_keywords=failed)
+    assert len(calls) == 2 and failed == []
+    sleep.assert_called_once_with(120)
 
 
 def test_errored_query_is_reported_as_failed_keyword():
     warnings, failed = [], []
     with patch("app.crawl._fetch_arxiv_window", return_value=([], False, False, True)):
-        papers = _collect_arxiv_keyword("kw", date(2026, 9, 1), date(2026, 9, 3), 200, warnings, failed)
-    assert papers == [] and failed == ["kw"]
+        papers = _collect_arxiv(["kw", "kw2"], date(2026, 9, 1), date(2026, 9, 3), 200, warnings, failed)
+    assert papers == [] and failed == ["kw", "kw2"]
     assert len(warnings) == 1 and "failed" in warnings[0]
 
 
@@ -109,9 +152,6 @@ def test_citation_fetch_strips_arxiv_version():
     assert url.endswith("/paper/arXiv:2510.01706?fields=citationCount")
 
 
-import pytest
-
-
 @pytest.mark.slow
 def test_live_generic_keyword_pages_back_through_window():
     """Real arXiv: a very generic keyword with a tiny per-query cap must page back over several days,
@@ -121,7 +161,7 @@ def test_live_generic_keyword_pages_back_through_window():
     d_from = d_to - timedelta(days=4)
     warnings = []
     with patch("app.crawl._fetch_arxiv_window", wraps=__import__("app.crawl", fromlist=["x"])._fetch_arxiv_window) as spy:
-        papers = _collect_arxiv_keyword("model", d_from, d_to, 40, warnings)
+        papers = _collect_arxiv(["model"], d_from, d_to, 40, warnings)
     ids = [p["arxiv_id"] for p in papers]
     assert spy.call_count > 1, "cap was never hit — keyword not generic enough for this test"
     assert len(ids) == len(set(ids))
@@ -158,7 +198,7 @@ class TestCountStepDedup:
 
         found = [_p("2605.23872v1"), _p("2609.00001v1"), _p("2609.00002v2")]
 
-        def fake_search(keywords, d_from, d_to, progress_callback=None, warnings=None):
+        def fake_search(keywords, d_from, d_to, warnings=None):
             warnings.append("kw: cut off")
             return found
 
@@ -185,8 +225,16 @@ class TestCountStepDedup:
 
 
 
-def test_search_warning_names_failed_and_ok_keywords():
+def test_search_warning_names_the_keywords_and_says_nothing_is_lost_yet():
     from app.crawl import _search_warning
-    w = _search_warning(["bar"], ["foo", "moe", "bar"])
-    assert "1 of 3 keywords (bar)" in w and "Searched fine: foo, moe." in w
-    assert "No keyword could be searched" in _search_warning(["foo"], ["foo"])
+    w = _search_warning(["foo", "bar"])
+    assert "(foo, bar)" in w and "Semantic Scholar" in w and "last 5 days" in w
+
+
+def test_merge_carry_adds_up_deferred_passes():
+    from app.crawl import _merge_carry
+    a = {"papers_found": 3, "papers_added": 1, "papers_checked": 2, "arxiv": 0, "scholar": 3, "papers": ["p1"], "keywords": ["a", "b"]}
+    b = {"papers_found": 2, "papers_added": 1, "papers_checked": 2, "arxiv": 0, "scholar": 2, "papers": ["p2"], "keywords": ["a", "b"]}
+    assert _merge_carry(None, b) is b
+    m = _merge_carry(a, b)
+    assert (m["papers_found"], m["papers_added"], m["papers"], m["keywords"]) == (5, 2, ["p1", "p2"], ["a", "b"])

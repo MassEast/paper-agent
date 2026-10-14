@@ -124,6 +124,29 @@ def _notify_failure(project, message):
     )
 
 
+def _notify_search_failed(project, tries):
+    """arXiv never answered tonight and nothing else was found: say so plainly, not "crawl failed".
+    Nothing is lost yet — each night searches the last CRAWL_DAYS_BACK days again."""
+    _log.error("[nightly] ✗ arXiv did not answer for %s after %d tries", project.name, tries)
+    if not project.notification_emails:
+        return
+    days_back = int(os.environ.get("CRAWL_DAYS_BACK", "5"))
+    project_url = f"{os.environ.get('SERVER_URL', 'http://localhost:5001')}/projects/{project.slug}"
+    send_notification(
+        subject=f"[{project.name}] arXiv search could not run tonight",
+        message="",
+        project_emails=project.notification_emails,
+        content_html=(
+            f'<p style="margin:0 0 10px 0;">arXiv did not answer the search for <strong>{project.name}</strong> '
+            f'tonight (rate limited or unavailable, {tries} tries), and Semantic Scholar recommended nothing new.</p>'
+            f'<p style="margin:0 0 10px 0;">Nothing is lost yet: each night searches the last {days_back} days, '
+            f'so the next nights cover these days again. If this email comes several nights in a row, '
+            f'something needs a look.</p>'
+            f'<p style="margin:0;"><a href="{project_url}" style="color:#7c3aed;">{project_url}</a></p>'
+        ),
+    )
+
+
 def _scheduled_hour() -> int:
     """UTC hour this run was scheduled for, not the hour it happens to start in.
 
@@ -208,25 +231,42 @@ def nightly_crawl():
             else:
                 _log.info("[nightly] ✓ done: %s", project.name)
 
-        if retry_queue:
-            wait = int(os.environ.get("NIGHTLY_RETRY_WAIT_S", "600"))
-            _log.info("[nightly] ── retrying arXiv-failed keywords for %d project(s) in %ds ──", len(retry_queue), wait)
+        # arXiv throttled/unavailable: retry the failed search up to NIGHTLY_RETRY_ROUNDS times, each after
+        # NIGHTLY_RETRY_WAIT_S. Rounds before the last defer their email too and add their numbers to the
+        # carry, so a project still gets exactly one email per night.
+        rounds = int(os.environ.get("NIGHTLY_RETRY_ROUNDS", "2"))
+        wait = int(os.environ.get("NIGHTLY_RETRY_WAIT_S", "600"))
+        for rnd in range(1, rounds + 1):
+            if not retry_queue:
+                break
+            last = rnd == rounds
+            _log.info("[nightly] ── retry %d/%d: arXiv search for %d project(s) in %ds ──", rnd, rounds, len(retry_queue), wait)
             time.sleep(wait)
+            still_failing = []
             for project, kws, d_from, d_to, carry in retry_queue:
-                retry_log = run_crawl(project.id, d_from, d_to, triggered_by="cron", keywords_override=kws, carry=carry)
-                if retry_log.status == "error" or getattr(retry_log, "failed_keywords", None):
+                retry_log = run_crawl(project.id, d_from, d_to, triggered_by="cron", keywords_override=kws,
+                                      carry=carry, defer_notification=not last)
+                failed = getattr(retry_log, "failed_keywords", None)
+                if retry_log.status == "error" and not failed:
+                    # not an arXiv answer problem (e.g. LLM down) — another round won't help
+                    _notify_failure(project, retry_log.error_message)
+                elif failed and not last:
+                    _log.error("[nightly] ⚠ retry %d/%d still failing: %s — %s", rnd, rounds, project.name, retry_log.error_message)
+                    still_failing.append((project, failed, d_from, d_to, getattr(retry_log, "notify_carry", None) or carry))
+                elif failed:
                     _log.error("[nightly] ✗ retry still failing: %s — %s", project.name, retry_log.error_message)
                     if getattr(retry_log, "notified", False):
-                        pass  # the crawl-complete email already carries the incomplete-search warning
+                        pass  # the crawl-complete email already carries the arXiv warning
                     elif carry and carry["papers_added"]:
                         send_carry_notification(project.id, carry, d_from, d_to,
-                                                _search_warning(retry_log.failed_keywords, carry["keywords"]))
+                                                _search_warning(failed))
                     else:
-                        _notify_failure(project, f"arXiv search kept failing after a retry: {retry_log.error_message}")
+                        _notify_search_failed(project, rounds + 1)
                 else:
                     _log.info("[nightly] ✓ retry done: %s (%d added)", project.name, retry_log.papers_added or 0)
                     if not getattr(retry_log, "notified", False) and carry and carry["papers_added"]:
                         send_carry_notification(project.id, carry, d_from, d_to, None)  # retry found nothing new
+            retry_queue = still_failing
 
         _log.info("[nightly] ── backfill: enriching incomplete papers ──────────────────────")
         filled = backfill_missing_paper_metadata()

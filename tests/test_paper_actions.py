@@ -424,3 +424,29 @@ def test_starred_project_goes_on_top_and_stays_after_reload(live_server, browser
     star.click()
     assert order() == server_order
     context.close()
+
+
+def test_collection_sorts_by_when_a_paper_was_collected_not_when_it_was_crawled(app, logged_in, two_projects):
+    """'Date added' in My Collection = date added to My Collection: a paper crawled long ago but
+    collected just now goes to the top."""
+    import re
+    from datetime import datetime, timedelta
+    ids = two_projects
+    with app.app_context():
+        old = Paper(arxiv_id="2601.00003", title="Crawled Long Ago", source="arxiv")
+        db.session.add(old)
+        db.session.flush()
+        ids["old"] = old.id
+        db.session.add(ProjectPaper(project_id=ids["src"], paper_id=old.id, added_at=datetime.utcnow() - timedelta(days=30)))
+        _link(ids["src"], ids["coll"]).collected_at = datetime.utcnow() - timedelta(days=1)
+        db.session.commit()
+    try:
+        logged_in.post("/paper/2601.00003/tag", data={"project_id": ids["src"], "tag": "related"})
+        html = logged_in.get("/projects/pa-source").data.decode()
+        keys = dict(re.findall(r'id="paper-card-(2601-0000[23])-\d+"\s+(?:\{#.*?#\}\s+)?data-added-at="([^"]+)"', html))
+        assert keys["2601-00003"] > keys["2601-00002"]
+    finally:
+        with app.app_context():
+            ProjectPaper.query.filter_by(paper_id=ids["old"]).delete()
+            Paper.query.filter_by(id=ids["old"]).delete()
+            db.session.commit()

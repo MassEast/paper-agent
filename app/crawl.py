@@ -1476,14 +1476,27 @@ def extract_keywords(research_interest: str, collection_papers: list) -> list[st
     return keywords
 
 
-def _fetch_arxiv_window(keyword: str, d_from: date, d_to: date, max_results: int) -> tuple[list[dict], bool, bool, bool]:
-    """One arXiv query for `keyword` restricted server-side to submittedDate in [d_from, d_to].
+def _keyword_clause(keyword: str) -> str:
+    return f'abs:"{keyword}"' if " " in keyword else keyword
+
+
+def _keywords_label(keywords: list[str]) -> str:
+    return keywords[0] if len(keywords) == 1 else f"{len(keywords)} keywords"
+
+
+def _fetch_arxiv_window(keywords: list[str], d_from: date, d_to: date, max_results: int) -> tuple[list[dict], bool, bool, bool]:
+    """One arXiv query for all `keywords` (OR-ed) restricted server-side to submittedDate in [d_from, d_to].
+
+    One query per project instead of one per keyword: arXiv answers ~1 in 4 of our nightly queries with
+    a 429 even at one request per 5 s, so fewer requests means fewer failures. Same papers as the union
+    of per-keyword queries (checked live on 3 projects, 2026-10-14).
 
     Returns (papers, hit_cap, timed_out, errored). `hit_cap` means arXiv returned max_results papers, so
     older ones in this window may have been cut off. `errored` means the query failed outright
     (429/503/other) after retries — "no answer", as opposed to "answered, nothing matched".
     """
-    base = f'abs:"{keyword}"' if " " in keyword else keyword
+    label = _keywords_label(keywords)
+    base = " OR ".join(_keyword_clause(k) for k in keywords)
     query = f"({base}) AND submittedDate:[{d_from:%Y%m%d}0000 TO {d_to:%Y%m%d}2359]"
     papers: list[dict] = []
     timed_out = False
@@ -1516,37 +1529,39 @@ def _fetch_arxiv_window(keyword: str, d_from: date, d_to: date, max_results: int
                     )
                 break  # success — don't retry
             except arxiv.HTTPError as e:
-                if getattr(e, "status", 0) == 429 and attempt < 2:
+                # 503 is arXiv's other "slow down / busy" answer — wait it out like a 429
+                if getattr(e, "status", 0) in (429, 503) and attempt < 2:
                     wait = 120 * (attempt + 1)  # 120s, then 240s
-                    _log.warning("[arXiv] 429 rate limit for '%s', waiting %ds (attempt %d/3)", keyword, wait, attempt + 1)
+                    _log.warning("[arXiv] %s for '%s', waiting %ds (attempt %d/3)", e.status, label, wait, attempt + 1)
                     time.sleep(wait)
                 else:
-                    _log.warning("[arXiv] HTTP error for '%s': %s", keyword, e)
+                    _log.warning("[arXiv] HTTP error for '%s': %s", label, e)
                     errored = True
                     break
             except Exception as e:
-                _log.warning("[arXiv] Error searching '%s': %s", keyword, e)
+                _log.warning("[arXiv] Error searching '%s': %s", label, e)
                 errored = True
                 break
         # _ArxivLockCtx enforces the inter-request gap on release — no manual sleep needed.
     return papers, len(papers) >= max_results, timed_out, errored
 
 
-def _collect_arxiv_keyword(
-    keyword: str, d_from: date, d_to: date, max_results: int, warnings: list[str], failed: Optional[list[str]] = None
+def _collect_arxiv(
+    keywords: list[str], d_from: date, d_to: date, max_results: int, warnings: list[str], failed: Optional[list[str]] = None
 ) -> list[dict]:
-    """All papers for `keyword` in [d_from, d_to], newest first.
+    """All papers matching any of `keywords` in [d_from, d_to], newest first.
 
     arXiv caps each query at `max_results`. When a query hits the cap, the oldest paper we got
     tells us how far back it reached: the next window is [d_from, that date] (the boundary day is
     re-queried since it may have been cut mid-day; duplicates are dropped by id).
-    A query that errors out (429/503) is added to `failed` and to `warnings`.
+    A query that errors out (429/503) adds all `keywords` to `failed`, and a message to `warnings`.
     """
+    keyword = _keywords_label(keywords)
     papers: list[dict] = []
     seen: set[str] = set()
     cur_to = d_to
     while cur_to >= d_from:
-        batch, hit_cap, timed_out, errored = _fetch_arxiv_window(keyword, d_from, cur_to, max_results)
+        batch, hit_cap, timed_out, errored = _fetch_arxiv_window(keywords, d_from, cur_to, max_results)
         for p in batch:
             if p["arxiv_id"] not in seen:
                 seen.add(p["arxiv_id"])
@@ -1556,7 +1571,7 @@ def _collect_arxiv_keyword(
             _log.warning("[arXiv] %s", msg)
             warnings.append(msg)
             if failed is not None:
-                failed.append(keyword)
+                failed.extend(keywords)
             break
         if timed_out:
             msg = f"'{keyword}': arXiv search timed out for {d_from}..{cur_to} — results may be incomplete"
@@ -1595,38 +1610,30 @@ def search_arxiv_with_full_papers(
     date_from: date,
     date_to: date,
     max_results: int = 200,
-    progress_callback=None,
     warnings: Optional[list[str]] = None,
     failed_keywords: Optional[list[str]] = None,
 ) -> list[dict]:
-    """Search arXiv for each keyword and return deduplicated papers in date range.
+    """Search arXiv for all keywords at once (one OR query, see _fetch_arxiv_window) and return
+    deduplicated papers in date range.
     Returns list of paper dicts without LLM processing.
     Used for the search phase to show user how many papers were found.
 
     `max_results` is the per-query cap; when it is hit, the search continues from the oldest paper's date
     back to `date_from`, so the full range is covered. Anything still truncated (single day over
-    the cap, or a 45s timeout) is appended to `warnings` if given; keywords whose query errored
-    out entirely are appended to `failed_keywords` if given.
-    progress_callback(keyword_idx, keyword_total, count_so_far, current_keyword) is called
-    before each keyword so callers can report live progress.
+    the cap, or a 45s timeout) is appended to `warnings` if given; if the query errored out
+    entirely, all keywords are appended to `failed_keywords` if given.
     """
     if warnings is None:
         warnings = []
+    if not keywords:
+        return []
     papers = []
     seen_ids = set()
-
-    for kw_idx, keyword in enumerate(keywords):
-        if progress_callback:
-            try:
-                progress_callback(kw_idx, len(keywords), len(papers), keyword)
-            except Exception:
-                pass
-        for paper in _collect_arxiv_keyword(keyword, date_from, date_to, max_results, warnings, failed_keywords):
-            if paper["arxiv_id"] in seen_ids:
-                continue
-            seen_ids.add(paper["arxiv_id"])
-            papers.append(paper)
-
+    for paper in _collect_arxiv(keywords, date_from, date_to, max_results, warnings, failed_keywords):
+        if paper["arxiv_id"] in seen_ids:
+            continue
+        seen_ids.add(paper["arxiv_id"])
+        papers.append(paper)
     return papers
 
 
@@ -1911,74 +1918,6 @@ def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = 100)
         return []
 
 
-def search_arxiv_papers(
-    keywords: list[str], date_from: date, date_to: date, limit: int = 1000
-) -> list[dict]:
-    """
-    Search arXiv for papers matching keywords within date range.
-    Returns list of paper dicts without LLM processing.
-    Used for the search phase to show user how many papers were found.
-    Has a 20-second timeout per keyword to prevent hanging.
-    Respects arXiv rate limits: 1 request per 3 seconds.
-    """
-    papers = []
-    seen_ids = set()
-    max_per_keyword = (limit // max(len(keywords), 1)) + 10
-
-    for keyword in keywords:
-        keyword_papers = []
-        start_time = datetime.now()
-
-        try:
-            arxiv_query = f'abs:"{keyword}"' if " " in keyword else keyword
-            search = arxiv.Search(
-                query=arxiv_query,
-                max_results=max_per_keyword,
-                sort_by=arxiv.SortCriterion.SubmittedDate,
-            )
-
-            with _ArxivLockCtx():
-                client = arxiv.Client(delay_seconds=3.1)
-                for result in client.results(search):
-                    if (datetime.now() - start_time).total_seconds() > 20:
-                        print(f"[arXiv] Timeout for keyword '{keyword}' after 45s")
-                        break
-
-                    paper_id = result.entry_id.split("/")[-1]
-                    if paper_id in seen_ids:
-                        continue
-
-                    pub_date = result.published.date()
-                    if pub_date < date_from or pub_date > date_to:
-                        continue
-
-                    seen_ids.add(paper_id)
-
-                    keyword_papers.append(
-                        {
-                            "arxiv_id": paper_id,
-                            "title": result.title,
-                            "authors": [str(a) for a in result.authors],
-                            "abstract": result.summary,
-                            "pdf_url": result.pdf_url,
-                            "published_date": pub_date,
-                            "year": pub_date.year,
-                            "categories": [cat for cat in result.categories],
-                        }
-                    )
-                # _ArxivLockCtx enforces the inter-request gap on release — no manual sleep needed.
-
-        except Exception as e:
-            print(f"[arXiv] Error searching '{keyword}': {e}")
-            continue
-
-        papers.extend(keyword_papers)
-        if len(papers) >= limit:
-            break
-
-    return papers[:limit]
-
-
 _citation_cache: dict[str, int] = {}
 _CITATION_429_GIVE_UP = 5  # consecutive papers that exhausted retries on 429 → pause citation fetches
 _CITATION_PAUSE_S = 900
@@ -2215,12 +2154,22 @@ def _make_carry(crawl_log, papers_added, papers_checked, papers, arxiv_count, sc
     }
 
 
-def _search_warning(failed: list[str], all_keywords: list[str]) -> str:
-    """Email banner text: which keywords arXiv could not answer and which were searched fine."""
-    ok = [k for k in all_keywords if k not in failed]
-    text = (f"arXiv was rate limited or unavailable for {len(failed)} of {len(all_keywords)} keywords "
-            f"({', '.join(failed)}), so papers matching only those may be missing for this date range.")
-    return text + (f" Searched fine: {', '.join(ok)}." if ok else " No keyword could be searched.")
+def _merge_carry(earlier: Optional[dict], later: dict) -> dict:
+    """Add up two deferred passes (first pass + a retry round that failed again and deferred too)."""
+    if not earlier:
+        return later
+    merged = {k: earlier.get(k, 0) + later.get(k, 0) for k in ("papers_found", "papers_added", "papers_checked", "arxiv", "scholar")}
+    merged["papers"] = list(earlier.get("papers", [])) + list(later.get("papers", []))
+    merged["keywords"] = list(dict.fromkeys(list(earlier.get("keywords", [])) + list(later.get("keywords", []))))
+    return merged
+
+
+def _search_warning(failed: list[str]) -> str:
+    """Email banner text when arXiv never answered. All keywords go in one query, so it is all or nothing."""
+    days_back = int(os.environ.get("CRAWL_DAYS_BACK", "5"))
+    return (f"arXiv did not answer tonight (rate limited or unavailable), so papers from the arXiv keyword search "
+            f"({', '.join(failed)}) may be missing; the papers here come from Semantic Scholar recommendations. "
+            f"Each night searches the last {days_back} days, so the next nights cover these days again.")
 
 
 def send_carry_notification(project_id: int, carry: dict, date_from, date_to, warning: str) -> bool:
@@ -2401,7 +2350,8 @@ def run_crawl(
             db.session.commit()
             crawl_log.failed_keywords = failed_keywords  # transient attr, read by the nightly retry pass
             if defer_notification and failed_keywords:
-                crawl_log.notify_carry = _make_carry(crawl_log, 0, 0, [], arxiv_papers_count, scholar_papers_count)
+                crawl_log.notify_carry = _merge_carry(
+                    carry, _make_carry(crawl_log, 0, 0, [], arxiv_papers_count, scholar_papers_count))
             return crawl_log
 
         papers_to_process = papers_data if paper_limit <= 0 else papers_data[:paper_limit]
@@ -2671,8 +2621,8 @@ def run_crawl(
 
         carry = carry or {}
         if defer_notification and failed_keywords and not cancelled:
-            crawl_log.notify_carry = _make_carry(crawl_log, papers_added, papers_checked, newly_added_papers,
-                                                 arxiv_papers_count, scholar_papers_count)
+            crawl_log.notify_carry = _merge_carry(carry, _make_carry(crawl_log, papers_added, papers_checked, newly_added_papers,
+                                                                     arxiv_papers_count, scholar_papers_count))
             should_notify = False
         else:
             should_notify = not cancelled and (papers_added + carry.get("papers_added", 0)) > 0
@@ -2703,7 +2653,7 @@ def run_crawl(
                     date_from=date_from,
                     date_to=date_to,
                     keywords_auto_generated=keywords_auto_generated,
-                    warning=_search_warning(failed_keywords, carry.get("keywords") or list(crawl_log.keywords_list or []))
+                    warning=_search_warning(failed_keywords)
                     if failed_keywords else None,
                 )
 

@@ -63,14 +63,14 @@ class TestArxivSearch:
 
     def test_deduplication_across_keywords(self):
         """Same paper matched by two keywords should only appear once."""
-        from app.crawl import search_arxiv_papers
+        from app.crawl import search_arxiv_with_full_papers
         today = date.today()
         # Use two overlapping queries that will likely match many of the same papers
-        results = search_arxiv_papers(
+        results = search_arxiv_with_full_papers(
             ["attention mechanism transformer", "transformer self attention"],
             date_from=today - timedelta(days=30),
             date_to=today,
-            limit=50,
+            max_results=50,
         )
         ids = [p["arxiv_id"] for p in results]
         assert len(ids) == len(set(ids)), "Duplicate arxiv IDs found after dedup"

@@ -16,7 +16,6 @@ from app.crawl import (
     extract_paper_info_from_url,
     generate_research_interest_from_collection,
     extract_keywords_with_usage,
-    search_arxiv_papers,
     search_arxiv_with_full_papers,
     get_semantic_scholar_recommendations,
     arxiv_queue_depth,
@@ -374,7 +373,7 @@ def arxiv_count(slug):
     use_scholar = request.form.get("use_scholar", "1") != "0"
 
     task_id = uuid.uuid4().hex[:12]
-    _arxiv_count_tasks[task_id] = {"status": "running", "keyword_idx": 0, "keyword_total": len(keywords) if use_arxiv else 0, "count_so_far": 0, "current_keyword": ""}
+    _arxiv_count_tasks[task_id] = {"status": "running"}
 
     # Collect seed IDs (My Collection) and existing paper IDs before the thread starts
     project_obj = Project.query.filter_by(slug=slug).first()
@@ -402,18 +401,10 @@ def arxiv_count(slug):
     search_warnings: list[str] = []
 
     def _run():
-        def _progress(kw_idx, kw_total, count_so_far, current_keyword):
-            _arxiv_count_tasks[task_id].update({
-                "keyword_idx": kw_idx + 1,
-                "keyword_total": kw_total,
-                "count_so_far": count_so_far,
-                "current_keyword": current_keyword,
-            })
-
         try:
             if use_arxiv:
                 arxiv_papers = search_arxiv_with_full_papers(
-                    keywords, date_from, date_to, progress_callback=_progress, warnings=search_warnings
+                    keywords, date_from, date_to, warnings=search_warnings
                 )
             else:
                 arxiv_papers = []
@@ -616,33 +607,6 @@ def papers_partial(slug):
         trashed_papers=trashed_papers,
         search_query=search_query,
     )
-
-
-@projects_bp.route("/<slug>/crawl-search", methods=["POST"])
-@login_required
-def crawl_search(slug):
-    """Preview step: search arXiv with freshly-extracted keywords and report a paper count,
-    without screening or persisting anything — lets the user sanity-check before crawling."""
-    project = Project.query.filter_by(slug=slug).first_or_404()
-    collection_pps = ProjectPaper.query.filter_by(project_id=project.id).filter(
-        ProjectPaper.manual_tag.isnot(None), ProjectPaper.trashed_at.is_(None)
-    ).all()
-
-    if not project.research_interest and not collection_pps:
-        return jsonify({"error": "Please set a research interest or add papers to My Collection first."}), 400
-
-    date_from_str = request.form.get("date_from")
-    date_to_str = request.form.get("date_to")
-    date_from = date.fromisoformat(date_from_str) if date_from_str else (date.today() - timedelta(days=7))
-    date_to = date.fromisoformat(date_to_str) if date_to_str else date.today()
-
-    try:
-        keywords, _ = extract_keywords_with_usage(project.research_interest, collection_pps)
-    except LLMUnavailableError as e:
-        return jsonify({"error": f"LLM unavailable: {str(e)}"}), 503
-
-    papers = search_arxiv_papers(keywords, date_from, date_to, limit=1000)
-    return jsonify({"papers_found": len(papers), "keywords": keywords})
 
 
 @projects_bp.route("/<slug>/generate-keywords", methods=["POST"])

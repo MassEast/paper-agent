@@ -1,6 +1,8 @@
 <div class="paper-card"
     id="paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
-    data-added-at="{{ pp.added_at.isoformat() if pp.added_at else '' }}"
+    {# "Date added" sort key: in My Collection, when it was collected (older links have no collected_at) #}
+    {% set _sort_added = (pp.collected_at if pp.manual_tag and pp.collected_at else pp.added_at) %}
+    data-added-at="{{ _sort_added.isoformat() if _sort_added else '' }}"
     data-pub-date="{{ pp.paper.published_date.isoformat() if pp.paper.published_date else '' }}"
     data-tags="{{ pp.tags_list | join(',') }}"
     style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">

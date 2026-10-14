@@ -713,13 +713,15 @@
                     <ol
                         style="list-style: decimal; padding-left: 16px; color: var(--ink-2); display: flex; flex-direction: column; gap: 8px;">
                         <li>
-                            <strong>arXiv keyword search:</strong> Queries arXiv for each keyword phrase from the
-                            Keywords widget above, restricted to your date range; deduplicates results by ID. arXiv
-                            returns at most 200 results per query, so a keyword that hits that cap is searched again
-                            further back in the date range. Every request to arXiv (search, HTML, PDF) goes through
-                            one global lock with at least 5 s between requests. If another crawl or search is active
-                            you'll see "Waiting for arXiv…" below. A keyword arXiv can't answer (rate limit, outage)
-                            is reported as a warning; the nightly crawl retries it once at the end of the run.
+                            <strong>arXiv keyword search:</strong> Queries arXiv once for all keyword phrases from the
+                            Keywords widget above (a paper matching any of them counts), restricted to your date range;
+                            deduplicates results by ID. arXiv returns at most 200 results per query, so a search that
+                            hits that cap continues further back in the date range. Every request to arXiv (search,
+                            HTML, PDF) goes through one global lock with at least 5 s between requests. If another
+                            crawl or search is active you'll see "Waiting for arXiv…" below. If arXiv is rate limiting
+                            or busy, the search waits and tries again (after 2, then 4 minutes); if it still gets no
+                            answer, that is reported as a warning, and the nightly crawl tries again twice more at
+                            the end of the run.
                         </li>
                         <li>
                             <strong>Semantic Scholar recommendations</strong> (if you have papers in My
@@ -1129,16 +1131,10 @@
                                                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
                                                 _spinnerHtml + ' Waiting for arXiv&hellip; (' + waiters + ' request' + (waiters > 1 ? 's' : '') + ' ahead, ' + s + 's)</div>';
                                         } else {
-                                            const kwInfo = data.keyword_total > 0
-                                                ? ' · Keyword ' + data.keyword_idx + '/' + data.keyword_total
-                                                : '';
-                                            const countInfo = data.count_so_far > 0
-                                                ? ' · ' + data.count_so_far + ' found so far'
-                                                : '';
                                             const scholarInfo = data.scholar_status === 'running' ? ' · fetching Semantic Scholar…' : '';
                                             countContent.innerHTML =
                                                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
-                                                _spinnerHtml + ' Searching ' + sourceLabel + '&hellip; ' + s + 's' + kwInfo + countInfo + scholarInfo + '</div>';
+                                                _spinnerHtml + ' Searching ' + sourceLabel + '&hellip; ' + s + 's' + scholarInfo + '</div>';
                                         }
                                         setTimeout(() => pollCountStatus(taskId), 2500);
                                     }
