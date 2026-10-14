@@ -117,6 +117,7 @@ Toggle is in the project sidebar (UI POST to `/projects/<slug>/toggle-nightly-cr
 ### Templates
 
 - `base.html` — layout, nav, CSS tokens
+- `projects.html` — project list; the star on a card keeps that project on top, stored per browser in `localStorage` (`starred-projects`), not in the DB, since everyone shares one site login
 - `project_detail.html` — the main working page; large file with inline `<script>` blocks for HTMX orchestration of the crawl count → crawl start flow
 - `partials/paper_list.html` — HTMX-swappable paper list (New Papers + My Collection + Trash)
 - `partials/paper_card.html` — single paper with tag buttons, notes, notify bell

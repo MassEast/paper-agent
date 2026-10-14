@@ -399,3 +399,28 @@ def test_tooltips_show_fast_on_hover(app, page, two_projects):
         assert text in tip.inner_text()
         page.mouse.move(0, 0)
         page.wait_for_function("() => !document.getElementById('rw-tip').classList.contains('show')", timeout=600)
+
+
+# ── Starred projects (projects page, per browser) ─────────────────────────────
+
+@pytest.mark.slow
+def test_starred_project_goes_on_top_and_stays_after_reload(live_server, browser_session, two_projects):
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state)
+    pg = context.new_page()
+    pg.goto(f"{live_server}/projects")
+    order = lambda: pg.eval_on_selector_all("#project-grid .project-card", "cs => cs.map(c => c.dataset.slug)")
+    server_order = order()
+    # Newest first from the server, so the source project sits below the target
+    assert server_order.index("pa-source") > server_order.index("pa-target")
+
+    pg.locator('.project-card[data-slug="pa-source"] .project-star-btn').click()
+    assert order()[0] == "pa-source"
+    pg.reload()
+    assert order()[0] == "pa-source"
+    star = pg.locator('.project-card[data-slug="pa-source"] .project-star-btn')
+    assert star.get_attribute("aria-pressed") == "true"
+
+    star.click()
+    assert order() == server_order
+    context.close()

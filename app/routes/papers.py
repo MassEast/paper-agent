@@ -12,6 +12,7 @@ from app import db
 from app.auth import login_required
 from app.models import Paper, ProjectPaper, Project
 from app.routes import papers_bp
+from app.utils import base_arxiv_id
 from app.crawl import (
     generate_summary_with_full_content,
     get_paper_figure,
@@ -488,9 +489,9 @@ def export_csv(slug):
             authors = "; ".join(json.loads(p.authors)) if p.authors else ""
         except (json.JSONDecodeError, TypeError):
             authors = p.authors or ""
-        base_id = p.arxiv_id.split("v")[0] if p.arxiv_id and not p.arxiv_id.startswith("web:") else ""
-        arxiv_url = f"https://arxiv.org/abs/{base_id}" if base_id else (p.arxiv_id or "")
-        writer.writerow([p.title or "", authors, arxiv_url, pp.manual_tag or "untagged", p.abstract or ""])
+        # Same link as the card: arXiv abs page, or the stored URL of a web-added paper
+        url = f"https://arxiv.org/abs/{base_arxiv_id(p.arxiv_id)}" if p.is_arxiv else (p.pdf_url or "")
+        writer.writerow([p.title or "", authors, url, pp.manual_tag or "untagged", p.abstract or ""])
 
     csv_bytes = buf.getvalue().encode("utf-8")
     return Response(

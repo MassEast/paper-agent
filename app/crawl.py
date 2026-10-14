@@ -1652,13 +1652,13 @@ def enrich_institutions_from_scholar(papers: list) -> None:
                     headers=_scholar_headers(),
                 )
         if r.status_code == 200:
-            id_map = {p.arxiv_id.split("v")[0]: p for p in to_enrich}
+            id_map = {base_arxiv_id(p.arxiv_id): p for p in to_enrich}
             for item in r.json():
                 if not item:
                     continue
                 ext = (item.get("externalIds") or {})
                 aid = ext.get("ArXiv") or ""
-                paper = id_map.get(aid.split("v")[0])
+                paper = id_map.get(base_arxiv_id(aid))
                 if not paper:
                     continue
                 affs: set[str] = set()
