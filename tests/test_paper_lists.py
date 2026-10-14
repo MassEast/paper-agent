@@ -133,6 +133,24 @@ def test_tag_toggle_returns_the_card_and_fresh_tag_counts(c, big_project):
     assert 'id="col-tag-pills" hx-swap-oob="true"' in html and "1 to discuss" in html
 
 
+def test_discuss_only_tags_and_never_emails(c, big_project, monkeypatch):
+    """'Discuss' is a plain tag toggle: it used to also build a flagged-paper email (figure download inside
+    the arXiv lock, ~5 s per click), which only the Notify button should send."""
+    import app.crawl as crawl
+    sent = []
+    monkeypatch.setattr(crawl, "send_notification", lambda *a, **k: sent.append(a) or True)
+    with c.application.app_context():
+        Project.query.get(big_project).notification_emails = "justus.westerhoff@bht-berlin.de"
+        db.session.commit()
+    html = c.get("/projects/pl-proj").data.decode()
+    assert "/tag-and-notify" not in html
+    assert re.search(r'hx-post="/paper/2603\.00000/tag"\s+hx-vals=\'\{"project_id": \d+, "tag": "to_discuss"\}\'', html)
+    resp = c.post("/paper/2603.00000/tag", data={"project_id": big_project, "tag": "to_discuss"},
+                  headers={"HX-Request": "true"})
+    assert resp.status_code == 200 and "1 to discuss" in resp.data.decode()
+    assert sent == []
+
+
 def test_bad_section_or_offset_is_rejected(c, big_project):
     assert c.get("/projects/pl-proj/papers/more?section=nope&offset=0").status_code == 400
     assert c.get("/projects/pl-proj/papers/more?section=new&offset=-1").status_code == 400

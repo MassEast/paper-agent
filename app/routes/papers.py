@@ -211,53 +211,6 @@ def transfer_paper(arxiv_id):
                            copied_to=target_project)
 
 
-@papers_bp.route("/paper/<arxiv_id>/tag-and-notify", methods=["POST"])
-@login_required
-def tag_and_notify(arxiv_id):
-    """Toggle a MULTI_TAGS label (important/to_read/to_discuss) and, only when the tag was
-    newly added (not removed) and the project has notification emails set, send the
-    "paper flagged" email. Removing a tag never triggers a notification."""
-    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
-    project_id = request.form.get("project_id", type=int)
-    tag = request.form.get("tag")
-    added = False
-
-    if project_id:
-        pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
-        if pp and tag in MULTI_TAGS:
-            tags = pp.tags_list
-            if tag in tags:
-                tags.remove(tag)
-                added = False
-            else:
-                tags.append(tag)
-                added = True
-            pp.paper_tags = json.dumps(tags)
-            if pp.manual_tag is None:
-                pp.manual_tag = "related"
-                pp.collected_at = datetime.utcnow()
-            db.session.commit()
-
-        project = Project.query.get(project_id)
-        if added and pp and project and project.notification_emails:
-            from app.crawl import notify_important_paper
-
-            notify_important_paper(
-                paper=paper,
-                project_name=project.name,
-                project_slug=project.slug,
-                figure_url=paper.figure_url,
-                figure_caption=paper.figure_caption,
-                notes=pp.notes if pp else None,
-            )
-
-    if request.headers.get("HX-Request") and project_id:
-        if pp is not None and project is not None:
-            return _card_response(pp, project)
-        return ("", 204)
-    return ("", 204)
-
-
 @papers_bp.route("/paper/<arxiv_id>/regenerate", methods=["POST"])
 @login_required
 def regenerate_paper(arxiv_id):

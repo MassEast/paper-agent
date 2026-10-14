@@ -97,7 +97,7 @@
                 style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
                     {% if 'to_discuss' in _tags %}border: 1px solid color-mix(in oklch, var(--tag-discuss-ink) 40%, transparent); color: var(--tag-discuss-ink); background-color: var(--tag-discuss-bg);
                     {% else %}border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3);{% endif %}"
-                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag-and-notify"
+                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
                 hx-vals='{"project_id": {{ project.id }}, "tag": "to_discuss"}'
                 hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" hx-swap="outerHTML">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
