@@ -116,6 +116,7 @@ class TestRunCrawl:
         from app.models import PaperSummary
         links = ProjectPaper.query.filter_by(project_id=project.id).all()
         assert {PaperSummary.query.filter_by(paper_id=pp.paper_id).one().content_source for pp in links} == {"full_text"}
+        assert {pp.origin for pp in links} == {"crawl"}
 
     def test_skips_irrelevant_papers(self, app, project):
         from app.models import CrawlLog, ProjectPaper

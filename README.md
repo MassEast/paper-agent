@@ -77,6 +77,8 @@ Next to "AI Summary" each card says what the summary was made from: the paper's 
 
 **Ask about a paper.** Every card has an "Ask about this paper" chat. The model reads the paper's full text (arXiv's HTML version, else the PDF; the chat says "⚠ Abstract only" when neither is available) together with the project's research interest, and answers in markdown with rendered math. The chat is saved with the paper, per project like the notes, and visible to everyone on the project; Copy / Move takes it along. Answers stream in as they are written (the model's thinking is never shown, stored, or sent back), keep going if you close the page, and can be stopped. Questions sent while an answer is coming are queued. The header shows how much of the model's context window the conversation fills; when it is full you clear the chat rather than have old turns silently dropped. Each question re-sends the paper, but the LLM server's prefix cache usually makes follow-up questions start answering within a second.
 
+Each card also says how the paper got into the project: found by a crawl, added by hand, or copied / moved from another project.
+
 A paper you add by URL fills in its card while you watch: it shows what is being fetched ("Fetching the figure", "Writing the AI summary…") and redraws itself as the details arrive, no reload needed.
 
 A paper that is already in the project (New Papers, My Collection or Trash) is never added again. Papers the agent rejected are remembered too and skipped without another LLM call, as long as the research interest and My Collection stay the same; change either and earlier rejects get checked again.

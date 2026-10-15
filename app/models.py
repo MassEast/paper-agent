@@ -168,6 +168,11 @@ class ProjectPaper(db.Model):
     # Per project (the summary is shared across projects): one or two sentences from the
     # screening LLM on why this paper matters for this project's research interest.
     relevance_reason = db.Column(db.Text, nullable=True)
+    # How the paper came into this project: "crawl" (nightly or Find Papers, via New Papers), "manual" (added
+    # by URL), "copied" / "moved" (Copy / Move from origin_project_id). None: from before this was recorded
+    # and not safely inferable (see the backfill in create_app).
+    origin = db.Column(db.Text)
+    origin_project_id = db.Column(db.Integer)
 
     __table_args__ = (
         db.UniqueConstraint("project_id", "paper_id"),
@@ -177,6 +182,10 @@ class ProjectPaper(db.Model):
     paper = db.relationship("Paper", back_populates="project_links")
     chat_messages = db.relationship("ChatMessage", back_populates="project_paper", cascade="all, delete-orphan",
                                     order_by="ChatMessage.id")
+
+    @property
+    def origin_project(self):
+        return db.session.get(Project, self.origin_project_id) if self.origin_project_id else None
 
     @property
     def tags_list(self) -> list[str]:

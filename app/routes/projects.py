@@ -215,7 +215,7 @@ def add_to_collection(slug):
                 # Active in collection already
                 return redirect(url_for("projects.detail", slug=slug, add_info="already_exists"))
             # Paper exists in DB but not linked to this project
-            pp = ProjectPaper(project_id=project.id, paper_id=existing_paper.id,
+            pp = ProjectPaper(project_id=project.id, paper_id=existing_paper.id, origin="manual",
                               manual_tag="related", paper_tags='["important"]', collected_at=datetime.utcnow())
             db.session.add(pp)
             db.session.commit()
@@ -226,7 +226,7 @@ def add_to_collection(slug):
         paper = Paper(arxiv_id=arxiv_id, title=f"arXiv:{arxiv_id}", source="manual", authors="[]")
         db.session.add(paper)
         db.session.flush()
-        pp = ProjectPaper(project_id=project.id, paper_id=paper.id,
+        pp = ProjectPaper(project_id=project.id, paper_id=paper.id, origin="manual",
                           manual_tag="related", paper_tags='["important"]', collected_at=datetime.utcnow())
         db.session.add(pp)
         db.session.commit()
@@ -247,7 +247,7 @@ def add_to_collection(slug):
                     db.session.commit()
                     return redirect(url_for("projects.detail", slug=slug))
                 return redirect(url_for("projects.detail", slug=slug, add_info="already_exists"))
-            pp = ProjectPaper(project_id=project.id, paper_id=existing_paper.id,
+            pp = ProjectPaper(project_id=project.id, paper_id=existing_paper.id, origin="manual",
                               manual_tag="related", paper_tags='["important"]', collected_at=datetime.utcnow())
             db.session.add(pp)
             db.session.commit()
@@ -256,7 +256,7 @@ def add_to_collection(slug):
         paper = Paper(arxiv_id=synthetic_id, title="Fetching…", pdf_url=url, source="web", authors="[]")
         db.session.add(paper)
         db.session.flush()
-        pp = ProjectPaper(project_id=project.id, paper_id=paper.id,
+        pp = ProjectPaper(project_id=project.id, paper_id=paper.id, origin="manual",
                           manual_tag="related", paper_tags='["important"]', collected_at=datetime.utcnow())
         db.session.add(pp)
         db.session.commit()

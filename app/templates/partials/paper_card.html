@@ -247,12 +247,17 @@
         </span>
         {% endif %}
         {% if pp.added_at or pp.collected_at %}
+        {# How the paper came into this project (ProjectPaper.origin) and when it was collected; a paper added
+           straight into My Collection (by hand, copied, moved) doesn't repeat the same day as "Collected" #}
+        {% set _src = pp.origin_project %}
+        {% set _show_collected = pp.collected_at and not (pp.origin in ('manual', 'copied', 'moved') and pp.added_at
+                                                          and pp.added_at.date() == pp.collected_at.date()) %}
         <span class="text-xs" style="color: var(--ink-4); display: inline-flex; align-items: center; gap: 6px;"
-            data-tip="{% if pp.added_at %}Added to New Papers {{ pp.added_at.strftime('%b %-d, %Y') }}{% endif %}{% if pp.collected_at %}{% if pp.added_at %} | {% endif %}Added to My Collection {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}">
+            data-tip="{% if pp.origin == 'crawl' %}Found by a crawl (nightly or Find Papers) and put into New Papers on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.origin == 'manual' %}Added by hand (pasted link) on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.origin in ('copied', 'moved') %}{{ pp.origin | capitalize }} here from the project {{ _src.name if _src else '(deleted)' }} on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.added_at %}Added to this project {{ pp.added_at.strftime('%b %-d, %Y') }} (how is not known: it came in before this was recorded){% endif %}{% if _show_collected %} | Moved to My Collection {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <use href="/static/icons.svg#icon-calendar"></use>
             </svg>
-            {% if pp.added_at %}Added {{ pp.added_at.strftime('%b %-d, %Y') }}{% endif %}{% if pp.collected_at %}{% if pp.added_at %} | {% endif %}Collected {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}
+            {% if pp.added_at %}{% if pp.origin == 'crawl' %}Found by crawl{% elif pp.origin == 'manual' %}Added by hand{% elif pp.origin in ('copied', 'moved') %}{{ pp.origin | capitalize }} from {{ _src.name if _src else 'another project' }}{% else %}Added{% endif %} {{ pp.added_at.strftime('%b %-d, %Y') }}{% endif %}{% if _show_collected %}{% if pp.added_at %} | {% endif %}Collected {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}
         </span>
         {% endif %}
         {% if pp.paper.summary and pp.paper.summary.elapsed_ms is not none %}

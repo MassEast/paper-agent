@@ -2592,7 +2592,7 @@ def run_crawl(
                     pd = result["paper_data"]
                     if pd.get("existing_paper_id"):
                         paper = Paper.query.get(pd["existing_paper_id"])
-                        db.session.add(ProjectPaper(project_id=project_id, paper_id=paper.id,
+                        db.session.add(ProjectPaper(project_id=project_id, paper_id=paper.id, origin="crawl",
                                                     relevance_reason=result["why"] or None))
                         newly_added_papers.append(paper)
                         papers_added += 1
@@ -2645,7 +2645,7 @@ def run_crawl(
 
                     link = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
                     if not link:
-                        link = ProjectPaper(project_id=project_id, paper_id=paper.id,
+                        link = ProjectPaper(project_id=project_id, paper_id=paper.id, origin="crawl",
                                             relevance_reason=result["why"] or None)
                         db.session.add(link)
                         newly_added_papers.append(paper)

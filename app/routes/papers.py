@@ -294,7 +294,8 @@ def transfer_paper(arxiv_id):
     now = datetime.utcnow()
     target = ProjectPaper.query.filter_by(project_id=target_id, paper_id=paper.id).first()
     if target is None:
-        target = ProjectPaper(project_id=target_id, paper_id=paper.id, added_at=now)
+        target = ProjectPaper(project_id=target_id, paper_id=paper.id, added_at=now,
+                              origin="moved" if mode == "move" else "copied", origin_project_id=project_id)
         db.session.add(target)
     target.trashed_at = None
     if target.manual_tag is None:

@@ -49,6 +49,17 @@ def setup_logging(app: Flask):
     return file_handler
 
 
+# Backfill of ProjectPaper.origin, only where it is certain: a paper in exactly one project was added there by
+# URL if its source says so (only the URL add sets "manual"/"web"; a copied paper would be in two projects), and
+# otherwise found by a crawl there. Papers in several projects stay unknown. Runs on every start like the other
+# migrations, but only touches rows without an origin, and every link created since sets one.
+ORIGIN_BACKFILL_SQL = (
+    "UPDATE project_papers SET origin = CASE WHEN (SELECT source FROM papers WHERE id = paper_id) IN ('manual', 'web') "
+    "THEN 'manual' ELSE 'crawl' END WHERE origin IS NULL "
+    "AND (SELECT COUNT(*) FROM project_papers x WHERE x.paper_id = project_papers.paper_id) = 1"
+)
+
+
 def create_app():
     app = Flask(__name__)
 
@@ -116,6 +127,9 @@ def create_app():
             "ALTER TABLE papers ADD COLUMN citation_attempted_at DATETIME",
             "ALTER TABLE project_papers ADD COLUMN relevance_reason TEXT",
             "ALTER TABLE paper_summaries ADD COLUMN content_source TEXT",
+            "ALTER TABLE project_papers ADD COLUMN origin TEXT",
+            "ALTER TABLE project_papers ADD COLUMN origin_project_id INTEGER",
+            ORIGIN_BACKFILL_SQL,
         ]
         for _sql in _migrations:
             try:
