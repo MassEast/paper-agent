@@ -728,3 +728,30 @@ def test_unavailable_model_says_so_instead_of_thinking_forever(c, app, chat_pp, 
     _idle(chat_pp["pp"])
     role, status, content = _msgs(app, chat_pp["pp"])[1]
     assert status == "error" and "The model is not available right now" in content and "Try again later" in content
+
+
+def test_prompt_carries_the_project_keywords_and_the_card_notes(c, app, chat_pp, monkeypatch, full_text):
+    """The model reads the researcher's own terms in the project's sense (2026-10-15: "programs" was taken
+    for changed weights when only the research interest was there)."""
+    with app.app_context():
+        db.session.get(Project, chat_pp["project"]).saved_keywords = json.dumps(["layer looping", "PoLar"])
+        db.session.get(ProjectPaper, chat_pp["pp"]).notes = "maybe not for polars"
+        db.session.commit()
+    model = FakeModel(["Answer."])
+    monkeypatch.setattr(chat, "_llm_stream", model)
+    _ask(c, chat_pp, "Q?")
+    _idle(chat_pp["pp"])
+    system = model.calls[0][0]["content"]
+    assert "in the sense of that project" in system
+    assert "Search keywords of the project: layer looping, PoLar" in system
+    assert "The researcher's notes on this paper: maybe not for polars" in system
+    assert "sparse attention" in system and "It sparsifies attention." in system
+
+
+def test_prompt_leaves_out_keywords_and_notes_when_there_are_none(c, app, chat_pp, monkeypatch, full_text):
+    model = FakeModel(["Answer."])
+    monkeypatch.setattr(chat, "_llm_stream", model)
+    _ask(c, chat_pp, "Q?")
+    _idle(chat_pp["pp"])
+    system = model.calls[0][0]["content"]
+    assert "Search keywords" not in system and "notes on this paper" not in system

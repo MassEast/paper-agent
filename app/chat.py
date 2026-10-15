@@ -166,6 +166,9 @@ def build_messages(pp, text: str, source: str, question) -> list[dict]:
     paper, project = pp.paper, pp.project
     system = prompts.PAPER_CHAT_SYSTEM.format(
         research_interest=(project.research_interest or "(not set)").strip(),
+        keywords_line=f"\nSearch keywords of the project: {', '.join(project.saved_keywords_list)}\n"
+        if project.saved_keywords_list else "",
+        notes_line=f"\nThe researcher's notes on this paper: {pp.notes.strip()}\n" if (pp.notes or "").strip() else "",
         relevance_line=f"Why this paper was flagged for the project: {pp.relevance_reason}\n" if pp.relevance_reason else "",
         title=paper.title,
         authors=", ".join(paper.authors_list) or "unknown",
