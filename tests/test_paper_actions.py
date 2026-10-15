@@ -121,7 +121,7 @@ def test_move_trashes_paper_in_source(app, logged_in, two_projects):
     assert _link(ids["src"], ids["new"]).trashed_at is not None
     target = _link(ids["dst"], ids["new"])
     assert target.manual_tag == "related" and target.trashed_at is None
-    assert json.loads(target.paper_tags) == ["to_read"]  # same default as "Move to My Collection"
+    assert json.loads(target.paper_tags) == []  # an untagged paper stays untagged, no "to read" default
 
 
 def _chat(project_id, paper_id, turns):

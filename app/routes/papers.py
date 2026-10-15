@@ -302,7 +302,7 @@ def transfer_paper(arxiv_id):
         target.manual_tag = "related"
         target.collected_at = now
     tags = target.tags_list
-    for tag in source.tags_list or ["to_read"]:  # same default as "Move to My Collection"
+    for tag in source.tags_list:
         if tag not in tags:
             tags.append(tag)
     target.paper_tags = json.dumps(tags)

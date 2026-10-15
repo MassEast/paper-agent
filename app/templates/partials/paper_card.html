@@ -322,7 +322,8 @@
             style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; border: 1px solid var(--border-default); color: var(--ink-2); background-color: var(--paper-3); display: inline-flex; align-items: center; gap: 6px;"
             hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
             hx-vals='{"project_id": {{ project.id }}, "tag": "related"}'
-            hx-target="closest .paper-card" hx-swap="outerHTML">
+            hx-target="closest .paper-card" hx-swap="outerHTML"
+            data-tip="Moves the paper to My Collection, tagged &quot;to read&quot;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color: var(--warning);">
                 <use href="/static/icons.svg#icon-star"></use>
             </svg>
