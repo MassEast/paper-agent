@@ -1,6 +1,6 @@
 """
 Token usage per project (app/usage.py, LlmUsage): every action that calls the model writes one row with
-its kind, project totals and the "AI Usage" panel under the crawl calendar sum those rows, and the card's
+its kind, project totals and the "LLM Usage" panel under the crawl calendar sum those rows, and the card's
 summary tokens cover only the summary + contributions of the latest run.
 
 LLM calls are mocked; llm._count stands in for a completed call where only the counting matters.
@@ -130,7 +130,7 @@ def test_project_page_shows_the_usage_by_kind_and_the_total(app, proj, logged_in
     panel = html[html.index('id="usage-panel"'):]
     assert panel.index("Crawls") < panel.index("Paper chat")
     assert "3.00M" in panel and "1.2k" in panel and "Everything is counted since Oct 15, 2026" in panel
-    assert "AI usage:" in html and "~3.00M tokens" in html and "(all crawls)" not in html
+    assert "LLM usage:" in html and "~3.00M tokens" in html and "(all crawls)" not in html
 
     listing = logged_in.get("/projects").get_data(as_text=True)
     assert "3.00M tok" in listing
