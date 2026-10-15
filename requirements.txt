@@ -8,3 +8,5 @@ arxiv
 python-dotenv
 Pillow
 pypdf
+markdown-it-py
+mdit-py-plugins

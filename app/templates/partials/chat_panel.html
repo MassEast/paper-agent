@@ -1,0 +1,22 @@
+{# The chat about one paper in one project (app/chat.py), swapped as the contents of #chat-<pp.id>.
+   While an answer streams only its message polls; when it ends, the log, head and notice are redrawn
+   (chat_message route) but never the form, so a question being typed survives. #}
+{% set cv = chat_view(pp) %}
+<div class="chat-panel">
+    {% include "partials/chat_head.html" %}
+    {% include "partials/chat_log.html" %}
+    {% include "partials/chat_notice.html" %}
+    {# action: a submit in the ~20 ms before htmx has bound a freshly swapped form must not navigate #}
+    <form class="chat-form" action="javascript:void(0)" hx-post="/paper/{{ pp.paper.arxiv_id }}/chat" hx-vals='{"project_id": {{ project.id }}}'
+        hx-target="#chat-{{ pp.id }}" hx-swap="innerHTML">
+        <textarea name="question" rows="1" class="chat-input" data-pp="{{ pp.id }}"
+            placeholder="Ask about this paper…"
+            {% if cv.full %}disabled{% endif %}{% if focus %} autofocus{% endif %}
+            onkeydown="if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (this.value.trim()) this.form.requestSubmit(); }"></textarea>
+        <button type="submit" class="chat-send focus-ring" {% if cv.full %}disabled{% endif %}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-send"></use></svg>
+            Send
+        </button>
+    </form>
+    <div class="chat-foot">Enter sends, Shift+Enter starts a new line. Saved with the paper and visible to everyone on this project. Questions sent meanwhile are queued.</div>
+</div>

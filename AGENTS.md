@@ -52,6 +52,14 @@ Single entry point for all LLM calls, against any endpoint that speaks the stand
 
 Model cascade: tries each model in `LLM_MODELS` (comma-separated env var) in order, with 5 retries per model and exponential backoff, before falling through to the next. All prompts live in `app/prompts.py` — edit there, not inline.
 
+`_llm_stream(messages, ...)` is the streaming variant used by the paper chat: it yields the visible answer so far (empty while the model is still inside its leading `<think>` block), a `("retry", model, attempt)` tuple before each retry, and finally `{"model", "usage", "finish_reason"}`. It only falls back to the next model before the first chunk arrives; a 400 (prompt too long) is not retried on the same model.
+
+### Paper chat (`app/chat.py`)
+
+"Ask about this paper" on a card: one conversation per `ProjectPaper` (`ChatMessage` rows; the table uses AUTOINCREMENT so ids are never reused after a clear, since they key in-memory state and the pages' polls). Each turn sends `PAPER_CHAT_SYSTEM` (research interest, why-relevant line, the paper's text) plus the earlier finished questions and answers; thinking is never stored or resent. The text is fetched once and kept in `PaperText` (arXiv HTML via `fetch_paper_full_text`, else the arXiv PDF, else an open-access PDF for web papers, else none → "abstract only", retried next question).
+
+One worker thread per chat (`_running`, `_lock`) works through the questions in order: a question asked while an answer streams is stored as `queued`. The visible answer lives in `_live` (in memory, so the single-process rule below applies); the card polls `/chat/message/<id>` every 700 ms, which returns the answer so far and, once it ended, the conversation log plus the head (source label, context meter) out of band, never the input form. Stop sets a flag the worker checks per chunk and closes the HTTP stream. The worker never holds a SQLite write transaction while streaming, and writes results with `UPDATE ... WHERE id`, so clearing a chat mid-answer is safe. A restart leaves a `streaming` row with no worker: `chat.view()` marks it interrupted and restarts the queue. The context meter shows the model's `prompt_tokens` for the last answer plus the answer's length (3.2 chars/token, measured), estimated live while streaming, against `CHAT_CONTEXT_TOKENS`; a question that would not fit is refused instead of dropping old turns. Tests: `tests/test_paper_chat.py` (scripted fake model).
+
 ### Crawl pipeline (`app/crawl.py`)
 
 `run_crawl(project_id, date_from, date_to, ...)` is the main entrypoint, always called via `start_crawl_async(...)` which wraps it in a daemon thread. Flow:
@@ -93,6 +101,10 @@ Papers do **not** automatically move between sections — only explicit user act
 
 PDF downloads (for page count + institution extraction, `_enrich_web_paper_pdf_metadata`) only happen for hosts in `OPEN_ACCESS_PDF_DOMAINS` (arxiv.org, ar5iv.labs.arxiv.org, aclanthology.org, proceedings.mlr.press, openreview.net, proceedings.neurips.cc, openaccess.thecvf.com, ojs.aaai.org, ijcai.org, jmlr.org) — checked via `_is_open_access_pdf_domain`. Any other domain still gets its landing-page metadata read, just never a PDF fetch. All outbound requests (this pipeline and the arXiv/Scholar crawl paths) carry a `USER_AGENT` identifying the bot with a link to this repo (`app/utils.py`).
 
+While `start_collection_add_async` / `start_web_paper_add_async` run, `crawl._enriching` holds the step each paper is on; `paper_card.html` shows it and polls `/project-paper/<id>/card`, which answers 204 while the step is unchanged and the whole card (HX-Retarget) once it changed or the work is done, so a freshly added paper fills in without a reload. The redraw waits while someone types in that card (`htmx:beforeSwap` in `base.html`). Tests: `tests/test_enrich_status.py`.
+
+`PaperSummary.content_source` records what a summary and its main contributions were made from (`full_text` / `web_page` / `abstract`, via `crawl.summary_source`, which mirrors the generators' own fallback); the card labels it, and `None` (summaries from before) shows nothing.
+
 The nightly Pass-3 backfill (`backfill_missing_paper_metadata` in `crawl.py`) retries `"web:"` papers still missing `page_count`/`institutions`, capped at `MAX_WEB_ENRICH_ATTEMPTS` (3) total via `Paper.web_enrich_attempts`/`web_enrich_last_attempt_at` — not per night. Once capped, `paper_card.html` shows a "Retry" button + attempt count; `POST /paper/<id>/retry-web-enrich` resets the counter and re-runs `_enrich_one_web_paper` in a background thread (same fire-and-forget pattern as `start_web_paper_add_async`).
 
 ### Nightly crawl scheduling
@@ -120,7 +132,8 @@ Toggle is in the project sidebar (UI POST to `/projects/<slug>/toggle-nightly-cr
 - `projects.html` — project list; the star on a card keeps that project on top, stored per browser in `localStorage` (`starred-projects`), not in the DB, since everyone shares one site login
 - `project_detail.html` — the main working page; large file with inline `<script>` blocks for HTMX orchestration of the crawl count → crawl start flow
 - `partials/paper_list.html` — the three sections (`section_new.html`, `section_col.html`, `section_trash.html`). Sorting and the My Collection tag filter run on the server (`app/paper_lists.py`); the page keeps the state in JS and sends it with every htmx request (`htmx:configRequest`), and each list renders `PAGE_SIZE` (10) cards plus a sentinel that loads the next page when it scrolls into view (`/projects/<slug>/papers/more`). A card action that moves a paper (collect, move back, trash, restore, Copy / Move's Move) removes that card and re-renders only the destination section plus the header counts out of band (`_moved_response` in `routes/papers.py`), so the reader keeps their place. "Date added" in My Collection means `collected_at`. Responses are compressed (Flask-Compress): a big project page was ~5 MB raw.
-- `partials/paper_card.html` — single paper with tag buttons, notes, notify bell
+- `partials/paper_card.html` — single paper with tag buttons, notes, notify bell, and the chat slot (`partials/chat_slot.html` → `chat_panel.html`, `chat_head.html`, `chat_log.html`, `chat_message.html`, `chat_live.html`, `chat_context.html`, `chat_notice.html`). Chat drafts are kept in `sessionStorage`; answers render markdown (raw HTML escaped) with math drawn by KaTeX from jsdelivr
+- `partials/crawl_banner.html` — "Nightly crawl is off" banner with a setup checklist; redraws itself on the `crawlSetupChanged` event (HX-Trigger from the email/toggle/card-action routes, fired by hand after the page's `fetch()` saves of research interest, keywords and emails)
 - `partials/crawl_status.html` — live crawl progress, auto-polls via HTMX
 
 ### Logs
@@ -131,7 +144,7 @@ Toggle is in the project sidebar (UI POST to `/projects/<slug>/toggle-nightly-cr
 
 `gunicorn` runs with `--workers 1 --threads 4 --timeout 120`. **Do not increase `--workers` beyond 1** — the entire app depends on being a single process:
 - `_arxiv_lock` / `_arxiv_waiters` (in `app/utils.py`, re-exported from `crawl.py`) enforce a global arXiv rate limit (one request in flight at a time, ≥5s gap) covering the search API *and* ar5iv/arxiv.org HTML+PDF fetches — all outbound arXiv-domain requests go through it. Each worker process would get its own copy of these; they can't see each other, so concurrent arXiv requests from different workers would bypass the lock entirely.
-- `_crawl_current_papers`, `_arxiv_count_tasks` (in-memory crawl/count state) — UI polling could hit a different worker than the one running the crawl, returning stale or missing data.
+- `_crawl_current_papers`, `_arxiv_count_tasks`, `crawl._enriching`, and the paper chat's `_live`/`_running` (in-memory state) — UI polling could hit a different worker than the one running the task, returning stale or missing data.
 - SQLite write contention — WAL mode helps reads, but concurrent writers across processes still cause `database is locked` errors.
 
 The 4 threads are sufficient: they share all in-process state correctly and handle concurrent web requests during long LLM/crawl operations.

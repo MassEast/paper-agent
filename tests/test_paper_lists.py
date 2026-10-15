@@ -187,3 +187,14 @@ def test_scroll_loads_more_and_collect_keeps_place_on_a_phone(live_server, brows
     pg.get_by_role("button", name="Release date").first.click()
     pg.wait_for_function(f"() => document.querySelector('#new-papers-list > .paper-card').id.startsWith('paper-card-2602-{N_NEW - 1:05d}')")
     context.close()
+
+
+def test_nightly_crawl_off_banner_says_what_it_means(c, big_project):
+    html = c.get("/projects/pl-proj").data.decode()
+    banner = re.sub(r"\s+", " ", html.split('id="crawl-off-banner"')[1].split("</ol>")[0])
+    assert "gets no new papers on its own" in banner and "early every morning" in banner
+    assert "add them manually" in banner and "To turn it on:" in banner
+    steps = re.findall(r'<li class="(done|)"><span class="crawl-step-mark">(.)</span>\s*<span><b>([^<]+)</b>( \(required\))?', banner)
+    assert [(label, done == "done", bool(req)) for done, _, label, req in steps] == [
+        ("Research interest", False, True), ("Search keywords", False, True),
+        ("A few papers in My Collection", True, False), ("An email address", False, False)]

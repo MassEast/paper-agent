@@ -48,7 +48,7 @@ class MockPatches:
     def __enter__(self):
         s = self._stack
         s.enter_context(patch("app.crawl.search_arxiv_with_full_papers", return_value=self._papers))
-        s.enter_context(patch("app.crawl.get_paper_content", return_value="Full paper text."))
+        s.enter_context(patch("app.crawl.get_paper_content", return_value="Full paper text. " * 20))
         s.enter_context(patch("app.crawl.get_citation_count", return_value=3))
         s.enter_context(patch("app.crawl.get_paper_figure", return_value=(None, None)))
         s.enter_context(patch(
@@ -113,6 +113,9 @@ class TestRunCrawl:
         assert log.papers_added == 2
         assert log.papers_found == 2
         assert ProjectPaper.query.filter_by(project_id=project.id).count() == 2
+        from app.models import PaperSummary
+        links = ProjectPaper.query.filter_by(project_id=project.id).all()
+        assert {PaperSummary.query.filter_by(paper_id=pp.paper_id).one().content_source for pp in links} == {"full_text"}
 
     def test_skips_irrelevant_papers(self, app, project):
         from app.models import CrawlLog, ProjectPaper

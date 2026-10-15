@@ -207,3 +207,73 @@ def _strip(text: str) -> str:
         text = text.lstrip("\n").lstrip(".")
 
     return text.strip()
+
+
+def _visible_answer(raw: str) -> str:
+    """The part of a streamed completion to show: nothing while the model is still inside its
+    leading <think> block, everything after </think> once it closes."""
+    if "</think>" in raw:
+        return raw.rsplit("</think>", 1)[1].lstrip()
+    if raw.lstrip().startswith("<think>") or "<think>".startswith(raw.lstrip()):
+        return ""  # thinking (or not yet enough text to tell)
+    return raw
+
+
+def _llm_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int = MAX_TOKENS_CEILING):
+    """Streaming variant of _llm for the paper chat. Yields the visible answer so far (a growing string,
+    empty while the model is still thinking), a ("retry", next model, attempt) tuple before each retry
+    (so the chat can say the model isn't answering instead of "Thinking..."), and finally a dict
+    {"model", "usage", "finish_reason"}.
+
+    Falls back through MODELS like _llm, but only until the first chunk arrives: a stream that breaks
+    after that raises, since the user has already seen part of the answer. A request the model rejects
+    as too long (400) is not retried on the same model."""
+    last_err = None
+    for model in MODELS:
+        for attempt in range(3):
+            if last_err is not None:
+                yield ("retry", model, attempt + 1)
+            got_chunk = False
+            try:
+                with httpx.Client(timeout=httpx.Timeout(300.0, connect=30.0)) as http:
+                    with http.stream(
+                        "POST", f"{API_BASE}/chat/completions",
+                        headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+                        json={"model": model, "messages": messages, "temperature": temperature,
+                              "max_tokens": max_tokens, "stream": True,
+                              "stream_options": {"include_usage": True}},
+                    ) as r:
+                        if r.status_code >= 400:
+                            r.read()
+                            raise httpx.HTTPStatusError(f"{r.status_code}: {r.text[:300]}", request=r.request, response=r)
+                        raw, usage, finish = "", None, None
+                        for line in r.iter_lines():
+                            if not line.startswith("data: ") or line == "data: [DONE]":
+                                continue
+                            chunk = json.loads(line[6:])
+                            usage = chunk.get("usage") or usage
+                            if not chunk.get("choices"):
+                                continue
+                            choice = chunk["choices"][0]
+                            finish = choice.get("finish_reason") or finish
+                            delta = (choice.get("delta") or {}).get("content") or ""
+                            if delta:
+                                got_chunk = True
+                                raw += delta
+                                yield _visible_answer(raw)
+                        if not got_chunk:
+                            raise ValueError("empty completion from server")
+                        if _LOG_LLM:
+                            _log.info("[LLM] STREAM RESPONSE (%d chars, %s): %s", len(raw), model, raw[:500])
+                        yield {"model": model, "usage": usage or _estimate_usage(messages, raw), "finish_reason": finish}
+                        return
+            except (httpx.HTTPError, ValueError) as e:
+                if got_chunk:
+                    raise
+                last_err = e
+                too_long = isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 400
+                _log.warning("[LLM] stream %s attempt %d failed: %s", model, attempt + 1, str(e)[:300])
+                if too_long:
+                    break
+                time.sleep((2**attempt) + random.uniform(0, 1))
+    raise LLMUnavailableError(str(last_err))

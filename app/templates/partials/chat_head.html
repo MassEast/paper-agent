@@ -1,0 +1,18 @@
+<div class="chat-head" id="chat-head-{{ pp.id }}"{% if oob %} hx-swap-oob="true"{% endif %}>
+    <span style="font-weight: 600; color: var(--ink-2);">Chat about this paper</span>
+    {% if cv.source %}
+    <span class="chat-badge{% if cv.source == 'abstract' %} chat-badge-warn{% endif %}" data-tip="{{ cv.source_tip }}">
+        {% if cv.source == 'abstract' %}⚠ {% endif %}{{ cv.source_label }}
+    </span>
+    {% else %}
+    <span class="chat-badge" data-tip="The paper's full text is downloaded with the first question (arXiv HTML, else the PDF). If neither works, the model gets only the abstract and this label says so.">Full text on first question</span>
+    {% endif %}
+    <span style="flex: 1;"></span>
+    {% with ctx=cv.ctx, pp_id=pp.id, oob=False %}{% include "partials/chat_context.html" %}{% endwith %}
+    {% if cv.messages %}
+    <button class="chat-clear focus-ring"
+        hx-post="/paper/{{ pp.paper.arxiv_id }}/chat/clear" hx-vals='{"project_id": {{ project.id }}}'
+        hx-target="#chat-{{ pp.id }}" hx-swap="innerHTML"
+        hx-confirm="Delete this whole chat for everyone on this project?{% if cv.busy %} The answer being written is stopped.{% endif %} This can't be undone.">Clear chat</button>
+    {% endif %}
+</div>

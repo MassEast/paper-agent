@@ -1,0 +1,7 @@
+{# Context meter of a chat. ctx: {"used", "limit", "pct", "full", "approx"}; approx while an answer is
+   being written (estimated from the text so far), the model's own count once it is done. #}
+<span class="chat-context" id="chat-ctx-{{ pp_id }}"{% if oob %} hx-swap-oob="true"{% endif %}
+    data-tip="How much of the model's context window this conversation fills: the paper text plus every question and answer so far.{% if ctx.approx %} Estimated while the answer is being written; the model's exact count replaces it when it is done.{% endif %} Nothing is ever dropped; when it is full, clear the chat to start over.">
+    Context {% if ctx.used is not none %}{{ '~' if ctx.approx }}{{ (ctx.used / 1000) | round(1) }}k{% else %}–{% endif %} / {{ (ctx.limit / 1000) | int }}k
+    <span class="chat-meter"><span style="width: {{ ctx.pct }}%;{% if ctx.full %} background-color: var(--error);{% elif ctx.pct > 75 %} background-color: var(--warning);{% endif %}"></span></span>
+</span>

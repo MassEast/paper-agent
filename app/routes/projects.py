@@ -5,7 +5,7 @@ import threading
 import uuid
 from datetime import date, timedelta, datetime
 
-from flask import current_app, render_template, request, redirect, url_for, jsonify
+from flask import current_app, make_response, render_template, request, redirect, url_for, jsonify
 
 from app import db
 from app.auth import login_required
@@ -577,7 +577,7 @@ def save_keywords(slug):
     if keywords_json:
         try:
             keywords = [k.strip() for k in json.loads(keywords_json) if str(k).strip()]
-            project.saved_keywords = json.dumps(keywords)
+            project.saved_keywords = json.dumps(keywords) if keywords else None  # all removed: none saved
             db.session.commit()
         except (json.JSONDecodeError, ValueError):
             return jsonify({"error": "Invalid keywords"}), 400
@@ -611,6 +611,26 @@ def stop_crawl(slug):
     return redirect(url_for("projects.detail", slug=slug, message=message))
 
 
+def _has_collection(project) -> bool:
+    return ProjectPaper.query.filter_by(project_id=project.id, trashed_at=None).filter(
+        ProjectPaper.manual_tag.isnot(None)).first() is not None
+
+
+@projects_bp.route("/<slug>/crawl-banner")
+@login_required
+def crawl_banner(slug):
+    """The "Nightly crawl is off" banner, redrawn when the setup it lists changes (HX-Trigger: crawlSetupChanged)."""
+    project = Project.query.filter_by(slug=slug).first_or_404()
+    return render_template("partials/crawl_banner.html", project=project, curated_papers=_has_collection(project))
+
+
+def setup_changed(body):
+    """A response to something the nightly-crawl checklist shows: the banner redraws itself."""
+    resp = make_response(body)
+    resp.headers["HX-Trigger"] = "crawlSetupChanged"
+    return resp
+
+
 @projects_bp.route("/<slug>/notification-emails", methods=["POST"])
 @login_required
 def update_notification_emails(slug):
@@ -624,7 +644,7 @@ def update_notification_emails(slug):
         project.notification_emails = None
         db.session.commit()
         if request.headers.get("HX-Request"):
-            return '<span style="color: var(--success); font-size: 0.75rem;">Cleared</span>'
+            return setup_changed('<span style="color: var(--success); font-size: 0.75rem;">Cleared</span>')
         return redirect(url_for("projects.detail", slug=slug))
 
     candidates = [e.strip() for e in emails_raw.split(",") if e.strip()]
@@ -639,7 +659,7 @@ def update_notification_emails(slug):
     db.session.commit()
 
     if request.headers.get("HX-Request"):
-        return '<span style="color: var(--success); font-size: 0.75rem;">Saved</span>'
+        return setup_changed('<span style="color: var(--success); font-size: 0.75rem;">Saved</span>')
 
     return redirect(url_for("projects.detail", slug=slug))
 
@@ -678,7 +698,7 @@ def toggle_nightly_crawl(slug):
     else:
         schedule_html = '<span id="crawl-schedule-text" style="color:var(--ink-4);">Off</span>'
 
-    return schedule_html
+    return setup_changed(schedule_html)
 
 
 @projects_bp.route("/health-check", methods=["GET"])

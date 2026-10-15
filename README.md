@@ -2,7 +2,7 @@
 
 ![Related Work Agent screenshot](docs/screenshot.png)
 
-A free, open-source, self-hosted **literature review assistant**. It tracks multiple research projects at once — each with its own research interest, keywords, and nightly crawl schedule — crawling arXiv and Semantic Scholar, screening candidates with an LLM, and surfacing **everything you need to judge a paper in seconds**: a brief AI summary, figure 1, a direct PDF link, citation count, author affiliations. New papers land in an always-up-to-date database and get emailed to you, so keeping up with your field stays fun instead of overwhelming — even with how much gets published these days.
+A free, open-source, self-hosted **literature review assistant**. It tracks multiple research projects at once — each with its own research interest, keywords, and nightly crawl schedule — crawling arXiv and Semantic Scholar, screening candidates with an LLM, and surfacing **everything you need to judge a paper in seconds**: a brief AI summary, figure 1, a direct PDF link, citation count, author affiliations, and a chat that has read the whole paper for whatever the summary doesn't answer. New papers land in an always-up-to-date database and get emailed to you, so keeping up with your field stays fun instead of overwhelming — even with how much gets published these days.
 
 All it needs to run is any LLM that speaks the standard chat-completions API — that can be a small locally-hosted model just as well as a large one; we've only tested at the scale described below, but nothing about the tool requires it.
 
@@ -73,6 +73,12 @@ The dashed edge is a feedback loop: papers you've already curated into My Collec
 
 Each paper card shows a neutral AI summary (shared by every project the paper is in) and, per project, a short **"Why it's relevant"** line that the deep relevance check writes against that project's research interest. A paper that fits a different project can be **copied or moved** into that project's My Collection from its card. After you change the research interest, **Re-screen** in New Papers re-checks the papers still waiting there and moves the ones that no longer fit to Trash, where you can restore them.
 
+Next to "AI Summary" each card says what the summary was made from: the paper's full text, or **"⚠ from abstract only"** when no full text could be fetched (hover for why). Regenerate tries the full text again.
+
+**Ask about a paper.** Every card has an "Ask about this paper" chat. The model reads the paper's full text (arXiv's HTML version, else the PDF; the chat says "⚠ Abstract only" when neither is available) together with the project's research interest, and answers in markdown with rendered math. The chat is saved with the paper, per project like the notes, and visible to everyone on the project; Copy / Move takes it along. Answers stream in as they are written (the model's thinking is never shown, stored, or sent back), keep going if you close the page, and can be stopped. Questions sent while an answer is coming are queued. The header shows how much of the model's context window the conversation fills; when it is full you clear the chat rather than have old turns silently dropped. Each question re-sends the paper, but the LLM server's prefix cache usually makes follow-up questions start answering within a second.
+
+A paper you add by URL fills in its card while you watch: it shows what is being fetched ("Fetching the figure", "Writing the AI summary…") and redraws itself as the details arrive, no reload needed.
+
 A paper that is already in the project (New Papers, My Collection or Trash) is never added again. Papers the agent rejected are remembered too and skipped without another LLM call, as long as the research interest and My Collection stay the same; change either and earlier rejects get checked again.
 
 You can also add any paper directly by pasting its URL. It first tries to resolve the paper to its arXiv version — an explicit arXiv link on the page, a DOI match, or (as a last resort) a title search on arXiv itself — and if found, treats it as a regular arXiv paper with full enrichment. If no arXiv version exists, the landing page's title/abstract/authors are still read regardless of domain, but the actual PDF (used for page count and author-institution extraction) is only downloaded from a small allowlist of open-access hosts — arXiv, ACL Anthology, PMLR, OpenReview, NeurIPS Proceedings, CVF (CVPR/ICCV/ECCV), AAAI, IJCAI, JMLR — out of respect for publisher licensing terms. For anything else, you still get the metadata, just not a downloaded PDF.
@@ -106,6 +112,7 @@ Return JSON only: {"relevant": true} or {"relevant": false}
 | Why it's relevant, for copied/moved papers + the one-off refill | [`RELEVANCE_REASON`](app/prompts.py#L77-L90)                                                        |
 | Institutions (LLM fallback, batched after all papers screened) | [`INSTITUTION_EXTRACTION`](app/prompts.py#L136-L145)                                                   |
 | Pick featured paper                                            | [`FEATURED_PAPER_SELECTION`](app/prompts.py#L122-L134)                                                 |
+| Ask about a paper (chat on a card)                             | [`PAPER_CHAT_SYSTEM`](app/prompts.py#L167-L182)                                                        |
 
 ## Quick start
 
@@ -141,6 +148,7 @@ All configuration is via environment variables — see [`.env.example`](.env.exa
 | `SITE_PASSWORD`                    | yes      | Single shared password for the whole site                                                  |
 | `SCHOLAR_API_KEY`                  | no       | Semantic Scholar API key — without it, Scholar calls are unauthenticated (rate-limit risk) |
 | `RESEND_API_KEY` / `NOTIFIER_TYPE` | no       | Email notifications — see `.env.example` for the SMTP fallback option                      |
+| `CHAT_CONTEXT_TOKENS`              | no       | Context window of the first model in `LLM_MODELS`, for the paper chat's usage meter (default 196000) |
 
 ## Deployment
 

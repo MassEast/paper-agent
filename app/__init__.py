@@ -115,6 +115,7 @@ def create_app():
             "ALTER TABLE papers ADD COLUMN web_enrich_last_attempt_at DATETIME",
             "ALTER TABLE papers ADD COLUMN citation_attempted_at DATETIME",
             "ALTER TABLE project_papers ADD COLUMN relevance_reason TEXT",
+            "ALTER TABLE paper_summaries ADD COLUMN content_source TEXT",
         ]
         for _sql in _migrations:
             try:
@@ -153,6 +154,10 @@ def create_app():
     app.jinja_env.globals["timedelta"] = timedelta
     from app.crawl import MAX_WEB_ENRICH_ATTEMPTS
     app.jinja_env.globals["max_web_enrich_attempts"] = MAX_WEB_ENRICH_ATTEMPTS
+    from app.crawl import enrich_step
+    app.jinja_env.globals["enrich_step"] = enrich_step
+    from app import chat
+    chat.init_app(app)
 
     _berlin = ZoneInfo("Europe/Berlin")
 

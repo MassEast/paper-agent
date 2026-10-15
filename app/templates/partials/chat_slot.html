@@ -1,0 +1,16 @@
+{# Contents of a card's chat slot (#chat-<pp.id>): the conversation if there is one, else the button
+   that opens an empty one. #}
+{% if pp.chat_messages %}
+{% include "partials/chat_panel.html" %}
+{% else %}
+<button class="focus-ring"
+    style="margin-top: 8px; height: 28px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3); display: inline-flex; align-items: center; gap: 6px;"
+    data-tip="Ask a model questions about this paper; it reads the full text where available. The chat is saved with the paper."
+    hx-get="/paper/{{ pp.paper.arxiv_id }}/chat?project_id={{ project.id }}"
+    hx-target="#chat-{{ pp.id }}" hx-swap="innerHTML">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <use href="/static/icons.svg#icon-bot"></use>
+    </svg>
+    Ask about this paper
+</button>
+{% endif %}

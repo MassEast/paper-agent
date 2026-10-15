@@ -1,0 +1,7 @@
+<div class="chat-poll" id="chat-live-{{ m.id }}" hx-get="/chat/message/{{ m.id }}" hx-trigger="every 700ms" hx-swap="outerHTML">
+    {% if live.stop %}<span class="chat-status">Stopping<span class="thinking-dots"></span></span>
+    {% elif live.phase == "reading" %}<span class="chat-status">Reading the paper<span class="thinking-dots"></span></span>
+    {% elif live.phase == "retrying" %}<span class="chat-status">The model isn't answering, trying again ({{ live.retry }})<span class="thinking-dots"></span></span>
+    {% elif live.phase == "thinking" %}<span class="chat-status">Thinking<span class="thinking-dots"></span></span>
+    {% else %}<div class="chat-md">{{ live.text | chat_md }}</div>{% endif %}
+</div>

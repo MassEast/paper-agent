@@ -1,0 +1,4 @@
+<div id="chat-notice-{{ pp.id }}"{% if oob %} hx-swap-oob="true"{% endif %}>
+    {% if error %}<div class="chat-notice chat-notice-error">{{ error }}</div>
+    {% elif cv.full %}<div class="chat-notice chat-notice-error">The chat has used up the model's context. Clear the chat to start a new one.</div>{% endif %}
+</div>

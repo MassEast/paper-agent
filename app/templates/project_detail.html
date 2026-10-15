@@ -15,16 +15,20 @@
 
 {% block content %}
 <style>
+    .kw-remove { padding: 0 6px; border-radius: var(--radius-sm); color: var(--ink-4); background: none; border: none; font-size: 1rem; line-height: 1; }
+    .kw-remove:hover { color: var(--error); background-color: var(--error-bg); }
+    #crawl-off-banner .crawl-steps { margin-top: 2px; display: flex; flex-direction: column; gap: 2px; }
+    #crawl-off-banner .crawl-steps li { display: flex; gap: 8px; }
+    #crawl-off-banner .crawl-steps li.done { color: var(--ink-4); }
+    #crawl-off-banner .crawl-step-mark { width: 1em; flex: none; text-align: center; }
+    #crawl-off-banner .crawl-steps li.done .crawl-step-mark { color: var(--success); }
+    #crawl-off-banner .crawl-steps li.crawl-step-now { color: var(--ink-1); font-weight: 600; margin-top: 2px; }
     @keyframes spin {
         to {
             transform: rotate(360deg);
         }
     }
 
-    @keyframes crawl-pulse {
-        0%, 100% { box-shadow: 0 0 0 0 rgba(180, 83, 9, 0); background-color: transparent; }
-        50%       { box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.25); background-color: rgba(180, 83, 9, 0.06); }
-    }
 
     .detail-grid {
         display: grid;
@@ -49,24 +53,7 @@
     }
 </style>
 <div style="max-width: 1600px; margin: 0 auto; padding: 10px 16px;">
-    {% if not project.crawl_hour %}
-    {% set _missing = [] %}
-    {% if not project.research_interest %}{% set _missing = _missing + ['a research interest'] %}{% endif %}
-    {% if not project.saved_keywords %}{% set _missing = _missing + ['search keywords'] %}{% endif %}
-    <div id="crawl-off-banner" style="display:flex;align-items:flex-start;gap:12px;padding:12px 16px;margin-bottom:16px;background-color:color-mix(in oklch,var(--error) 8%,var(--paper-2));border:1px solid color-mix(in oklch,var(--error) 30%,transparent);border-radius:var(--radius-md);">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color:var(--error);flex-shrink:0;margin-top:2px;">
-            <use href="/static/icons.svg#icon-bell-off"></use>
-        </svg>
-        <div style="font-size:0.78rem;color:var(--ink-2);line-height:1.6;">
-            <span style="font-weight:600;color:var(--error);">Nightly crawl is off.</span>
-            {% if _missing %}
-            To enable it, set {{ _missing | join(' and ') }} first — then toggle it on in the sidebar.
-            {% else %}
-            Turn it on in the sidebar under "Notifications and Nightly Crawl".
-            {% endif %}
-        </div>
-    </div>
-    {% endif %}
+    {% include "partials/crawl_banner.html" %}
 
     {% if not project.research_interest and not project.saved_keywords and not curated_papers %}
     <div id="onboarding-project"
@@ -180,6 +167,7 @@
                         }).then(r => {
                             if (r.ok && !r.redirected) {
                                 _riSavedValue = value;
+                                htmx.trigger(document.body, 'crawlSetupChanged');  // the "To turn it on" checklist
                                 _setSaveBtnState(false);
                                 saveBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
                                 setTimeout(() => { saveBtn.textContent = 'Save'; }, 2000);
@@ -508,6 +496,7 @@
                                     btn.style.opacity = '1'; btn.style.cursor = 'pointer';
                                 } else {
                                     _emailSaved = input.value;
+                                    htmx.trigger(document.body, 'crawlSetupChanged');  // the "To turn it on" checklist
                                     status.innerHTML = '';
                                     renderEmailTags(pid, input.value);
                                     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
@@ -525,11 +514,9 @@
 
                 <hr style="border-color: var(--border-subtle); margin: 12px 0;">
 
-                {# Hint shown at initial page-load when RI or keywords are missing.
-                   The toggle is always clickable — server enforces the same check. #}
-                {% set _crawl_initially_blocked = (not project.research_interest or not project.saved_keywords) and not project.crawl_hour %}
-                <div id="crawl-section-{{ project.id }}"
-                     style="{% if _crawl_initially_blocked %}animation: crawl-pulse 2s ease-in-out infinite; border-radius: var(--radius-md); padding: 6px 8px; margin: -6px -8px 0;{% endif %}">
+                {# What is still missing is listed in the banner at the top (partials/crawl_banner.html); the
+                   server refuses to switch on without a research interest and keywords. #}
+                <div id="crawl-section-{{ project.id }}">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <span style="font-size: 0.75rem; color: var(--ink-3);">Nightly crawl</span>
                     <button type="button" id="crawl-toggle-btn-{{ project.id }}"
@@ -545,7 +532,7 @@
                             id="crawl-toggle-knob-{{ project.id }}"></span>
                     </button>
                 </div>
-                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: {% if _crawl_initially_blocked %}6px{% else %}0{% endif %};">
+                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: 0;">
                     {% if project.crawl_hour %}
                     <span id="crawl-schedule-text">Daily at {{ "%02d:00"|format(project.crawl_hour) }} UTC</span>
                     {% else %}
@@ -553,11 +540,6 @@
                     {% endif %}
                     <span style="color: var(--ink-5);">&nbsp;· spread across 01–04 UTC</span>
                 </p>
-                {% if _crawl_initially_blocked %}
-                <p id="crawl-prereq-hint-{{ project.id }}" style="font-size: 0.7rem; color: var(--warning, #b45309); line-height: 1.5; margin: 0;">
-                    To enable:{% if not project.research_interest %} <span style="font-weight:600;">set a research interest</span>{% endif %}{% if not project.research_interest and not project.saved_keywords %} and{% endif %}{% if not project.saved_keywords %} <span style="font-weight:600;">generate keywords</span>{% endif %} first.
-                </p>
-                {% endif %}
                 </div>
                 <script>
                     function onCrawlToggle(event, pid) {
@@ -574,16 +556,7 @@
                         btn.dataset.on = nowOn ? 'true' : 'false';
                         btn.style.backgroundColor = nowOn ? 'var(--accent)' : 'var(--border-default)';
                         knob.style.left = nowOn ? '21px' : '3px';
-                        // Hide the initial-load hint + pulse when turning on
-                        if (nowOn) {
-                            var hint = document.getElementById('crawl-prereq-hint-' + pid);
-                            var section = document.getElementById('crawl-section-' + pid);
-                            if (hint) hint.remove();
-                            if (section) section.style.animation = 'none';
-                        }
-                        // Show/hide the top-of-page "crawl is off" banner
-                        var banner = document.getElementById('crawl-off-banner');
-                        if (banner) banner.style.display = nowOn ? 'none' : 'flex';
+                        // The "crawl is off" banner at the top redraws itself (HX-Trigger: crawlSetupChanged)
                     }
                 </script>
             </div>
@@ -627,8 +600,9 @@
                 <div
                     style="padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
                     <p id="kw-panel-label" style="font-size: 0.75rem; color: var(--ink-3); margin-bottom: 8px;">
-                        {% if project.saved_keywords_list %}Saved keywords — check/uncheck to include:{% else %}No
-                        keywords yet — generate via AI or add manually:{% endif %}
+                        {# kept in sync by renderKeywordList #}
+                        {% if project.saved_keywords_list %}The nightly crawl searches for all of these. Uncheck one to leave it out of your next "Find Papers" search; × removes it (then Save).{% else %}No
+                        keywords yet: generate them via AI or add your own.{% endif %}
                     </p>
                     <div id="keyword-list" class="flex flex-col gap-2"></div>
                     <div style="display: flex; gap: 8px; margin-top: 10px;">
@@ -921,10 +895,28 @@
                             });
                             const span = document.createElement('span');
                             span.textContent = kw;
+                            span.style.flex = '1';
+                            const del = document.createElement('button');
+                            del.type = 'button';
+                            del.className = 'kw-remove';
+                            del.textContent = '×';
+                            del.setAttribute('aria-label', 'Remove keyword ' + kw);
+                            del.dataset.tip = 'Remove this keyword (then Save)';
+                            del.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                keywordData.keywords = keywordData.keywords.filter(k => k !== kw);
+                                uncheckedKeywords.delete(kw);
+                                renderKeywordList(keywordData.keywords);
+                                setKwDirty();
+                            });
                             label.appendChild(cb);
                             label.appendChild(span);
+                            label.appendChild(del);
                             list.appendChild(label);
                         });
+                        document.getElementById('kw-panel-label').textContent = keywords.length
+                            ? 'The nightly crawl searches for all of these. Uncheck one to leave it out of your next "Find Papers" search; × removes it (then Save).'
+                            : 'No keywords yet: generate them via AI or add your own.';
                     }
 
                     function addKeyword() {
@@ -990,7 +982,6 @@
                     }
                     function saveKeywords() {
                         const all = Array.from(document.querySelectorAll('input[name="keyword_item"]')).map(el => el.value);
-                        if (all.length === 0) return;
                         const btn = document.getElementById('save-kw-btn');
                         const status = document.getElementById('kw-status');
                         btn.disabled = true;
@@ -999,6 +990,7 @@
                             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                             body: 'keywords_json=' + encodeURIComponent(JSON.stringify(all))
                         }).then(r => r.json()).then(() => {
+                            htmx.trigger(document.body, 'crawlSetupChanged');  // the "To turn it on" checklist
                             btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
                             btn.style.opacity = '0.55'; btn.style.cursor = 'not-allowed';
                             setTimeout(() => { btn.textContent = 'Save'; _setKwBtnState(btn, false); }, 2000);

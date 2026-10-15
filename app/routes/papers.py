@@ -4,13 +4,14 @@ import json
 import logging
 from datetime import datetime
 
-from flask import render_template, request, jsonify, Response
+from flask import current_app, render_template, request, jsonify, Response
 
 _log = logging.getLogger(__name__)
 
 from app import db
 from app.auth import login_required
-from app.models import Paper, ProjectPaper, Project
+from app.models import ChatMessage, Paper, ProjectPaper, Project
+from app import chat
 from app import paper_lists
 from app.routes import papers_bp
 from app.utils import base_arxiv_id
@@ -25,6 +26,7 @@ from app.crawl import (
     generate_relevance_reason,
     get_paper_content,
     extract_main_contributions,
+    summary_source,
 )
 from app.llm import LLMUnavailableError
 
@@ -43,16 +45,21 @@ def _moved_response(project_id, dest):
     s = paper_lists.sections(project, state)
     ctx = dict(project=project, s=s, state=state, page_size=paper_lists.PAGE_SIZE, oob=True)
     redraw = [dest] + [sec for sec in paper_lists.SECTIONS if sec != dest and not s[sec]]
-    return render_template("partials/counts_oob.html", **ctx) + "".join(
-        render_template(f"partials/section_{sec}.html", **ctx) for sec in redraw)
+    resp = current_app.make_response(render_template("partials/counts_oob.html", **ctx) + "".join(
+        render_template(f"partials/section_{sec}.html", **ctx) for sec in redraw))
+    resp.headers["HX-Trigger"] = "crawlSetupChanged"  # My Collection changed: the nightly-crawl checklist
+    return resp
 
 
 def _card_response(pp, project):
     """A card changed in place (a tag toggled): the card itself, plus the tag counts out of band."""
     state = paper_lists.list_state(request.values)
     s = paper_lists.sections(project, state)
-    return (render_template("partials/paper_card.html", pp=pp, project=project, show_curate=False)
-            + render_template("partials/counts_oob.html", project=project, s=s, state=state))
+    resp = current_app.make_response(
+        render_template("partials/paper_card.html", pp=pp, project=project, show_curate=False)
+        + render_template("partials/counts_oob.html", project=project, s=s, state=state))
+    resp.headers["HX-Trigger"] = "crawlSetupChanged"  # a tag can put a paper into My Collection
+    return resp
 
 
 @papers_bp.route("/paper/<arxiv_id>/tag", methods=["POST"])
@@ -93,6 +100,109 @@ def tag_paper(arxiv_id):
             return _card_response(pp, Project.query.get(project_id))
         return _moved_response(project_id, "col" if tag == "related" else "new")
     return ("", 204)
+
+
+def _chat_pp(arxiv_id):
+    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
+    project_id = request.values.get("project_id", type=int)
+    return ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first_or_404()
+
+
+def _chat_panel(pp, error=None, focus=False):
+    return render_template("partials/chat_panel.html", pp=pp, project=pp.project, error=error, focus=focus)
+
+
+@papers_bp.route("/paper/<arxiv_id>/chat")
+@login_required
+def chat_panel(arxiv_id):
+    """The chat panel for a card that has no chat yet (the card renders an existing one itself)."""
+    return _chat_panel(_chat_pp(arxiv_id), focus=True)
+
+
+@papers_bp.route("/paper/<arxiv_id>/chat", methods=["POST"])
+@login_required
+def chat_ask(arxiv_id):
+    pp = _chat_pp(arxiv_id)
+    question = (request.form.get("question") or "").strip()
+    error = chat.ask(pp, question, current_app._get_current_object()) if question else None
+    return _chat_panel(pp, error=error, focus=True)
+
+
+@papers_bp.route("/paper/<arxiv_id>/chat/clear", methods=["POST"])
+@login_required
+def chat_clear(arxiv_id):
+    pp = _chat_pp(arxiv_id)
+    chat.clear(pp)
+    db.session.expire(pp, ["chat_messages"])
+    return render_template("partials/chat_slot.html", pp=pp, project=pp.project)
+
+
+@papers_bp.route("/chat/message/<int:msg_id>")
+@login_required
+def chat_message(msg_id):
+    """Polled while an answer is written: the answer so far; once it has ended, the conversation (which
+    may already show the next queued question being answered) plus the head and notice out of band."""
+    live = chat.live_state(msg_id)
+    if live:
+        m = ChatMessage.query.get_or_404(msg_id)
+        html = render_template("partials/chat_live.html", m=m, live=live)
+        ctx = chat.live_context(msg_id)
+        if ctx:  # the meter counts up while the answer is written
+            html += render_template("partials/chat_context.html", ctx=ctx, pp_id=m.project_paper_id, oob=True)
+        return html
+    msg = ChatMessage.query.get(msg_id)
+    if msg is None:  # the chat was cleared meanwhile
+        return ("", 286)  # htmx: stop polling
+    return _chat_redraw(msg.project_paper)
+
+
+def _chat_redraw(pp):
+    """The log (into #chat-log-<pp.id>) with head and notice out of band; the form is left alone."""
+    ctx = dict(pp=pp, project=pp.project, cv=chat.view(pp, current_app._get_current_object()), oob=True)
+    resp = current_app.make_response(render_template("partials/chat_log.html", **ctx)
+                                      + render_template("partials/chat_head.html", **ctx)
+                                      + render_template("partials/chat_notice.html", **ctx))
+    resp.headers["HX-Retarget"] = f"#chat-log-{pp.id}"
+    resp.headers["HX-Reswap"] = "outerHTML"
+    return resp
+
+
+@papers_bp.route("/chat/message/<int:msg_id>/stop", methods=["POST"])
+@login_required
+def chat_stop(msg_id):
+    chat.stop(msg_id)
+    return ("", 204)
+
+
+@papers_bp.route("/chat/message/<int:msg_id>/remove", methods=["POST"])
+@login_required
+def chat_remove_queued(msg_id):
+    """Take a queued question back. Too late if it has been sent meanwhile: then the conversation is redrawn."""
+    msg = ChatMessage.query.get_or_404(msg_id)
+    pp = msg.project_paper
+    if chat.remove_queued(msg_id):
+        return ""
+    return _chat_redraw(pp)
+
+
+@papers_bp.route("/project-paper/<int:pp_id>/card")
+@login_required
+def paper_card_refresh(pp_id):
+    """Polled by a card whose details are still being fetched in the background: nothing while the step
+    it shows is current; the whole card once the step changed or the work is done. Keyed by the
+    ProjectPaper, which stays the same when a web add turns out to be an arXiv paper."""
+    from app.crawl import enrich_step
+    pp = ProjectPaper.query.get(pp_id)
+    if pp is None:
+        return ("", 286)  # htmx: stop polling
+    step = enrich_step(pp.paper_id)
+    if step is not None and step == request.args.get("step"):
+        return ("", 204)
+    resp = current_app.make_response(render_template(
+        "partials/paper_card.html", pp=pp, project=pp.project, show_curate=pp.manual_tag is None))
+    resp.headers["HX-Retarget"] = f'[data-pp-card="{pp.id}"]'
+    resp.headers["HX-Reswap"] = "outerHTML"
+    return resp
 
 
 @papers_bp.route("/paper/<arxiv_id>/notes", methods=["POST"])
@@ -168,8 +278,8 @@ def transfer_menu(arxiv_id):
 @papers_bp.route("/paper/<arxiv_id>/transfer", methods=["POST"])
 @login_required
 def transfer_paper(arxiv_id):
-    """Copy or move a paper into another project's My Collection. Tags and notes come along
-    (notes only if the target has none). Move also puts the paper in this project's Trash, not
+    """Copy or move a paper into another project's My Collection. Tags, notes and the paper chat come
+    along (notes and chat only if the target has none). Move also puts the paper in this project's Trash, not
     a hard delete, so this project's crawls don't add it again. The target gets its own
     "why it's relevant" line in the background if it has none yet."""
     paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
@@ -197,6 +307,8 @@ def transfer_paper(arxiv_id):
     target.paper_tags = json.dumps(tags)
     if not target.notes and source.notes:
         target.notes = source.notes
+    db.session.flush()  # a new target needs its id for the chat
+    chat.copy_chat(source, target)
     if mode == "move":
         source.trashed_at = now
     db.session.commit()
@@ -273,8 +385,10 @@ def regenerate_paper(arxiv_id):
             title=paper.title, paper_content=content, abstract=paper.abstract or "",
         )
         elapsed, tokens = elapsed + contrib_elapsed, tokens + contrib_tokens
+        source = summary_source(content, paper.abstract or "")
         from app.models import PaperSummary
         if paper.summary:
+            paper.summary.content_source = source
             if contributions:
                 paper.summary.main_contributions = contributions
             paper.summary.summary_text = summary_data.get("summary", "")
@@ -289,6 +403,7 @@ def regenerate_paper(arxiv_id):
         else:
             db.session.add(PaperSummary(
                 paper_id=paper.id,
+                content_source=source,
                 summary_text=summary_data.get("summary", ""),
                 main_contributions=contributions,
                 model_used=model,

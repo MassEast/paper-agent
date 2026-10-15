@@ -1,0 +1,37 @@
+{# "Nightly crawl is off" banner with the setup checklist. Redraws itself when the setup changes: routes
+   that change it answer with HX-Trigger: crawlSetupChanged, and the page's fetch() saves trigger it too.
+   Expects: project, curated_papers (anything truthy when My Collection has papers). #}
+<div id="crawl-banner" hx-get="/projects/{{ project.slug }}/crawl-banner" hx-trigger="crawlSetupChanged from:body" hx-swap="outerHTML">
+{% if not project.crawl_hour %}
+    {# Checklist for turning the nightly crawl on: the first two are required (the toggle refuses without them) #}
+    {% set _steps = [
+        (project.research_interest, True, "Research interest", "describe what you work on: the AI checks every new paper against it"),
+        (project.saved_keywords, True, "Search keywords", "what arXiv is searched for; \"Regenerate via AI\" under Search Keywords suggests them from the research interest"),
+        (curated_papers, False, "A few papers in My Collection", "recommended: the AI uses them as examples of what is relevant (add them under \"Add to My Collection\")"),
+        (project.notification_emails, False, "An email address", "recommended: under \"Notifications and Nightly Crawl\", to get the morning overview"),
+    ] %}
+    <div id="crawl-off-banner" style="display:flex;align-items:flex-start;gap:12px;padding:12px 16px;margin-bottom:16px;background-color:color-mix(in oklch,var(--error) 8%,var(--paper-2));border:1px solid color-mix(in oklch,var(--error) 30%,transparent);border-radius:var(--radius-md);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color:var(--error);flex-shrink:0;margin-top:2px;">
+            <use href="/static/icons.svg#icon-bell-off"></use>
+        </svg>
+        <div style="font-size:0.78rem;color:var(--ink-2);line-height:1.6;">
+            <span style="font-weight:600;color:var(--error);">Nightly crawl is off, so this project gets no new papers on its own.</span>
+            When it is on, the agent searches arXiv and Semantic Scholar early every morning with this
+            project's search keywords, lets the AI check each new paper against the research interest, puts the
+            relevant ones into New Papers, and emails a short overview to the addresses under "Notifications and
+            Nightly Crawl". While it is off, papers only come in when you search yourself with Paper Crawler or add
+            them manually.
+            <div style="margin-top: 6px; font-weight: 600;">To turn it on:</div>
+            <ol class="crawl-steps">
+                {% for done, required, label, how in _steps %}
+                <li class="{{ 'done' if done else '' }}"><span class="crawl-step-mark">{{ '✓' if done else '○' }}</span>
+                    <span><b>{{ label }}</b>{% if required and not done %} (required){% endif %}: {{ how }}</span></li>
+                {% endfor %}
+                {% if _steps | rejectattr(0) | list | length == 0 %}
+                <li class="crawl-step-now"><span class="crawl-step-mark">→</span><span>Now switch on <b>"Nightly crawl"</b> in the sidebar under "Notifications and Nightly Crawl".</span></li>
+                {% endif %}
+            </ol>
+        </div>
+    </div>
+{% endif %}
+</div>

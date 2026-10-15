@@ -106,8 +106,50 @@ class PaperSummary(db.Model):
     generated_at = db.Column(db.DateTime, default=datetime.utcnow)
     elapsed_ms = db.Column(db.Integer)
     tokens_used = db.Column(db.Integer, default=0)  # total tokens for relevance+summary+contributions
+    # What the summary and main contributions were made from: "full_text" | "web_page" (a web paper's
+    # landing-page text) | "abstract" (no full text could be fetched). None: made before this was recorded.
+    content_source = db.Column(db.Text)
 
     paper = db.relationship("Paper", back_populates="summary")
+
+
+class PaperText(db.Model):
+    """A paper's full text, fetched once when someone first chats about it (app/chat.py). Its own table
+    so the project page, which loads every Paper, never pulls hundreds of KB of text per card."""
+    __tablename__ = "paper_texts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    paper_id = db.Column(db.Integer, db.ForeignKey("papers.id"), unique=True, nullable=False)
+    text = db.Column(db.Text, nullable=False)
+    source = db.Column(db.Text, nullable=False)  # "html" | "pdf"
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class ChatMessage(db.Model):
+    """One message of the "ask about this paper" chat on a card, per paper per project (like notes).
+    An assistant row is created empty with status "streaming" when its question is sent to the model,
+    and filled in when the answer is done."""
+    __tablename__ = "chat_messages"
+    # Ids are never reused after a chat is cleared: they key the in-memory answer state and the
+    # /chat/message/<id> polls of pages still open
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_paper_id = db.Column(db.Integer, db.ForeignKey("project_papers.id"), nullable=False, index=True)
+    role = db.Column(db.Text, nullable=False)  # "user" | "assistant"
+    content = db.Column(db.Text, nullable=False, default="")
+    # user: "queued" (waiting for an earlier answer) | "done" (sent to the model)
+    # assistant: "streaming" | "done" | "stopped" (by the user; the partial answer is kept) | "error"
+    status = db.Column(db.Text, nullable=False, default="done")
+    reply_to_id = db.Column(db.Integer)  # assistant rows: the question they answer
+    context_source = db.Column(db.Text)  # what the answer was based on: "html" | "pdf" | "abstract"
+    model = db.Column(db.Text)
+    # Assistant rows: the whole conversation's size as the model counted it (prompt + this answer),
+    # shown as context usage on the chat
+    context_tokens = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    project_paper = db.relationship("ProjectPaper", back_populates="chat_messages")
 
 
 class ProjectPaper(db.Model):
@@ -133,6 +175,8 @@ class ProjectPaper(db.Model):
 
     project = db.relationship("Project", back_populates="papers")
     paper = db.relationship("Paper", back_populates="project_links")
+    chat_messages = db.relationship("ChatMessage", back_populates="project_paper", cascade="all, delete-orphan",
+                                    order_by="ChatMessage.id")
 
     @property
     def tags_list(self) -> list[str]:

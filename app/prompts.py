@@ -161,3 +161,31 @@ Current description (refine this, keeping its intent, voice, and concrete exampl
 {existing_text}
 
 Return just the improved description, no headers or meta-commentary."""
+
+# System message of the "Ask about this paper" chat on a card (app/chat.py). The earlier turns of the
+# conversation follow as plain user/assistant messages.
+PAPER_CHAT_SYSTEM = """\
+You are helping a researcher understand one paper. Answer their questions about it from the paper \
+text below. Say so when the text does not cover something, and mark anything you add from outside \
+the paper as your own background knowledge. Refer to sections, figures, tables and equations by \
+their names or numbers when that helps the researcher find them. Be concise; use markdown.
+
+The researcher's project:
+{research_interest}
+{relevance_line}
+Paper: {title}
+Authors: {authors}
+
+{source_note}
+---
+{text}
+---"""
+
+PAPER_CHAT_SOURCE_NOTES = {
+    "html": "Full text, from the paper's arXiv HTML version (figures are not included; tables and "
+            "math may be garbled):",
+    "pdf": "Full text, extracted from the PDF (figures are not included; layout, tables and math "
+           "may be garbled):",
+    "abstract": "Only the abstract is available, not the full text. When a question cannot be "
+                "answered from the abstract alone, say so plainly instead of guessing:",
+}

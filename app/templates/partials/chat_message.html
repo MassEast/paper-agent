@@ -1,0 +1,21 @@
+{# One chat message. An answer being written has an inner .chat-poll that reloads itself every 700 ms;
+   once the answer has ended the server answers that poll with the whole log instead. #}
+{% if m.role == "user" %}
+<div class="chat-msg chat-user{% if m.status == 'queued' %} chat-queued{% endif %}" id="chat-msg-{{ m.id }}">{{ m.content }}
+    {%- if m.status == 'queued' %}<div class="chat-msg-meta">Queued: sent when the answer before it is done ·
+        <button class="chat-link" hx-post="/chat/message/{{ m.id }}/remove" hx-target="#chat-msg-{{ m.id }}" hx-swap="outerHTML">Remove</button></div>{% endif -%}
+</div>
+{% else %}
+{% set live = chat_live(m.id) %}
+<div class="chat-msg chat-assistant{% if m.status == 'error' %} chat-error{% endif %}" id="chat-msg-{{ m.id }}">
+    {% if live %}
+    {% include "partials/chat_live.html" %}
+    <div class="chat-msg-meta"><button class="chat-link" hx-post="/chat/message/{{ m.id }}/stop" hx-swap="none"
+        data-tip="Stop this answer; what it has written so far is kept. Queued questions still get answered.">Stop</button></div>
+    {% else %}
+    <div class="chat-md">{{ m.content | chat_md }}</div>
+    {% if m.status == 'stopped' %}<div class="chat-msg-meta">Stopped{% if not m.content.strip() %} before it wrote anything{% endif %}.</div>{% endif %}
+    {% if m.model and m.model != chat_main_model %}<div class="chat-msg-meta">Answered by the fallback model {{ m.model }} ({{ chat_main_model }} was unavailable).</div>{% endif %}
+    {% endif %}
+</div>
+{% endif %}

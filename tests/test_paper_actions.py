@@ -15,7 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from app import db
-from app.models import Paper, PaperSummary, Project, ProjectPaper, ScreenedPaper, compute_screening_hash
+from app.models import ChatMessage, Paper, PaperSummary, Project, ProjectPaper, ScreenedPaper, compute_screening_hash
 from tests.conftest import make_llm_json_response, FAKE_RELEVANCE_YES, FAKE_RELEVANCE_NO
 
 
@@ -38,6 +38,8 @@ def two_projects(app):
         ids = {"src": src.id, "dst": dst.id, "new": new.id, "coll": coll.id}
     yield ids
     with app.app_context():
+        pp_ids = [pp.id for pp in ProjectPaper.query.filter(ProjectPaper.project_id.in_([ids["src"], ids["dst"]]))]
+        ChatMessage.query.filter(ChatMessage.project_paper_id.in_(pp_ids)).delete()
         ProjectPaper.query.filter(ProjectPaper.project_id.in_([ids["src"], ids["dst"]])).delete()
         ScreenedPaper.query.filter(ScreenedPaper.project_id.in_([ids["src"], ids["dst"]])).delete()
         PaperSummary.query.filter(PaperSummary.paper_id.in_([ids["new"], ids["coll"]])).delete()
@@ -120,6 +122,59 @@ def test_move_trashes_paper_in_source(app, logged_in, two_projects):
     target = _link(ids["dst"], ids["new"])
     assert target.manual_tag == "related" and target.trashed_at is None
     assert json.loads(target.paper_tags) == ["to_read"]  # same default as "Move to My Collection"
+
+
+def _chat(project_id, paper_id, turns):
+    """turns: (question, answer, answer status) tuples; returns the ProjectPaper id."""
+    pp = _link(project_id, paper_id)
+    if pp is None:
+        pp = ProjectPaper(project_id=project_id, paper_id=paper_id, manual_tag="related")
+        db.session.add(pp)
+        db.session.flush()
+    for q, a, status in turns:
+        qm = ChatMessage(project_paper_id=pp.id, role="user", content=q, status="done")
+        db.session.add(qm)
+        db.session.flush()
+        db.session.add(ChatMessage(project_paper_id=pp.id, role="assistant", content=a, status=status,
+                                   reply_to_id=qm.id, context_source="html", context_tokens=42000))
+    db.session.commit()
+    return pp.id
+
+
+def _chat_contents(project_id, paper_id):
+    from app import chat
+    pp = _link(project_id, paper_id)
+    return [(m.role, m.content, m.status) for m in chat.ordered(ChatMessage.query.filter_by(project_paper_id=pp.id).all())]
+
+
+def test_copy_and_move_take_the_finished_chat_along(app, logged_in, two_projects):
+    ids = two_projects
+    with app.app_context():
+        _chat(ids["src"], ids["coll"], [("Q1", "A1", "done"), ("Q2", "partial", "stopped"), ("Q3", "", "streaming")])
+        src_pp = _link(ids["src"], ids["coll"]).id
+        db.session.add(ChatMessage(project_paper_id=src_pp, role="user", content="Q4", status="queued"))
+        db.session.commit()
+    with patch("app.routes.papers.start_relevance_reason_async"):
+        logged_in.post("/paper/2601.00002/transfer", data={
+            "project_id": ids["src"], "target_project_id": ids["dst"], "mode": "copy"})
+    with app.app_context():
+        assert _chat_contents(ids["dst"], ids["coll"]) == [
+            ("user", "Q1", "done"), ("assistant", "A1", "done"), ("user", "Q2", "done"), ("assistant", "partial", "stopped")]
+        assert len(_chat_contents(ids["src"], ids["coll"])) == 7  # the source keeps its chat
+        target = _link(ids["dst"], ids["coll"])
+        assert ChatMessage.query.filter_by(project_paper_id=target.id, role="assistant").first().context_tokens == 42000
+
+
+def test_transfer_keeps_the_targets_own_chat(app, logged_in, two_projects):
+    ids = two_projects
+    with app.app_context():
+        _chat(ids["src"], ids["new"], [("Source Q", "Source A", "done")])
+        _chat(ids["dst"], ids["new"], [("Target Q", "Target A", "done")])
+    with patch("app.routes.papers.start_relevance_reason_async"):
+        logged_in.post("/paper/2601.00001/transfer", data={
+            "project_id": ids["src"], "target_project_id": ids["dst"], "mode": "move"}, headers={"HX-Request": "true"})
+    with app.app_context():
+        assert _chat_contents(ids["dst"], ids["new"]) == [("user", "Target Q", "done"), ("assistant", "Target A", "done")]
 
 
 def test_transfer_into_project_where_paper_was_trashed_restores_it(app, logged_in, two_projects):
@@ -450,3 +505,36 @@ def test_collection_sorts_by_when_a_paper_was_collected_not_when_it_was_crawled(
             ProjectPaper.query.filter_by(paper_id=ids["old"]).delete()
             Paper.query.filter_by(id=ids["old"]).delete()
             db.session.commit()
+
+
+def test_summary_source_follows_what_the_generators_read():
+    from app.crawl import summary_source
+    assert summary_source("A long full text " * 10, "Short abstract") == "full_text"
+    assert summary_source(None, "Short abstract") == "abstract"
+    assert summary_source("Short abstract", "Short abstract") == "abstract"  # content fell back to the abstract
+
+
+@pytest.mark.parametrize("content, source, label", [
+    ("FULL TEXT OF THE PAPER, much longer than the abstract", "full_text", "· from full text"),
+    (None, "abstract", "⚠ from abstract only"),
+])
+def test_regenerate_records_and_shows_what_the_summary_was_made_from(app, logged_in, two_projects, content, source, label):
+    ids = two_projects
+    with patch("app.routes.papers.get_paper_figure", return_value=(None, None)), \
+         patch("app.routes.papers.get_citation_count", return_value=None), \
+         patch("app.routes.papers.get_paper_content", return_value=content), \
+         patch("app.crawl._llm_json", return_value=make_llm_json_response({"summary": "S.", "reason": "R."})):
+        html = logged_in.post("/paper/2601.00001/regenerate", data={"project_id": ids["src"]},
+                              headers={"HX-Request": "true"}).get_data(as_text=True)
+    with app.app_context():
+        assert PaperSummary.query.filter_by(paper_id=ids["new"]).one().content_source == source
+    assert label in html and "summary-src" in html
+
+
+def test_summary_made_before_sources_were_recorded_has_no_label(app, logged_in, two_projects):
+    ids = two_projects
+    with app.app_context():
+        db.session.add(PaperSummary(paper_id=ids["coll"], summary_text="Old summary."))
+        db.session.commit()
+    html = logged_in.get("/projects/pa-source").get_data(as_text=True)
+    assert "Old summary." in html and 'class="summary-src' not in html

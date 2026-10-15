@@ -1,4 +1,4 @@
-<div class="paper-card"
+<div class="paper-card" data-pp-card="{{ pp.id }}"
     id="paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
     {# "Date added" sort key: in My Collection, when it was collected (older links have no collected_at) #}
     {% set _sort_added = (pp.collected_at if pp.manual_tag and pp.collected_at else pp.added_at) %}
@@ -6,6 +6,15 @@
     data-pub-date="{{ pp.paper.published_date.isoformat() if pp.paper.published_date else '' }}"
     data-tags="{{ pp.tags_list | join(',') }}"
     style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">
+    {% set _step = enrich_step(pp.paper_id) %}
+    {% if _step %}
+    {# Details still being fetched in the background (crawl._enriching): the card redraws itself when the step changes #}
+    <div class="enrich-status" hx-get="/project-paper/{{ pp.id }}/card?step={{ _step | urlencode }}"
+        hx-trigger="every 2s" hx-swap="outerHTML"
+        data-tip="This paper was just added; its details are being fetched in the background. The card fills in by itself, no need to reload.">
+        <span class="enrich-spinner" aria-hidden="true"></span>{{ _step }}<span class="thinking-dots"></span>
+    </div>
+    {% endif %}
     <div class="flex flex-col sm:flex-row items-start gap-2 sm:gap-4 mb-3">
         <div class="flex-1 min-w-0">
             <a href="{{ 'https://arxiv.org/abs/' + pp.paper.arxiv_id if pp.paper.is_arxiv else (pp.paper.pdf_url or '#') }}" target="_blank"
@@ -127,7 +136,15 @@
 
     {% if pp.paper.summary %}
     <div class="mb-3 border-l-2" style="border-color: var(--accent); padding-left: 12px;">
-        <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">AI Summary</p>
+        {% set src = pp.paper.summary.content_source %}
+        <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">AI Summary
+            {%- if src == "abstract" %}
+            <span class="summary-src summary-src-warn" data-tip="No full text could be fetched when this summary was made (no arXiv HTML version, the download failed, or a web page without readable text), so the summary, the badges and the main contributions come from the abstract alone. Regenerate tries the full text again.">⚠ from abstract only</span>
+            {%- elif src == "full_text" %}
+            <span class="summary-src" data-tip="The summary, the badges and the main contributions were made from the paper's full text (arXiv HTML version).">· from full text</span>
+            {%- elif src == "web_page" %}
+            <span class="summary-src" data-tip="This paper was added from a web page; the summary, the badges and the main contributions were made from that page's text, not from a PDF.">· from the web page</span>
+            {%- endif %}</p>
         <p class="text-sm" style="color: var(--ink-2); line-height: 1.5;">{{ pp.paper.summary.summary_text }}</p>
         <div class="flex flex-wrap gap-2 mt-3">
             {% if pp.paper.summary.introduces_dataset %}
@@ -385,4 +402,5 @@
         <span id="notes-saved-{{ pp.paper.arxiv_id }}-{{ project.id }}"
             style="display:none;position:absolute;bottom:6px;right:8px;font-size:0.65rem;color:var(--success);pointer-events:none;">saved</span>
     </div>
+    <div id="chat-{{ pp.id }}">{% include "partials/chat_slot.html" %}</div>
 </div>

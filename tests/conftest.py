@@ -83,8 +83,11 @@ def live_server(app):
 
 @pytest.fixture(scope="module")
 def browser_session(live_server):
-    """One browser + one login per module: /login is rate-limited to 5 per minute."""
+    """One browser + one login per module: /login is rate-limited to 5 per minute, which a run of more
+    than five browser modules would hit, so the limiter's counts are cleared first."""
     sync_api = pytest.importorskip("playwright.sync_api")
+    from app import limiter
+    limiter.reset()
     with sync_api.sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context()

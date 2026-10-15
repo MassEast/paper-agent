@@ -153,6 +153,29 @@ def _scholar_headers() -> dict:
         headers["x-api-key"] = SCHOLAR_API_KEY
     return headers
 
+# Papers whose details are being fetched in the background right now (start_collection_add_async,
+# start_web_paper_add_async): paper id -> {"by": which task, "step": what it is doing}. The paper's card
+# shows the step and redraws itself as it changes (/project-paper/<id>/card), so a freshly added paper
+# fills in without a reload. In memory: needs the single gunicorn process (see CLAUDE.md).
+_enriching: dict[int, dict] = {}
+
+
+def enrich_step(paper_id: int) -> str | None:
+    state = _enriching.get(paper_id)
+    return state["step"] if state else None
+
+
+def _set_step(paper_id: int, by: str, step: str) -> None:
+    _enriching[paper_id] = {"by": by, "step": step}
+
+
+def _end_steps(paper_id: int, by: str) -> None:
+    """Only the task that set the status clears it: a web add that turns out to be an arXiv paper hands
+    the same paper over to start_collection_add_async, which has set its own status by then."""
+    if _enriching.get(paper_id, {}).get("by") == by:
+        _enriching.pop(paper_id, None)
+
+
 def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, app) -> None:
     """Background thread: fully enrich a paper that was just added directly to My Collection.
 
@@ -160,8 +183,15 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
     authors, figure, institutions, citation count, and generates summary + contributions.
     """
     def _run():
+        try:
+            _steps()
+        finally:
+            _end_steps(paper_id, "arxiv")
+
+    def _steps():
         with app.app_context():
             # --- Step 1: Fetch arXiv metadata (needs the global lock) ---
+            _set_step(paper_id, "arxiv", "Fetching title, authors and abstract from arXiv")
             with _ArxivLockCtx():
                 try:
                     results = list(arxiv.Client(delay_seconds=3.1).results(
@@ -191,6 +221,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                 return
 
             # --- Step 2: Figure ---
+            _set_step(paper_id, "arxiv", "Fetching the figure")
             try:
                 figure_url, figure_caption = get_paper_figure(arxiv_id)
                 if figure_url:
@@ -201,6 +232,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                 _log.warning("[collection-add] figure fetch failed for %s: %s", arxiv_id, e)
 
             # --- Step 3: Citation count ---
+            _set_step(paper_id, "arxiv", "Fetching the citation count")
             try:
                 _count = get_citation_count(arxiv_id)
                 if _count is not None:
@@ -211,6 +243,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                 _log.warning("[collection-add] citation fetch failed for %s: %s", arxiv_id, e)
 
             # --- Step 4: Page count ---
+            _set_step(paper_id, "arxiv", "Counting the pages")
             try:
                 enrich_page_counts([paper])
                 db.session.commit()
@@ -218,6 +251,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                 _log.warning("[collection-add] page count failed for %s: %s", arxiv_id, e)
 
             # --- Step 5: LLM summary + contributions ---
+            _set_step(paper_id, "arxiv", "Writing the AI summary and main contributions")
             db.session.refresh(paper)
             if paper.summary:
                 _log.info("[collection-add] summary already exists for %s, skipping", arxiv_id)
@@ -239,6 +273,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                     summary_data = summary_data if isinstance(summary_data, dict) else {}
                     summary = PaperSummary(
                         paper_id=paper.id,
+                        content_source=summary_source(paper_content, paper.abstract or ""),
                         summary_text=summary_data.get("summary", ""),
                         main_contributions=contributions,
                         model_used=summary_model or LLM_MODELS[0],
@@ -257,6 +292,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                     _log.warning("[collection-add] summary failed for %s: %s", arxiv_id, e)
 
             # --- Step 6: Institutions (Scholar batch) ---
+            _set_step(paper_id, "arxiv", "Finding the authors' institutions")
             try:
                 enrich_institutions_from_scholar([paper])
                 db.session.commit()
@@ -273,6 +309,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
             else:
                 _log.info("[collection-add] ✓ enriched %s (citations pending — nightly backfill will retry)", arxiv_id)
 
+    _set_step(paper_id, "arxiv", "Waiting to start")  # before the thread, so the page rendered next shows it
     threading.Thread(target=_run, daemon=True).start()
 
 
@@ -289,12 +326,19 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
     import hashlib as _hashlib
 
     def _run():
+        try:
+            _steps()
+        finally:
+            _end_steps(paper_id, "web")
+
+    def _steps():
         with app.app_context():
             paper = Paper.query.get(paper_id)
             if not paper:
                 return
 
             # Step 1: fetch page metadata
+            _set_step(paper_id, "web", "Reading the web page")
             info = extract_paper_info_from_url(url)
             page_title = info.get("title") or url
             page_abstract = info.get("abstract") or ""  # reliable only (citation_abstract / #abstract)
@@ -304,6 +348,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
             page_full_text = info.get("full_text") or page_abstract
 
             # Step 2: check if any in-page arXiv link corresponds to the same paper
+            _set_step(paper_id, "web", "Looking for the paper on arXiv")
             matched_arxiv_id = None
             match_source = None
             for candidate_id in arxiv_links[:3]:  # check at most 3 links
@@ -417,6 +462,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
             _log.info("[web-add] stored web paper: %s → %s (pdf=%s)", url, page_title, paper.pdf_url)
 
             # Step 3b: download the actual PDF (if we found a direct link) for institutions +
+            _set_step(paper_id, "web", "Reading the PDF")
             # page-count fallback — same idea as the arXiv pipeline's page-1 extraction
             # (_enrich_institutions_llm_fallback), generalized to an arbitrary PDF URL instead
             # of assuming arxiv.org/pdf/{id}.pdf.
@@ -427,6 +473,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
                           paper.page_count, paper.institutions)
 
             # Step 4: generate LLM summary from page content (best-effort)
+            _set_step(paper_id, "web", "Writing the AI summary and main contributions")
             # Use full_text (stripped body) so blogs/articles get a real summary, not meta noise.
             if page_full_text:
                 try:
@@ -443,6 +490,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
                     summary_data = summary_data if isinstance(summary_data, dict) else {}
                     summary = PaperSummary(
                         paper_id=paper.id,
+                        content_source="web_page" if summary_source(page_full_text, page_abstract) == "full_text" else "abstract",
                         summary_text=summary_data.get("summary", ""),
                         main_contributions=contributions,
                         model_used=LLM_MODELS[0],
@@ -467,6 +515,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
             except Exception:
                 db.session.rollback()
 
+    _set_step(paper_id, "web", "Waiting to start")  # before the thread, so the page rendered next shows it
     threading.Thread(target=_run, daemon=True).start()
 
 
@@ -2072,6 +2121,12 @@ def _screen_paper_deep(
     return relevant, ("relevant" if relevant else "not-relevant"), model, elapsed, tokens_used, why
 
 
+def summary_source(paper_content: str | None, abstract: str) -> str:
+    """What generate_summary_with_full_content / extract_main_contributions actually read for these
+    inputs (they fall back to the abstract unless the content is longer): "full_text" or "abstract"."""
+    return "full_text" if paper_content and len(paper_content) > len(abstract or "") else "abstract"
+
+
 def extract_main_contributions(
     title: str, paper_content: str, abstract: str
 ) -> tuple[str, str, int, int]:
@@ -2475,6 +2530,7 @@ def run_crawl(
                         "figure_caption": figure_caption,
                         "citation_count": citation_count,
                         "summary_data": summary_data,
+                        "summary_source": summary_source(paper_content, pd["abstract"]),
                         "model": sum_model,
                         "total_elapsed": sum_elapsed + contrib_time,
                         "contributions": contributions,
@@ -2569,6 +2625,7 @@ def run_crawl(
                     _sd = result["summary_data"] if isinstance(result["summary_data"], dict) else {}
                     summary = PaperSummary(
                         paper_id=paper.id,
+                        content_source=result["summary_source"],
                         summary_text=_sd.get("summary", ""),
                         main_contributions=result["contributions"],
                         model_used=result["model"],
