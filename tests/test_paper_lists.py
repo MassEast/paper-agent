@@ -140,7 +140,7 @@ def test_discuss_only_tags_and_never_emails(c, big_project, monkeypatch):
     sent = []
     monkeypatch.setattr(crawl, "send_notification", lambda *a, **k: sent.append(a) or True)
     with c.application.app_context():
-        Project.query.get(big_project).notification_emails = "justus.westerhoff@bht-berlin.de"
+        Project.query.get(big_project).notification_emails = "someone@example.org"
         db.session.commit()
     html = c.get("/projects/pl-proj").data.decode()
     assert "/tag-and-notify" not in html

@@ -104,7 +104,7 @@ class FakeModel:
                     raise step
                 else:
                     yield step
-            yield {"model": "bht/large", "usage": {"prompt_tokens": self.prompt_tokens},
+            yield {"model": llm.MODELS[0], "usage": {"prompt_tokens": self.prompt_tokens},
                    "finish_reason": self.finish_reason}
         except GeneratorExit:
             self.closed.append(n)
@@ -717,14 +717,13 @@ def test_llm_stream_announces_retries(monkeypatch):
 
 
 def test_unavailable_model_says_so_instead_of_thinking_forever(c, app, chat_pp, monkeypatch, full_text):
-    model = FakeModel([("retry", "bht/medium", 1), FakeModel.WAIT, llm.LLMUnavailableError("503: down")])
+    model = FakeModel([("retry", llm.MODELS[1], 1), FakeModel.WAIT, llm.LLMUnavailableError("503: down")])
     monkeypatch.setattr(chat, "_llm_stream", model)
     _ask(c, chat_pp, "Anyone there?")
     answer_id = _latest_answer_id(app, chat_pp["pp"])
     _wait(model.waiting.is_set, "the retry")
     html = c.get(f"/chat/message/{answer_id}").data.decode()
-    assert "The model isn&#39;t answering, trying again (bht/medium, attempt 1)" in html or \
-        "The model isn't answering, trying again (bht/medium, attempt 1)" in html
+    assert f"trying again ({llm.MODELS[1]}, attempt 1)" in html and "answering" in html
     model.release()
     _idle(chat_pp["pp"])
     role, status, content = _msgs(app, chat_pp["pp"])[1]

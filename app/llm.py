@@ -60,7 +60,7 @@ def _llm(
     Falls through to the next model only after exhausting retries on the current one.
 
     A completion cut off by max_tokens is retried at once with double the budget (up to
-    MAX_TOKENS_CEILING): bht/large sometimes reasons past the cap, and a same-budget retry at low
+    MAX_TOKENS_CEILING): a reasoning model sometimes reasons past the cap, and a same-budget retry at low
     temperature reproduces the identical cut-off (2026-10-08 log: 4x the same 18,357 chars).
 
     Returns (response_text, model_used, elapsed_ms, usage_dict). Raises LLMUnavailableError

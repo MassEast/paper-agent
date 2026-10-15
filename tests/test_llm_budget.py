@@ -1,6 +1,6 @@
 """_llm doubles max_tokens when a completion is cut off, instead of repeating the same request.
 
-2026-10-07/08 nightly: bht/large reasoned past the cap (featured pick 1024, summary 2048,
+2026-10-07/08 nightly: the model reasoned past the cap (featured pick 1024, summary 2048,
 institutions 4096) and the same-budget retries at temperature 0 returned the identical cut-off.
 """
 from unittest.mock import MagicMock, patch
@@ -53,7 +53,7 @@ def test_budget_stops_at_ceiling():
 
 @pytest.mark.slow
 def test_live_cutoff_recovers_by_doubling(caplog):
-    """Real endpoint: a budget far too small for bht/large's reasoning is grown until it answers."""
+    """Real endpoint: a budget far too small for the model's reasoning is grown until it answers."""
     from app import prompts
     prompt = prompts.INSTITUTION_EXTRACTION.format(
         source_label="first page of the PDF", title="Homogenization in Multi-Agent Systems",

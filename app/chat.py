@@ -35,7 +35,8 @@ from app.utils import _ArxivLockCtx, _http_client, fetch_paper_full_text
 
 _log = logging.getLogger(__name__)
 
-# bht/large's context window, read from its "maximum context length" error on 2026-10-14 (bht/small: 65,536).
+# The first model's context window: set CHAT_CONTEXT_TOKENS to what your endpoint reports (a vLLM server
+# names it in the "maximum context length" error of a too-long request).
 CONTEXT_LIMIT = int(os.environ.get("CHAT_CONTEXT_TOKENS", 196000))
 MAX_ANSWER_TOKENS = MAX_TOKENS_CEILING  # thinking + answer; the server counts it against the context
 MAX_PAPER_CHARS = 150_000  # ~40k tokens, the same cap the deep relevance check uses
@@ -226,7 +227,7 @@ def view(pp, app=None) -> dict:
     }
 
 
-CHARS_PER_TOKEN = 3.2  # measured on bht/large 2026-10-14: 134.5k chars of FlashAttention -> 42k prompt tokens
+CHARS_PER_TOKEN = 3.2  # measured on our model: 134.5k chars of a paper's text -> 42k prompt tokens
 
 
 def _ctx(used: int | None, approx: bool) -> dict:

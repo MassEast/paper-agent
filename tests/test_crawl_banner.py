@@ -50,7 +50,7 @@ def test_banner_ticks_what_is_set_and_says_now_only_when_everything_is(c, app, p
                             "A few papers in My Collection": False, "An email address": False}
     assert "Now switch on" not in html
     with app.app_context():
-        Project.query.get(proj["project"]).notification_emails = "justus.westerhoff@bht-berlin.de"
+        Project.query.get(proj["project"]).notification_emails = "someone@example.org"
         ProjectPaper.query.filter_by(project_id=proj["project"]).first().manual_tag = "related"
         db.session.commit()
     html = c.get("/projects/banner-proj/crawl-banner").data.decode()
@@ -66,7 +66,7 @@ def test_banner_is_empty_once_the_nightly_crawl_is_on(c, app, proj):
 
 
 def test_setup_changes_tell_the_banner_to_redraw(c, proj):
-    resp = c.post("/projects/banner-proj/notification-emails", data={"notification_emails": "justus.westerhoff@bht-berlin.de"},
+    resp = c.post("/projects/banner-proj/notification-emails", data={"notification_emails": "someone@example.org"},
                   headers={"HX-Request": "true"})
     assert resp.headers["HX-Trigger"] == "crawlSetupChanged"
     resp = c.post("/projects/banner-proj/toggle-nightly-crawl", headers={"HX-Request": "true"})
@@ -134,7 +134,7 @@ def test_checklist_updates_live_and_banner_goes_when_switched_on(live_server, br
     assert pg.locator("#crawl-off-banner li.done").count() == 3 and pg.locator("text=Now switch on").count() == 0
     pg.evaluate("window.__notReloaded = true")
 
-    pg.fill(f"#notification-emails-{proj['project']}", "justus.westerhoff@bht-berlin.de")
+    pg.fill(f"#notification-emails-{proj['project']}", "someone@example.org")
     pg.locator(f"#email-save-btn-{proj['project']}").click()
     pg.wait_for_selector("text=Now switch on")
     assert pg.locator("#crawl-off-banner li.done").count() == 4
