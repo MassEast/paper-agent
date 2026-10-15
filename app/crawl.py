@@ -1887,70 +1887,71 @@ def select_featured_paper_llm(papers: list, research_interest: str) -> tuple:
     return papers[0], 0
 
 
-def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = 100) -> list[dict]:
-    """Fetch paper recommendations from Semantic Scholar based on seed papers.
+# Semantic Scholar's recommendations endpoint takes at most 100 seed papers and returns at most 500
+# recommendations per call, ranked by similarity, not date, and spread over the last few months. The crawl keeps
+# only the ones published in its window (5 days nightly), so a single call with all seeds has few of those.
+# Smaller seed groups each get their own top 500, and together they reach many more recent papers, which pass
+# screening about as often. One call per seed (the "recent" pool) brings many more still, but mostly unrelated
+# ones, so it isn't used. Groups of 10: at most 10 calls per crawl.
+RECOMMENDATION_MAX_SEEDS = 100
+RECOMMENDATION_GROUP_SIZE = 10
+RECOMMENDATION_LIMIT = 500
 
-    Uses the public /recommendations API seeded with arxiv IDs.
-    Returns a list of paper dicts compatible with the arXiv search result format.
-    """
-    if not arxiv_ids:
-        return []
 
-    positive_ids = [f"ArXiv:{base_arxiv_id(aid)}" for aid in arxiv_ids[:20]]
+def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = RECOMMENDATION_LIMIT) -> list[dict]:
+    """Recommended arXiv papers for the seed papers (best first, the first RECOMMENDATION_MAX_SEEDS used), asked
+    for in groups of RECOMMENDATION_GROUP_SIZE seeds with `limit` results each (why: see the comment above).
+    A paper recommended for several groups comes back once. Returns a list of paper dicts compatible with the
+    arXiv search result format."""
+    seeds = [f"ArXiv:{base_arxiv_id(aid)}" for aid in arxiv_ids[:RECOMMENDATION_MAX_SEEDS]]
+    groups = [seeds[i:i + RECOMMENDATION_GROUP_SIZE] for i in range(0, len(seeds), RECOMMENDATION_GROUP_SIZE)]
+    papers: dict[str, dict] = {}
+    for g, group in enumerate(groups, 1):
+        try:
+            for attempt in range(4):
+                with _ScholarLockCtx():
+                    with httpx.Client(timeout=httpx.Timeout(60.0)) as http:
+                        r = http.post(
+                            "https://api.semanticscholar.org/recommendations/v1/papers/",
+                            json={"positivePaperIds": group},
+                            params={"fields": "externalIds,title,authors,abstract,year,publicationDate", "limit": limit},
+                            headers=_scholar_headers(),
+                        )
+                if r.status_code != 429 or attempt == 3:
+                    break
+                wait = 15 * 3 ** attempt  # 15s, 45s, 135s
+                _log.warning("[Scholar] Recommendations rate limited, retrying in %ds (attempt %d/4)", wait, attempt + 1)
+                time.sleep(wait)
+            if r.status_code != 200:
+                _log.warning("[Scholar] Recommendations API returned %d for group %d/%d: %s",
+                             r.status_code, g, len(groups), r.text[:200])
+                continue
+            for item in r.json().get("recommendedPapers", []):
+                aid = (item.get("externalIds") or {}).get("ArXiv")
+                if not aid or base_arxiv_id(aid) in papers:
+                    continue  # skip non-arXiv papers and repeats from earlier groups
+                pub_date_str = item.get("publicationDate") or ""
+                try:
+                    pub_date = date.fromisoformat(pub_date_str) if pub_date_str else None
+                except ValueError:
+                    pub_date = None
+                papers[base_arxiv_id(aid)] = {
+                    "arxiv_id": aid,
+                    "title": item.get("title", ""),
+                    "authors": [a.get("name", "") for a in (item.get("authors") or [])],
+                    "abstract": item.get("abstract") or "",
+                    "pdf_url": f"https://arxiv.org/pdf/{aid}.pdf",
+                    "published_date": pub_date,
+                    "year": pub_date.year if pub_date else (item.get("year") or None),
+                    "categories": [],
+                    "source": "semantic_scholar",
+                }
+        except Exception as e:
+            _log.warning("[Scholar] Recommendations error for group %d/%d: %s", g, len(groups), e)
+        _log.info("[Scholar] recommendations: group %d/%d done, %d arXiv papers so far", g, len(groups), len(papers))
 
-    try:
-        url = "https://api.semanticscholar.org/recommendations/v1/papers/"
-        payload = {"positivePaperIds": positive_ids}
-        for attempt in range(4):
-            with _ScholarLockCtx():
-                with httpx.Client(timeout=httpx.Timeout(30.0)) as http:
-                    r = http.post(
-                        url,
-                        json=payload,
-                        params={"fields": "externalIds,title,authors,abstract,year,publicationDate", "limit": limit},
-                        headers=_scholar_headers(),
-                    )
-            if r.status_code != 429 or attempt == 3:
-                break
-            wait = 15 * 3 ** attempt  # 15s, 45s, 135s
-            _log.warning("[Scholar] Recommendations rate limited, retrying in %ds (attempt %d/4)", wait, attempt + 1)
-            time.sleep(wait)
-        if r.status_code != 200:
-            _log.warning("[Scholar] Recommendations API returned %d: %s", r.status_code, r.text[:200])
-            return []
-
-        papers = []
-        for item in r.json().get("recommendedPapers", []):
-            ext = item.get("externalIds") or {}
-            aid = ext.get("ArXiv")
-            if not aid:
-                continue  # skip non-arXiv papers
-
-            authors = [a.get("name", "") for a in (item.get("authors") or [])]
-            pub_date_str = item.get("publicationDate") or ""
-            try:
-                pub_date = date.fromisoformat(pub_date_str) if pub_date_str else None
-            except ValueError:
-                pub_date = None
-
-            papers.append({
-                "arxiv_id": aid,
-                "title": item.get("title", ""),
-                "authors": authors,
-                "abstract": item.get("abstract") or "",
-                "pdf_url": f"https://arxiv.org/pdf/{aid}.pdf",
-                "published_date": pub_date,
-                "year": pub_date.year if pub_date else (item.get("year") or None),
-                "categories": [],
-                "source": "semantic_scholar",
-            })
-
-        _log.info("[Scholar] Got %d arXiv recommendations from %d seeds", len(papers), len(positive_ids))
-        return papers
-
-    except Exception as e:
-        _log.warning("[Scholar] Recommendations error: %s", e)
-        return []
+    _log.info("[Scholar] Got %d arXiv recommendations from %d seeds in %d groups", len(papers), len(seeds), len(groups))
+    return list(papers.values())
 
 
 def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: date,
@@ -2056,7 +2057,7 @@ def gather_candidates(keywords: list[str], seeds: list[tuple[str, str]], date_fr
     if use_scholar and seeds:
         if status is not None:
             status["scholar_status"] = "running"
-        recs = [p for p in get_semantic_scholar_recommendations([s[0] for s in seeds], limit=100)
+        recs = [p for p in get_semantic_scholar_recommendations([s[0] for s in seeds])
                 # The recommendations API has no date filter, so it returns old papers too
                 if p.get("published_date") is not None and date_from <= p["published_date"] <= date_to]
         for p in recs:

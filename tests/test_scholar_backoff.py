@@ -48,3 +48,25 @@ def test_citation_fetch_pauses_after_repeated_429s():
     assert client.get.call_count == calls
     assert crawl._citation_paused_until > 0
     crawl._citation_paused_until = 0.0
+
+
+def test_recommendations_are_asked_for_in_groups_of_ten_seeds():
+    """One call has few recent papers among its 500 (ranked by similarity over months); groups of 10 seeds
+    each get their own 500, which reaches more recent ones. At most 100 seeds, so at most 10 calls."""
+    rec = lambda aid: {"externalIds": {"ArXiv": aid}, "title": aid, "publicationDate": "2026-10-12"}
+    responses = [_resp(200, {"recommendedPapers": [rec("2610.00001"), rec("2610.00002")]}),
+                 _resp(500),  # one group failing doesn't lose the others
+                 _resp(200, {"recommendedPapers": [rec("2610.00002v2"), rec("2610.00003"), {"externalIds": {}}]})]
+    client = _client_returning(responses)
+    seeds = [f"2501.{i:05d}" for i in range(25)]
+    with patch.object(crawl.httpx, "Client", return_value=client), patch.object(crawl, "_ScholarLockCtx", MagicMock()):
+        papers = crawl.get_semantic_scholar_recommendations(seeds)
+    assert [len(c.kwargs["json"]["positivePaperIds"]) for c in client.post.call_args_list] == [10, 10, 5]
+    assert {c.kwargs["params"]["limit"] for c in client.post.call_args_list} == {500}
+    assert [p["arxiv_id"] for p in papers] == ["2610.00001", "2610.00002", "2610.00003"]
+
+    client = _client_returning([_resp(200, {"recommendedPapers": []})] * 20)
+    with patch.object(crawl.httpx, "Client", return_value=client), patch.object(crawl, "_ScholarLockCtx", MagicMock()):
+        crawl.get_semantic_scholar_recommendations([f"2501.{i:05d}" for i in range(174)])
+    assert client.post.call_count == 10
+    assert client.post.call_args_list[0].kwargs["json"]["positivePaperIds"][0] == "ArXiv:2501.00000"  # best first

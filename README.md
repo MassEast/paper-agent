@@ -72,7 +72,7 @@ flowchart TD
     class DROP,TRASH dropped
 ```
 
-The dashed edges are a feedback loop: papers you've already curated into My Collection seed Semantic Scholar's recommendations, and every one of them is also checked for new papers that cite it. A citing paper isn't necessarily relevant (widely cited papers are cited by work from every corner of the field), so these candidates go through the same screening as the rest. Collection papers also quietly inform two LLM steps not drawn above — keyword extraction and relevance screening both get calibration excerpts from your Collection too — so **the tool gets better targeted the more you curate**.
+The dashed edges are a feedback loop: papers you've already curated into My Collection seed Semantic Scholar's recommendations, and every one of them is also checked for new papers that cite it. The recommendations are asked for in groups of 10 seed papers (up to 100, best-tagged first): Semantic Scholar returns at most 500 per request, ranked by similarity over the last few months rather than by date, so a single request has only a few papers from the last days among them; each smaller group gets its own 500, and together they reach many more recent papers. A citing paper isn't necessarily relevant (widely cited papers are cited by work from every corner of the field), so these candidates go through the same screening as the rest. Collection papers also quietly inform two LLM steps not drawn above — keyword extraction and relevance screening both get calibration excerpts from your Collection too — so **the tool gets better targeted the more you curate**.
 
 Each paper card shows a neutral AI summary (shared by every project the paper is in) and, per project, a short **"Why it's relevant"** line that the deep relevance check writes against that project's research interest. A paper that fits a different project can be **copied or moved** into that project's My Collection from its card. After you change the research interest, **Re-screen** in New Papers re-checks the papers still waiting there and moves the ones that no longer fit to Trash, where you can restore them.
 
@@ -204,6 +204,7 @@ The CronJob always pulls `:latest` at job start, so it needs no separate restart
 ## Planned
 
 - **Spend fewer tokens on screening.** The pipeline was built for recall, not cost: every candidate gets an LLM relevance check. A cheap first pass (embedding similarity to My Collection, or a reranker) could drop the clear misses before the LLM sees them. To build it, first replay past crawls to measure how many papers that were accepted the pre-filter would have cut, and only use it if that number is close to zero.
+- **Negative examples for the recommendations.** Semantic Scholar's recommendation endpoint also accepts papers you *don't* want more of. The papers in Trash could go there, to steer recommendations away from what was rejected. Not done yet because Trash also holds papers that fit the topic but weren't interesting enough, so the effect is unclear; it would need a before/after comparison of what the recommendations bring in.
 
 ## Contributing
 
