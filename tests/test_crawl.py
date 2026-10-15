@@ -174,7 +174,7 @@ class TestRunCrawl:
         assert log.total_tokens is not None and log.total_tokens > 0
 
     def test_tokens_stored_per_paper(self, app, project):
-        from app.models import Paper
+        from app.models import CrawlLog, Paper
 
         papers = _papers(1, "2501.F")
         run(project.id, papers, date_suffix="06")
@@ -182,7 +182,11 @@ class TestRunCrawl:
         paper = Paper.query.filter_by(arxiv_id=papers[0]["arxiv_id"]).first()
         assert paper is not None
         assert paper.summary is not None
-        assert paper.summary.tokens_used > 0
+        # The card counts only the summary (200) + contributions (80) of MockPatches, not the quick and
+        # deep checks (60 each); those are in the crawl's total
+        assert paper.summary.tokens_used == 280
+        log = CrawlLog.query.filter_by(project_id=project.id).order_by(CrawlLog.id.desc()).first()
+        assert log.total_tokens > paper.summary.tokens_used
 
     def test_keywords_override_skips_keyword_extraction(self, app, project):
         from app.crawl import run_crawl

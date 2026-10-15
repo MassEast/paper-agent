@@ -53,6 +53,14 @@ def setup_logging(app: Flask):
 # URL if its source says so (only the URL add sets "manual"/"web"; a copied paper would be in two projects), and
 # otherwise found by a crawl there. Papers in several projects stay unknown. Runs on every start like the other
 # migrations, but only touches rows without an origin, and every link created since sets one.
+# One-time: crawls from before llm_usage existed count with their crawl_logs.total_tokens. Runs only
+# while the table is still empty, so it never adds a crawl twice.
+USAGE_BACKFILL_SQL = (
+    "INSERT INTO llm_usage (project_id, kind, tokens, calls, created_at) "
+    "SELECT project_id, 'crawl', total_tokens, NULL, started_at FROM crawl_logs "
+    "WHERE total_tokens > 0 AND NOT EXISTS (SELECT 1 FROM llm_usage)"
+)
+
 ORIGIN_BACKFILL_SQL = (
     "UPDATE project_papers SET origin = CASE WHEN (SELECT source FROM papers WHERE id = paper_id) IN ('manual', 'web') "
     "THEN 'manual' ELSE 'crawl' END WHERE origin IS NULL "
@@ -130,6 +138,8 @@ def create_app():
             "ALTER TABLE project_papers ADD COLUMN origin TEXT",
             "ALTER TABLE project_papers ADD COLUMN origin_project_id INTEGER",
             ORIGIN_BACKFILL_SQL,
+            "CREATE INDEX IF NOT EXISTS idx_llm_usage_project ON llm_usage(project_id, kind)",
+            USAGE_BACKFILL_SQL,
         ]
         for _sql in _migrations:
             try:
@@ -180,6 +190,20 @@ def create_app():
         if dt is None:
             return ""
         return dt.replace(tzinfo=timezone.utc).astimezone(_berlin).strftime(fmt)
+
+    @app.template_filter("tokens_short")
+    def tokens_short_filter(n):
+        n = n or 0
+        if n >= 1_000_000_000:
+            return f"{n / 1_000_000_000:.2f}B"
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.2f}M"
+        return f"{n / 1000:.1f}k"
+
+    @app.template_filter("est_cost")
+    def est_cost_filter(n):
+        from app.models import estimated_cost
+        return f"{estimated_cost(n):.2f}"
 
     @app.route("/")
     def index():

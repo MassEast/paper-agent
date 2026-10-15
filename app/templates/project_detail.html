@@ -1379,26 +1379,53 @@
                 </script>
             </div>
 
+            <div id="usage-panel"
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-subtle); padding: var(--space-lg);">
+                <h2 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 12px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px;"
+                    data-tip="Tokens the model read and wrote for this project, by what they were for. The cost is what they would cost at {{ cost_comparison_model }} pricing, for comparison. The nightly metadata backfill works on papers shared by all projects and counts for none.">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color: var(--ink-3);">
+                        <use href="/static/icons.svg#icon-hash"></use>
+                    </svg>
+                    AI Usage
+                </h2>
+                {% set _usage_total_panel = usage.values() | sum %}
+                {% if usage %}
+                <table style="width: 100%; font-size: 0.8rem; border-collapse: collapse;">
+                    {% for kind, tokens in usage.items() %}
+                    <tr style="border-top: 1px solid var(--border-subtle);">
+                        <td style="padding: 5px 0; color: var(--ink-2);">{{ usage_kinds[kind] }}</td>
+                        <td style="padding: 5px 0 5px 8px; text-align: right; color: var(--ink-3); white-space: nowrap;">{{ tokens | tokens_short }}</td>
+                        <td style="padding: 5px 0 5px 8px; text-align: right; color: var(--ink-4); white-space: nowrap;">~${{ tokens | est_cost }}</td>
+                    </tr>
+                    {% endfor %}
+                    <tr style="border-top: 1px solid var(--border-default); font-weight: 600;">
+                        <td style="padding: 5px 0; color: var(--ink-1);">Total</td>
+                        <td style="padding: 5px 0 5px 8px; text-align: right; color: var(--ink-1); white-space: nowrap;">{{ _usage_total_panel | tokens_short }}</td>
+                        <td style="padding: 5px 0 5px 8px; text-align: right; color: var(--ink-2); white-space: nowrap;">~${{ _usage_total_panel | est_cost }}</td>
+                    </tr>
+                </table>
+                <p style="font-size: 0.72rem; color: var(--ink-4); margin-top: 8px; line-height: 1.45;">Everything is counted since Oct 15, 2026. Before that only crawls were counted, so chat, adding papers, Regenerate and the rest are missing for earlier days.</p>
+                {% else %}
+                <p style="font-size: 0.8rem; color: var(--ink-4);">No AI usage yet.</p>
+                {% endif %}
+            </div>
+
         </div>
     </div>
-    {% set ns = namespace(total_tokens=0, total_cost=0.0) %}
-    {% for log in project.crawl_logs %}{% if log.total_tokens %}{% set ns.total_tokens = ns.total_tokens +
-    log.total_tokens %}{% set ns.total_cost = ns.total_cost + log.estimated_cost %}{% endif %}{% endfor %}
+    {% set _usage_total = usage.values() | sum %}
     <div
         style="margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
         <span style="font-size: 0.75rem; color: var(--ink-4); display: inline-flex; align-items: center; gap: 5px;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <use href="/static/icons.svg#icon-hash"></use>
             </svg>
-            AI usage (all crawls):
+            AI usage:
         </span>
         <span style="font-size: 0.75rem; color: var(--ink-3);">
-            {% if ns.total_tokens >= 1000000000 %}~{{ (ns.total_tokens / 1000000000)|round(2) }}B tokens{% elif
-            ns.total_tokens >= 1000000 %}~{{ (ns.total_tokens / 1000000)|round(2) }}M tokens{% elif ns.total_tokens > 0
-            %}~{{ (ns.total_tokens / 1000)|round(1) }}k tokens{% else %}0 tokens{% endif %}
+            ~{{ _usage_total | tokens_short }} tokens
         </span>
         <span style="font-size: 0.75rem; color: var(--ink-3);">
-            ~${{ "%.2f" | format(ns.total_cost) }}
+            ~${{ _usage_total | est_cost }}
         </span>
         <span style="font-size: 0.7rem; color: var(--ink-4);">({{ cost_comparison_model }} pricing, for comparison)</span>
         <span style="font-size: 0.7rem; color: var(--ink-4);">·</span>

@@ -10,6 +10,7 @@ _log = logging.getLogger(__name__)
 
 from app import db
 from app.auth import login_required
+from app.usage import counted
 from app.models import ChatMessage, Paper, ProjectPaper, Project
 from app import chat
 from app import paper_lists
@@ -334,102 +335,103 @@ def regenerate_paper(arxiv_id):
     project_id = request.form.get("project_id", type=int)
     project = Project.query.get(project_id) if project_id else None
 
-    if paper.is_arxiv:
-        # Figure
-        try:
-            figure_url, figure_caption = get_paper_figure(arxiv_id)
-            if figure_url:
-                paper.figure_url = figure_url
-                paper.figure_caption = figure_caption
-        except Exception as e:
-            _log.warning("[regenerate] figure fetch failed for %s: %s", arxiv_id, e)
+    with counted(project_id, "regenerate"):
+        if paper.is_arxiv:
+            # Figure
+            try:
+                figure_url, figure_caption = get_paper_figure(arxiv_id)
+                if figure_url:
+                    paper.figure_url = figure_url
+                    paper.figure_caption = figure_caption
+            except Exception as e:
+                _log.warning("[regenerate] figure fetch failed for %s: %s", arxiv_id, e)
 
-        # Citations
-        try:
-            count = get_citation_count(arxiv_id)
-            if count is not None:
-                if not paper.citation_manual or count >= paper.citation_count:
-                    paper.citation_count = count
-                    paper.citation_manual = False
-                paper.citation_fetched_at = datetime.utcnow()
-        except Exception as e:
-            _log.warning("[regenerate] citation fetch failed for %s: %s", arxiv_id, e)
+            # Citations
+            try:
+                count = get_citation_count(arxiv_id)
+                if count is not None:
+                    if not paper.citation_manual or count >= paper.citation_count:
+                        paper.citation_count = count
+                        paper.citation_manual = False
+                    paper.citation_fetched_at = datetime.utcnow()
+            except Exception as e:
+                _log.warning("[regenerate] citation fetch failed for %s: %s", arxiv_id, e)
 
-    elif paper.semantic_scholar_id:
-        # Non-arXiv paper with a Scholar ID — fetch citations only
-        try:
-            count = get_citation_count_by_scholar_id(paper.semantic_scholar_id)
-            if count is not None:
-                if not paper.citation_manual or count >= paper.citation_count:
-                    paper.citation_count = count
-                    paper.citation_manual = False
-                paper.citation_fetched_at = datetime.utcnow()
-        except Exception as e:
-            _log.warning("[regenerate] citation fetch failed for scholar:%s: %s", paper.semantic_scholar_id, e)
+        elif paper.semantic_scholar_id:
+            # Non-arXiv paper with a Scholar ID — fetch citations only
+            try:
+                count = get_citation_count_by_scholar_id(paper.semantic_scholar_id)
+                if count is not None:
+                    if not paper.citation_manual or count >= paper.citation_count:
+                        paper.citation_count = count
+                        paper.citation_manual = False
+                    paper.citation_fetched_at = datetime.utcnow()
+            except Exception as e:
+                _log.warning("[regenerate] citation fetch failed for scholar:%s: %s", paper.semantic_scholar_id, e)
 
-        # Institutions (batch function takes a list; skips if already set — force by clearing)
-        paper.institutions = None
-        try:
-            enrich_institutions_from_scholar([paper])
-        except Exception as e:
-            _log.warning("[regenerate] institution enrich failed for %s: %s", arxiv_id, e)
+            # Institutions (batch function takes a list; skips if already set — force by clearing)
+            paper.institutions = None
+            try:
+                enrich_institutions_from_scholar([paper])
+            except Exception as e:
+                _log.warning("[regenerate] institution enrich failed for %s: %s", arxiv_id, e)
 
-    # Summary + main contributions, from the full text like a crawl (abstract if there is none)
-    content = (get_paper_content(arxiv_id) if paper.is_arxiv else None) or paper.abstract or ""
-    try:
-        summary_data, model, elapsed, tokens = generate_summary_with_full_content(
-            title=paper.title,
-            abstract=paper.abstract or "",
-            paper_content=content,
-        )
-        contributions, _, contrib_elapsed, contrib_tokens = extract_main_contributions(
-            title=paper.title, paper_content=content, abstract=paper.abstract or "",
-        )
-        elapsed, tokens = elapsed + contrib_elapsed, tokens + contrib_tokens
-        source = summary_source(content, paper.abstract or "")
-        from app.models import PaperSummary
-        if paper.summary:
-            paper.summary.content_source = source
-            if contributions:
-                paper.summary.main_contributions = contributions
-            paper.summary.summary_text = summary_data.get("summary", "")
-            paper.summary.model_used = model
-            paper.summary.introduces_dataset = summary_data.get("introduces_dataset", False)
-            paper.summary.introduces_architecture = summary_data.get("introduces_architecture", False)
-            paper.summary.introduces_method = summary_data.get("introduces_method", False)
-            paper.summary.is_survey = summary_data.get("is_survey", False)
-            paper.summary.is_benchmark = summary_data.get("is_benchmark", False)
-            paper.summary.elapsed_ms = elapsed
-            paper.summary.tokens_used = (paper.summary.tokens_used or 0) + tokens
-        else:
-            db.session.add(PaperSummary(
-                paper_id=paper.id,
-                content_source=source,
-                summary_text=summary_data.get("summary", ""),
-                main_contributions=contributions,
-                model_used=model,
-                introduces_dataset=summary_data.get("introduces_dataset", False),
-                introduces_architecture=summary_data.get("introduces_architecture", False),
-                introduces_method=summary_data.get("introduces_method", False),
-                is_survey=summary_data.get("is_survey", False),
-                is_benchmark=summary_data.get("is_benchmark", False),
-                elapsed_ms=elapsed,
-                tokens_used=tokens,
-            ))
-    except LLMUnavailableError as e:
-        _log.warning("[regenerate] LLM unavailable for %s: %s", arxiv_id, e)
-
-    # This project's why-relevant line (the summary above is shared by all projects)
-    pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first() if project_id else None
-    if pp and project and (project.research_interest or "").strip():
+        # Summary + main contributions, from the full text like a crawl (abstract if there is none)
+        content = (get_paper_content(arxiv_id) if paper.is_arxiv else None) or paper.abstract or ""
         try:
-            why = generate_relevance_reason(paper.title, paper.abstract or "", project.research_interest)
-            if why:
-                pp.relevance_reason = why
+            summary_data, model, elapsed, tokens = generate_summary_with_full_content(
+                title=paper.title,
+                abstract=paper.abstract or "",
+                paper_content=content,
+            )
+            contributions, _, contrib_elapsed, contrib_tokens = extract_main_contributions(
+                title=paper.title, paper_content=content, abstract=paper.abstract or "",
+            )
+            elapsed, tokens = elapsed + contrib_elapsed, tokens + contrib_tokens
+            source = summary_source(content, paper.abstract or "")
+            from app.models import PaperSummary
+            if paper.summary:
+                paper.summary.content_source = source
+                if contributions:
+                    paper.summary.main_contributions = contributions
+                paper.summary.summary_text = summary_data.get("summary", "")
+                paper.summary.model_used = model
+                paper.summary.introduces_dataset = summary_data.get("introduces_dataset", False)
+                paper.summary.introduces_architecture = summary_data.get("introduces_architecture", False)
+                paper.summary.introduces_method = summary_data.get("introduces_method", False)
+                paper.summary.is_survey = summary_data.get("is_survey", False)
+                paper.summary.is_benchmark = summary_data.get("is_benchmark", False)
+                paper.summary.elapsed_ms = elapsed
+                paper.summary.tokens_used = tokens
+            else:
+                db.session.add(PaperSummary(
+                    paper_id=paper.id,
+                    content_source=source,
+                    summary_text=summary_data.get("summary", ""),
+                    main_contributions=contributions,
+                    model_used=model,
+                    introduces_dataset=summary_data.get("introduces_dataset", False),
+                    introduces_architecture=summary_data.get("introduces_architecture", False),
+                    introduces_method=summary_data.get("introduces_method", False),
+                    is_survey=summary_data.get("is_survey", False),
+                    is_benchmark=summary_data.get("is_benchmark", False),
+                    elapsed_ms=elapsed,
+                    tokens_used=tokens,
+                ))
         except LLMUnavailableError as e:
-            _log.warning("[regenerate] LLM unavailable for why-line of %s: %s", arxiv_id, e)
+            _log.warning("[regenerate] LLM unavailable for %s: %s", arxiv_id, e)
 
-    db.session.commit()
+        # This project's why-relevant line (the summary above is shared by all projects)
+        pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first() if project_id else None
+        if pp and project and (project.research_interest or "").strip():
+            try:
+                why = generate_relevance_reason(paper.title, paper.abstract or "", project.research_interest)
+                if why:
+                    pp.relevance_reason = why
+            except LLMUnavailableError as e:
+                _log.warning("[regenerate] LLM unavailable for why-line of %s: %s", arxiv_id, e)
+
+        db.session.commit()
 
     if request.headers.get("HX-Request") and project_id:
         pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
@@ -458,7 +460,7 @@ def retry_web_enrich(arxiv_id):
     paper_id = paper.id
 
     def _run():
-        with _app.app_context():
+        with _app.app_context(), counted(None, "metadata"):
             p = Paper.query.get(paper_id)
             if not p:
                 return

@@ -262,7 +262,7 @@
         {% endif %}
         {% if pp.paper.summary and pp.paper.summary.elapsed_ms is not none %}
         <span class="text-xs" style="color: var(--ink-4); display: inline-flex; align-items: center; gap: 6px;"
-            data-tip="Model: the model that wrote the AI summary and main contributions | Time: how long the model took to write them | Tokens: what the model read and wrote for them (the paper text in, the summary out); for a paper found by a crawl this also counts the relevance check, and after Regenerate it adds up every run">
+            data-tip="Model: the model that wrote the AI summary and main contributions | Time: how long the model took to write them | Tokens: what the model read and wrote for them (the paper text in, the summary out), for the latest run; on older cards this may also count the relevance check or earlier runs. All of the project's AI usage is under the crawl calendar">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <use href="/static/icons.svg#icon-cpu"></use>
             </svg>

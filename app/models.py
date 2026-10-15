@@ -105,7 +105,7 @@ class PaperSummary(db.Model):
     is_benchmark = db.Column(db.Boolean, default=False)
     generated_at = db.Column(db.DateTime, default=datetime.utcnow)
     elapsed_ms = db.Column(db.Integer)
-    tokens_used = db.Column(db.Integer, default=0)  # total tokens for relevance+summary+contributions
+    tokens_used = db.Column(db.Integer, default=0)  # summary + contributions of the latest run
     # What the summary and main contributions were made from: "full_text" | "web_page" (a web paper's
     # landing-page text) | "abstract" (no full text could be fetched). None: made before this was recorded.
     content_source = db.Column(db.Text)
@@ -239,19 +239,38 @@ class CrawlLog(db.Model):
     
     @property
     def estimated_cost(self):
-        """Cost comparison figure — not what we actually pay (self-hosted inference has no
-        real per-token cost), but what this many tokens would have cost on a metered API.
-        Model/rates configurable via LLM_COST_COMPARISON_MODEL / _INPUT_PER_1M / _OUTPUT_PER_1M
-        (default: Claude Sonnet 4.6 pricing as of May 2026, $3/$15 per million tokens)."""
-        if not self.total_tokens:
-            return 0
-        input_cost_per_1m = float(os.environ.get("LLM_COST_COMPARISON_INPUT_PER_1M", "3.00"))
-        output_cost_per_1m = float(os.environ.get("LLM_COST_COMPARISON_OUTPUT_PER_1M", "15.00"))
-        # Typical ratio: ~70% input tokens, 30% output tokens
-        ratio = 0.7
-        input_tokens = int(self.total_tokens * ratio)
-        output_tokens = int(self.total_tokens * (1 - ratio))
-        return (input_tokens / 1_000_000 * input_cost_per_1m) + (output_tokens / 1_000_000 * output_cost_per_1m)
+        return estimated_cost(self.total_tokens)
+
+
+def estimated_cost(tokens) -> float:
+    """Cost comparison figure — not what we actually pay (self-hosted inference has no
+    real per-token cost), but what this many tokens would have cost on a metered API.
+    Model/rates configurable via LLM_COST_COMPARISON_MODEL / _INPUT_PER_1M / _OUTPUT_PER_1M
+    (default: Claude Sonnet 4.6 pricing as of May 2026, $3/$15 per million tokens)."""
+    if not tokens:
+        return 0
+    input_cost_per_1m = float(os.environ.get("LLM_COST_COMPARISON_INPUT_PER_1M", "3.00"))
+    output_cost_per_1m = float(os.environ.get("LLM_COST_COMPARISON_OUTPUT_PER_1M", "15.00"))
+    # Typical ratio: ~70% input tokens, 30% output tokens
+    ratio = 0.7
+    input_tokens = int(tokens * ratio)
+    output_tokens = int(tokens * (1 - ratio))
+    return (input_tokens / 1_000_000 * input_cost_per_1m) + (output_tokens / 1_000_000 * output_cost_per_1m)
+
+
+class LlmUsage(db.Model):
+    """Tokens the model used for one action (a crawl, a chat answer, a Regenerate, ...), written by
+    app.usage.counted when the action ends. project_id is NULL for work on shared papers that belongs
+    to no project (the nightly metadata backfill). Crawls before this table existed were backfilled
+    from crawl_logs.total_tokens (calls NULL)."""
+    __tablename__ = "llm_usage"
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id"))
+    kind = db.Column(db.Text, nullable=False)
+    tokens = db.Column(db.Integer, nullable=False, default=0)
+    calls = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class ScreenedPaper(db.Model):

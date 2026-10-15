@@ -1,5 +1,7 @@
+import contextvars
 import json
 import logging
+import threading
 import os
 import re
 import time
@@ -50,6 +52,46 @@ def _estimate_usage(messages: list[dict], response_text: str) -> dict:
     }
 
 
+class UsageMeter:
+    """Adds up the tokens of every LLM call made while it is the current meter (see metered)."""
+
+    def __init__(self):
+        self.tokens = 0
+        self.calls = 0
+        self._lock = threading.Lock()
+
+    def add(self, usage: dict) -> None:
+        with self._lock:
+            self.tokens += int(usage.get("total_tokens")
+                               or (usage.get("prompt_tokens") or 0) + (usage.get("completion_tokens") or 0))
+            self.calls += 1
+
+
+_meter: contextvars.ContextVar = contextvars.ContextVar("llm_usage_meter", default=None)
+
+
+class metered:
+    """`with metered() as m:` counts the LLM calls made inside the block into m. A thread pool started
+    inside does not inherit it on its own: submit with contextvars.copy_context().run."""
+
+    def __enter__(self) -> UsageMeter:
+        self.meter = UsageMeter()
+        self._token = _meter.set(self.meter)
+        return self.meter
+
+    def __exit__(self, *exc):
+        _meter.reset(self._token)
+
+
+def _count(usage: dict) -> None:
+    m = _meter.get()
+    if m is None:
+        _log.info("[usage] LLM call outside any usage scope (%s tokens), not counted for a project",
+                  usage.get("total_tokens"))
+        return
+    m.add(usage)
+
+
 def _llm(
     messages: list[dict], temperature: float = 0.9, max_tokens: int = 4096
 ) -> tuple[str, str, int, dict]:
@@ -92,6 +134,7 @@ def _llm(
                     r.raise_for_status()
                     payload = r.json()
                     raw = payload["choices"][0]["message"]["content"]
+                    _count(payload.get("usage") or _estimate_usage(messages, raw or ""))
                     finish_reason = payload["choices"][0].get("finish_reason")
                     if not raw or not raw.strip():
                         last_err = ValueError("empty completion from server")
@@ -233,7 +276,7 @@ def _llm_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int 
         for attempt in range(3):
             if last_err is not None:
                 yield ("retry", model, attempt + 1)
-            got_chunk = False
+            got_chunk, raw, counted = False, "", False
             try:
                 with httpx.Client(timeout=httpx.Timeout(300.0, connect=30.0)) as http:
                     with http.stream(
@@ -265,7 +308,11 @@ def _llm_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int 
                             raise ValueError("empty completion from server")
                         if _LOG_LLM:
                             _log.info("[LLM] STREAM RESPONSE (%d chars, %s): %s", len(raw), model, raw[:500])
-                        yield {"model": model, "usage": usage or _estimate_usage(messages, raw), "finish_reason": finish}
+                        final = {"model": model, "usage": usage or _estimate_usage(messages, raw),
+                                 "finish_reason": finish}
+                        _count(final["usage"])
+                        counted = True
+                        yield final
                         return
             except (httpx.HTTPError, ValueError) as e:
                 if got_chunk:
@@ -276,4 +323,7 @@ def _llm_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int 
                 if too_long:
                     break
                 time.sleep((2**attempt) + random.uniform(0, 1))
+            finally:
+                if got_chunk and not counted:  # stopped by the user or broken mid-answer: estimate it
+                    _count(_estimate_usage(messages, raw))
     raise LLMUnavailableError(str(last_err))

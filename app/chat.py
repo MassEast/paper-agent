@@ -31,6 +31,7 @@ from mdit_py_plugins.dollarmath import dollarmath_plugin
 from app import db, prompts
 from app.llm import MAX_TOKENS_CEILING, MODELS, LLMUnavailableError, _llm_stream
 from app.models import ChatMessage, PaperText, ProjectPaper
+from app.usage import counted
 from app.utils import _ArxivLockCtx, _http_client, fetch_paper_full_text
 
 _log = logging.getLogger(__name__)
@@ -292,10 +293,12 @@ def _kick(app, pp_id: int) -> None:
 
 def _work(app, pp_id: int, answer_id: int) -> None:
     with app.app_context():
+        project_id = db.session.get(ProjectPaper, pp_id).project_id
         try:
             while answer_id is not None:
                 try:
-                    _answer(answer_id)
+                    with counted(project_id, "chat"):
+                        _answer(answer_id)
                 except Exception as e:  # never leave an answer "streaming" with nothing writing it
                     _log.exception("[chat] answer %d: worker failed", answer_id)
                     db.session.rollback()

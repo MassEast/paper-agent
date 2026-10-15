@@ -9,6 +9,7 @@ from flask import current_app, make_response, render_template, request, redirect
 
 from app import db
 from app.auth import login_required
+from app.usage import counted, project_usage, usage_by_project, KINDS as USAGE_KINDS
 from app.models import Project, ProjectPaper, Paper, CrawlLog, ScreenedPaper
 from app import paper_lists
 from app.routes import projects_bp
@@ -41,7 +42,9 @@ def index():
     projects = [p for p in all_projects if not p.trashed_at]
     trashed_projects = [p for p in all_projects if p.trashed_at]
     return render_template(
-        "projects.html", projects=projects, trashed_projects=trashed_projects, llm_model=LLM_MODELS[0]
+        "projects.html", projects=projects, trashed_projects=trashed_projects, llm_model=LLM_MODELS[0],
+        usage_totals=usage_by_project(),
+        cost_comparison_model=os.environ.get("LLM_COST_COMPARISON_MODEL", "Claude Sonnet 4.6"),
     )
 
 
@@ -154,6 +157,8 @@ def detail(slug):
         prompt_summary=_prompts.SUMMARY_WITH_FULL_CONTENT,
         reference_papers_limit=REFERENCE_PAPERS_LIMIT,
         rescreen=rescreen_state(project.id),
+        usage=project_usage(project.id),
+        usage_kinds=USAGE_KINDS,
         prompt_keyword_extraction=_prompts.KEYWORD_EXTRACTION,
         prompt_research_interest=_prompts.RESEARCH_INTEREST_IMPROVE,
         llm_model=LLM_MODELS[0],
@@ -293,7 +298,8 @@ def generate_research_interest(slug):
         return jsonify({"error": "Add papers to My Collection or write a research interest first"}), 400
 
     try:
-        generated = generate_research_interest_from_collection(collection_pps, existing_text=existing_text)
+        with counted(project.id, "research_interest"):
+            generated = generate_research_interest_from_collection(collection_pps, existing_text=existing_text)
         return jsonify({"research_interest": generated})
     except LLMUnavailableError as e:
         return jsonify({"error": f"LLM unavailable: {str(e)}"}), 503
@@ -559,7 +565,8 @@ def generate_keywords(slug):
         return jsonify({"error": "Please set a research interest or add papers to My Collection first."}), 400
 
     try:
-        keywords, _ = extract_keywords_with_usage(project.research_interest, collection_pps)
+        with counted(project.id, "keywords"):
+            keywords, _ = extract_keywords_with_usage(project.research_interest, collection_pps)
     except LLMUnavailableError as e:
         return jsonify({"error": f"LLM unavailable: {str(e)}"}), 503
 

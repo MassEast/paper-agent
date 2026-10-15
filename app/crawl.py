@@ -11,6 +11,8 @@ from typing import Optional
 
 _log = logging.getLogger(__name__)
 
+import contextvars
+
 import arxiv
 import httpx
 
@@ -18,6 +20,7 @@ from app import db
 from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog, ScreenedPaper, compute_screening_hash
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
+from app.usage import counted, counts
 from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, USER_AGENT, base_arxiv_id
 
 API_KEY = os.environ.get("LLM_API_KEY")
@@ -189,7 +192,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
             _end_steps(paper_id, "arxiv")
 
     def _steps():
-        with app.app_context():
+        with app.app_context(), counted(project_id, "add"):
             # --- Step 1: Fetch arXiv metadata (needs the global lock) ---
             _set_step(paper_id, "arxiv", "Fetching title, authors and abstract from arXiv")
             with _ArxivLockCtx():
@@ -332,7 +335,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
             _end_steps(paper_id, "web")
 
     def _steps():
-        with app.app_context():
+        with app.app_context(), counted(project_id, "add"):
             paper = Paper.query.get(paper_id)
             if not paper:
                 return
@@ -2227,6 +2230,7 @@ def _search_warning(failed: list[str]) -> str:
             f"Each night searches the last {days_back} days, so the next nights cover these days again.")
 
 
+@counts("crawl")
 def send_carry_notification(project_id: int, carry: dict, date_from, date_to, warning: str) -> bool:
     """Send the deferred first-pass email when the retry pass could not (it errored before screening)."""
     project = Project.query.get(project_id)
@@ -2239,6 +2243,7 @@ def send_carry_notification(project_id: int, carry: dict, date_from, date_to, wa
     )
 
 
+@counts("crawl")
 def run_crawl(
     project_id: int,
     date_from: date,
@@ -2535,13 +2540,15 @@ def run_crawl(
                         "total_elapsed": sum_elapsed + contrib_time,
                         "contributions": contributions,
                         "tokens": rel_tokens + sum_tokens + contrib_tokens,
+                        "summary_tokens": sum_tokens + contrib_tokens,  # the card shows what the summary cost
                         "why": why,
                     }
                 finally:
                     _crawl_in_flight[_crawl_log_id] = max(0, _crawl_in_flight.get(_crawl_log_id, 1) - 1)
 
             with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = {executor.submit(_process_one, pd): pd for pd in papers_to_check_fresh}
+                futures = {executor.submit(contextvars.copy_context().run, _process_one, pd): pd  # keeps the usage meter
+                           for pd in papers_to_check_fresh}
                 for future in as_completed(futures):
                     db.session.refresh(crawl_log)
                     if crawl_log.status == "cancelled":
@@ -2635,7 +2642,7 @@ def run_crawl(
                         is_survey=_sd.get("is_survey", False),
                         is_benchmark=_sd.get("is_benchmark", False),
                         elapsed_ms=result["total_elapsed"],
-                        tokens_used=result["tokens"],
+                        tokens_used=result["summary_tokens"],
                     )
                     db.session.add(summary)
                     papers_added += 1
@@ -2771,7 +2778,7 @@ def start_relevance_reason_async(project_id: int, paper_id: int, app=None) -> th
         app = current_app._get_current_object()
 
     def _run():
-        with app.app_context():
+        with app.app_context(), counted(project_id, "relevance_reason"):
             project = db.session.get(Project, project_id)
             pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper_id).first()
             if not project or not pp or not (project.research_interest or "").strip():
@@ -2825,6 +2832,7 @@ def start_rescreen_async(project_id: int, app=None) -> bool:
     return True
 
 
+@counts("rescreen")
 def run_rescreen(project_id: int) -> dict:
     """Re-check every New Papers paper against the project's current research interest and My
     Collection, with the same quick → deep screen a crawl uses. Papers that no longer pass go
@@ -2882,7 +2890,7 @@ def run_rescreen(project_id: int) -> dict:
         return item, reason, why
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(_screen, item) for item in todo]
+        futures = [executor.submit(contextvars.copy_context().run, _screen, item) for item in todo]  # keeps the usage meter
         try:
             for future in as_completed(futures):
                 item, reason, why = future.result()
@@ -2984,6 +2992,7 @@ def start_crawl_async(
     return thread, crawl_log_id
 
 
+@counts("metadata", per_project=False)
 def backfill_missing_paper_metadata() -> int:
     """Ensure all arXiv papers have complete metadata (title, authors, abstract, citations).
 

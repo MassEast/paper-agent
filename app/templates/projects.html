@@ -155,12 +155,11 @@
                                     <span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle;background-color:{% if project.crawl_hour %}var(--success, #16a34a){% else %}var(--error){% endif %};{% if not project.crawl_hour %}opacity:0.7;{% endif %}"></span>{% if project.crawl_hour %}On{% else %}Off{% endif %}
                                 </div>
                             </div>
-                            {% set ns = namespace(total_tokens=0, total_cost=0.0) %}
-                            {% for log in project.crawl_logs %}{% if log.total_tokens %}{% set ns.total_tokens = ns.total_tokens + log.total_tokens %}{% set ns.total_cost = ns.total_cost + log.estimated_cost %}{% endif %}{% endfor %}
-                            {% if ns.total_tokens > 0 %}
-                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" data-tip="Total LLM tokens used across all crawls (estimated Sonnet 4.6 pricing)">
+                            {% set _tokens = usage_totals.get(project.id, 0) %}
+                            {% if _tokens > 0 %}
+                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" data-tip="All LLM tokens this project used: crawls, paper chat, adding papers, Regenerate, Re-screen and the rest (cost estimated at {{ cost_comparison_model }} pricing, for comparison). The breakdown is under the project's crawl calendar">
                                 <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">LLM usage</div>
-                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">~${{ "%.2f"|format(ns.total_cost) }} <span style="font-weight: 400; font-size: 0.75rem; color: var(--ink-4);">{% if ns.total_tokens >= 1000000000 %}{{ (ns.total_tokens / 1000000000)|round(2) }}B{% elif ns.total_tokens >= 1000000 %}{{ (ns.total_tokens / 1000000)|round(2) }}M{% else %}{{ (ns.total_tokens / 1000)|round(1) }}k{% endif %} tok</span></div>
+                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">~${{ _tokens|est_cost }} <span style="font-weight: 400; font-size: 0.75rem; color: var(--ink-4);">{{ _tokens|tokens_short }} tok</span></div>
                             </div>
                             {% endif %}
                         </div>
