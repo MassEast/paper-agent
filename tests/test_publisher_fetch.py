@@ -86,6 +86,78 @@ class TestSSRFGuard:
             assert not _is_safe_external_url("https://this-domain-does-not-resolve.invalid/x")
 
 
+def _redirecting_to_metadata(seen):
+    """A public page that redirects to the cloud-metadata address. `seen` collects every URL the
+    transport was actually asked for."""
+    import httpx
+
+    def handler(request):
+        seen.append(str(request.url))
+        if request.url.host == "public.example":
+            return httpx.Response(302, headers={"Location": "http://169.254.169.254/latest/meta-data/"})
+        return httpx.Response(200, text="<title>secret</title>%PDF")
+    return httpx.MockTransport(handler)
+
+
+def _fake_dns(host, *args, **kwargs):
+    ip = "93.184.216.34" if host == "public.example" else host
+    return [(None, None, None, None, (ip, 0))]
+
+
+class TestSSRFRedirects:
+    """The guard checks every redirect hop, not just the URL the user pasted."""
+
+    def _wired(self, module, seen):
+        from app import utils
+        real = utils._http_client
+        transport = _redirecting_to_metadata(seen)
+        return patch(f"{module}._http_client", lambda **kw: real(transport=transport, **kw))
+
+    def test_landing_page_redirect_into_the_cluster_is_not_followed(self):
+        from app.crawl import extract_paper_info_from_url
+        seen = []
+        with patch("socket.getaddrinfo", side_effect=_fake_dns), self._wired("app.crawl", seen):
+            info = extract_paper_info_from_url("https://public.example/paper")
+        assert seen == ["https://public.example/paper"]
+        assert info["title"] is None
+
+    def test_web_paper_pdf_redirect_is_not_followed(self, ctx):
+        from app.crawl import _enrich_web_paper_pdf_metadata
+        from app.models import Paper
+        seen = []
+        paper = Paper(arxiv_id="web:redirect", title="P")
+        with patch("socket.getaddrinfo", side_effect=_fake_dns), \
+             patch("app.crawl._is_open_access_pdf_domain", return_value=True), \
+             self._wired("app.crawl", seen):
+            _enrich_web_paper_pdf_metadata(paper, "https://public.example/p.pdf")
+        assert seen == ["https://public.example/p.pdf"]
+        assert paper.page_count is None
+
+    def test_chat_pdf_redirect_is_not_followed(self):
+        from app.utils import fetch_pdf_text
+        seen = []
+        with patch("socket.getaddrinfo", side_effect=_fake_dns), self._wired("app.utils", seen):
+            assert fetch_pdf_text("https://public.example/p.pdf", arxiv=False) is None
+        assert seen == ["https://public.example/p.pdf"]
+
+    def test_public_redirect_still_works(self):
+        import httpx
+        from app.utils import _http_client
+        seen = []
+
+        def handler(request):
+            seen.append(str(request.url))
+            if request.url.path == "/old":
+                return httpx.Response(301, headers={"Location": "https://public.example/new"})
+            return httpx.Response(200, text="ok")
+
+        with patch("socket.getaddrinfo", side_effect=_fake_dns):
+            with _http_client(public_only=True, transport=httpx.MockTransport(handler),
+                              follow_redirects=True) as http:
+                assert http.get("https://public.example/old").text == "ok"
+        assert seen == ["https://public.example/old", "https://public.example/new"]
+
+
 class TestEnrichOneWebPaper:
     def test_increments_attempts_and_updates_metadata_on_oa_match(self, ctx):
         """A single call must always bump the attempt counter/timestamp, and pull in whatever

@@ -59,6 +59,7 @@ cookies.txt
 
 # Reference/resource files (local only, not part of the project)
 resources/
+external_resources/
 
 # k8s manifests with real cluster-specific values — see k8s/*.yaml.example for the
 # public templates; these are the real ones actually applied to our cluster

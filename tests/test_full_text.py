@@ -42,7 +42,7 @@ def _web(monkeypatch, routes):
 
     real = httpx.Client
     monkeypatch.setattr(utils, "_http_client",
-                        lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+                        lambda public_only=False, **kw: real(transport=httpx.MockTransport(handler), **kw))
     monkeypatch.setattr(utils, "_ArxivLockCtx", contextlib.nullcontext)
     return seen
 

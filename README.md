@@ -198,6 +198,10 @@ kubectl rollout restart deployment/related-work
 
 The CronJob always pulls `:latest` at job start, so it needs no separate restart. To test the nightly crawl without waiting for its schedule, run `scripts/nightly_crawl.py` directly with `CRAWL_HOUR_OVERRIDE=all` set (bypasses the per-project hour filter).
 
+## Planned
+
+- **Spend fewer tokens on screening.** The pipeline was built for recall, not cost: every candidate gets an LLM relevance check. A cheap first pass (embedding similarity to My Collection, or a reranker) could drop the clear misses before the LLM sees them. To build it, first replay past crawls to measure how many papers that were accepted the pre-filter would have cut, and only use it if that number is close to zero.
+
 ## Contributing
 
 See [`AGENTS.md`](AGENTS.md) for repo conventions, dev commands, and an architecture deep-dive — written for both human and AI-agent contributors.

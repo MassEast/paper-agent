@@ -21,7 +21,7 @@ from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog, Scr
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
 from app.usage import counted, counts
-from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, USER_AGENT, base_arxiv_id
+from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id
 
 API_KEY = os.environ.get("LLM_API_KEY")
 SCHOLAR_API_KEY = os.environ.get("SCHOLAR_API_KEY")
@@ -87,26 +87,6 @@ def _enrich_one_web_paper(paper) -> None:
     if info.get("pdf_url"):
         _enrich_web_paper_pdf_metadata(paper, info["pdf_url"])
 
-
-def _is_safe_external_url(url: str) -> bool:
-    """Basic SSRF guard for user-supplied URLs (add-by-URL, /extract-from-url): reject
-    non-http(s) schemes and hosts that resolve to a private/loopback/link-local/reserved
-    address (RFC1918, 127.0.0.0/8, 169.254.0.0/16 incl. the cloud-metadata address, etc.).
-    Fails closed — any resolution error is treated as unsafe."""
-    import socket
-    import ipaddress
-    from urllib.parse import urlparse
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            return False
-        for family, _, _, _, sockaddr in socket.getaddrinfo(parsed.hostname, None):
-            ip = ipaddress.ip_address(sockaddr[0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-                return False
-        return True
-    except Exception:
-        return False
 
 _crawl_lock = threading.Lock()
 
@@ -636,7 +616,7 @@ def extract_paper_info_from_url(url: str) -> dict:
         return results
 
     try:
-        with _http_client(timeout=15.0, follow_redirects=True) as http:
+        with _http_client(public_only=True, timeout=15.0, follow_redirects=True) as http:
             resp = http.get(fetch_url)
         content = resp.text[:100000]
 
@@ -1806,7 +1786,7 @@ def _enrich_web_paper_pdf_metadata(paper, pdf_url: str) -> None:
     try:
         import io
         from pypdf import PdfReader
-        with _http_client(timeout=httpx.Timeout(30.0), follow_redirects=True) as http:
+        with _http_client(public_only=True, timeout=httpx.Timeout(30.0), follow_redirects=True) as http:
             pdf_resp = http.get(pdf_url)
         if pdf_resp.status_code == 200 and pdf_resp.content:
             reader = PdfReader(io.BytesIO(pdf_resp.content), strict=False)

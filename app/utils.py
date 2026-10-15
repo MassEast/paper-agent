@@ -11,11 +11,49 @@ import httpx
 USER_AGENT = "paper-agent/1.0 (+https://github.com/MassEast/paper-agent)"
 
 
-def _http_client(**kwargs) -> httpx.Client:
+class UnsafeURLError(httpx.HTTPError):
+    """A request to an address that is not on the public internet (see _is_safe_external_url)."""
+
+
+def _is_safe_external_url(url: str) -> bool:
+    """Basic SSRF guard for user-supplied URLs (add-by-URL, /extract-from-url): reject
+    non-http(s) schemes and hosts that resolve to a private/loopback/link-local/reserved
+    address (RFC1918, 127.0.0.0/8, 169.254.0.0/16 incl. the cloud-metadata address, etc.).
+    Fails closed — any resolution error is treated as unsafe."""
+    import socket
+    import ipaddress
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return False
+        for family, _, _, _, sockaddr in socket.getaddrinfo(parsed.hostname, None):
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _refuse_internal(request: httpx.Request) -> None:
+    # Request hook: httpx runs it for the first request and again for every redirect hop.
+    if not _is_safe_external_url(str(request.url)):
+        raise UnsafeURLError(f"refused non-public URL: {request.url}")
+
+
+def _http_client(public_only: bool = False, **kwargs) -> httpx.Client:
     """httpx.Client with the project's User-Agent set. Use instead of a bare httpx.Client(...)
-    for any outbound request (arXiv, ar5iv, Semantic Scholar, publisher sites)."""
+    for any outbound request (arXiv, ar5iv, Semantic Scholar, publisher sites).
+
+    public_only=True for URLs a user supplied (or a page they supplied pointed to): every request,
+    redirects included, must go to a public address, so a public page can't redirect the server
+    into the cluster. Checking only the first URL missed that (idea from external_resources/
+    research-toolset-main/src/core/url_security.py, make_request_guard)."""
     headers = kwargs.pop("headers", {}) or {}
     headers = {"User-Agent": USER_AGENT, **headers}
+    if public_only:
+        kwargs["event_hooks"] = {"request": [_refuse_internal]}
     return httpx.Client(headers=headers, **kwargs)
 
 
@@ -135,7 +173,8 @@ def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
     from pypdf.errors import PdfReadError
 
     def _get():
-        with _http_client(timeout=httpx.Timeout(60.0), follow_redirects=True) as http:
+        # A non-arXiv PDF link comes from a page a user added
+        with _http_client(public_only=not arxiv, timeout=httpx.Timeout(60.0), follow_redirects=True) as http:
             return http.get(url)
 
     try:
