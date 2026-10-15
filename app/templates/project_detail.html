@@ -793,6 +793,12 @@
                                 style="width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;">
                             Semantic Scholar <span style="color: var(--ink-4);">(fast)</span>
                         </label>
+                        <label data-tip="New papers that cite a paper in My Collection (looked up on Semantic Scholar, one request per My Collection paper)"
+                            style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="use-citations-checkbox" checked
+                                style="width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;">
+                            Citations <span style="color: var(--ink-4);">(slow)</span>
+                        </label>
                     </div>
                     <button class="focus-ring" type="button" id="arxiv-search-btn" onclick="handleArxivSearch()"
                         style="height: var(--button-height); background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; font-size: 0.875rem; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
@@ -1013,7 +1019,8 @@
 
                         const useArxiv = document.getElementById('use-arxiv-checkbox').checked;
                         const useScholar = document.getElementById('use-scholar-checkbox').checked;
-                        if (!useArxiv && !useScholar) { alert('Enable at least one source.'); return; }
+                        const useCitations = document.getElementById('use-citations-checkbox').checked;
+                        if (!useArxiv && !useScholar && !useCitations) { alert('Enable at least one source.'); return; }
 
                         searchBtn.disabled = true;
                         searchBtn.innerHTML = _spinnerHtml + ' Searching...';
@@ -1021,8 +1028,10 @@
 
                         const startTime = Date.now();
                         let elapsedInterval = null;
-                        const sourceLabel = useArxiv ? (useScholar ? 'arXiv + Semantic Scholar' : 'arXiv') : 'Semantic Scholar';
-                        const typicalTime = useArxiv ? '20–60s typical' : '~3s typical';
+                        const sourceLabel = [useArxiv && 'arXiv', useScholar && 'Semantic Scholar', useCitations && 'citations']
+                            .filter(Boolean).join(' + ');
+                        const typicalTime = useCitations ? 'citations take ~1–7s per My Collection paper'
+                            : useArxiv ? '20–60s typical' : '~3s typical';
 
                         function updateElapsed() {
                             const s = Math.round((Date.now() - startTime) / 1000);
@@ -1039,8 +1048,9 @@
                         formData.append('date_to', document.getElementById('crawl-date-to').value);
                         formData.append('use_arxiv', useArxiv ? '1' : '0');
                         formData.append('use_scholar', useScholar ? '1' : '0');
+                        formData.append('use_citations', useCitations ? '1' : '0');
 
-                        function showCountResult(count, arxivCount, ssCount, alreadyKnown, previouslyRejected, warnings) {
+                        function showCountResult(count, arxivCount, ssCount, alreadyKnown, previouslyRejected, warnings, citingCount) {
                             clearInterval(elapsedInterval);
                             searchBtn.disabled = false;
                             searchBtn.innerHTML = _searchBtnOrigHtml;
@@ -1055,6 +1065,7 @@
                             if (arxivCount !== undefined) {
                                 const parts = ['arXiv: ' + arxivCount];
                                 if (ssCount > 0) parts.push('Semantic Scholar: ' + ssCount);
+                                if (citingCount > 0) parts.push(citingCount + ' cite My Collection');
                                 if (alreadyKnown > 0) parts.push(alreadyKnown + ' already in project (skipped)');
                                 sourceNote = '<p style="font-size:0.7rem;color:var(--ink-4);margin-bottom:8px;">' + parts.join(' · ') + '</p>';
                                 if (previouslyRejected > 0) {
@@ -1094,7 +1105,7 @@
                                 .then(data => {
                                     if (data.status === 'done') {
                                         currentArxivTaskId = taskId;
-                                        showCountResult(data.count, data.arxiv_count, data.scholar_count || 0, data.already_known || 0, data.previously_rejected || 0, data.warnings || []);
+                                        showCountResult(data.count, data.arxiv_count, data.scholar_count || 0, data.already_known || 0, data.previously_rejected || 0, data.warnings || [], data.citing_count || 0);
                                     } else if (data.status === 'error') {
                                         showCountError(data.error || 'arXiv search failed');
                                     } else {
@@ -1105,7 +1116,8 @@
                                                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
                                                 _spinnerHtml + ' Waiting for arXiv&hellip; (' + waiters + ' request' + (waiters > 1 ? 's' : '') + ' ahead, ' + s + 's)</div>';
                                         } else {
-                                            const scholarInfo = data.scholar_status === 'running' ? ' · fetching Semantic Scholar…' : '';
+                                            const scholarInfo = data.citations ? ' · checking citations of My Collection (' + data.citations + ')…'
+                                                : data.scholar_status === 'running' ? ' · fetching Semantic Scholar…' : '';
                                             countContent.innerHTML =
                                                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
                                                 _spinnerHtml + ' Searching ' + sourceLabel + '&hellip; ' + s + 's' + scholarInfo + '</div>';
@@ -1157,6 +1169,7 @@
                         formData.append('keywords_json', JSON.stringify(selected));
                         formData.append('use_arxiv', document.getElementById('use-arxiv-checkbox').checked ? '1' : '0');
                         formData.append('use_scholar', document.getElementById('use-scholar-checkbox').checked ? '1' : '0');
+                        formData.append('use_citations', document.getElementById('use-citations-checkbox').checked ? '1' : '0');
                         if (currentArxivTaskId) formData.append('arxiv_task_id', currentArxivTaskId);
 
                         fetch('/projects/' + projectSlug + '/crawl', { method: 'POST', body: new URLSearchParams(formData) })
@@ -1338,7 +1351,7 @@
                             const addedStr = log.papers_added + ' added';
                             const counts = [foundStr, skippedStr, addedStr].filter(Boolean).join(' · ');
                             const srcs = (log.sources_used || 'arxiv,ss').split(',');
-                            const srcLabels = srcs.map(s => s === 'arxiv' ? 'arXiv' : (s === 'ss' || s === 'semantic_scholar') ? 'Semantic Scholar' : s).join(' + ');
+                            const srcLabels = srcs.map(s => s === 'arxiv' ? 'arXiv' : (s === 'ss' || s === 'semantic_scholar') ? 'Semantic Scholar' : s === 'citations' ? 'citations' : s).join(' + ');
                             html += '<div style="background-color: var(--paper-3); border-radius: var(--radius-sm); padding: 8px; font-size: 0.75rem; color: var(--ink-2); margin-bottom: 4px;">'
                                 + '<span style="color: ' + statusColor + '; font-weight: 600;">' + log.status + '</span>'
                                 + ' · <span style="color: ' + triggerColor + '; font-weight: 600;">' + triggerLabel + '</span>'

@@ -18,8 +18,9 @@ from app.crawl import (
     extract_paper_info_from_url,
     generate_research_interest_from_collection,
     extract_keywords_with_usage,
-    search_arxiv_with_full_papers,
-    get_semantic_scholar_recommendations,
+    gather_candidates,
+    collection_seeds,
+    _collection_tag_tier,
     arxiv_queue_depth,
     start_collection_add_async,
     start_web_paper_add_async,
@@ -325,20 +326,21 @@ def arxiv_count(slug):
 
     use_arxiv = request.form.get("use_arxiv", "1") != "0"
     use_scholar = request.form.get("use_scholar", "1") != "0"
+    use_citations = request.form.get("use_citations", "1") != "0"
 
     task_id = uuid.uuid4().hex[:12]
     _arxiv_count_tasks[task_id] = {"status": "running"}
 
-    # Collect seed IDs (My Collection) and existing paper IDs before the thread starts
+    # My Collection (seeds for recommendations and citations) and existing paper IDs before the thread starts
     project_obj = Project.query.filter_by(slug=slug).first()
-    seed_arxiv_ids = []
+    seeds = []
     existing_arxiv_ids = set()
     if project_obj:
         for pp in project_obj.papers:
             if pp.paper and pp.paper.arxiv_id:
                 existing_arxiv_ids.add(base_arxiv_id(pp.paper.arxiv_id))
-            if not pp.trashed_at and pp.manual_tag and pp.paper and pp.paper.arxiv_id:
-                seed_arxiv_ids.append(pp.paper.arxiv_id)
+        seeds = collection_seeds(sorted([pp for pp in project_obj.papers if not pp.trashed_at and pp.manual_tag],
+                                        key=_collection_tag_tier))
 
     # Papers rejected earlier under the *current* screening context — re-screening them is an instant
     # cache hit (no LLM call), so the UI reports them separately from genuinely new papers.
@@ -356,39 +358,23 @@ def arxiv_count(slug):
 
     def _run():
         try:
-            if use_arxiv:
-                arxiv_papers = search_arxiv_with_full_papers(
-                    keywords, date_from, date_to, warnings=search_warnings
-                )
-            else:
-                arxiv_papers = []
-            seen_ids = {base_arxiv_id(p["arxiv_id"]) for p in arxiv_papers}
-
-            scholar_papers = []
-            if use_scholar and seed_arxiv_ids:
-                _arxiv_count_tasks[task_id]["scholar_status"] = "running"
-                scholar_papers = get_semantic_scholar_recommendations(seed_arxiv_ids, limit=100)
-                # Filter to crawl date range — Scholar API has no date filter so it returns old papers too
-                scholar_papers = [
-                    p for p in scholar_papers
-                    if base_arxiv_id(p["arxiv_id"]) not in seen_ids
-                    and p.get("published_date") is not None
-                    and date_from <= p["published_date"] <= date_to
-                ]
-
-            all_papers = arxiv_papers + scholar_papers
+            all_papers = gather_candidates(keywords, seeds, date_from, date_to, use_arxiv=use_arxiv,
+                                           use_scholar=use_scholar, use_citations=use_citations,
+                                           warnings=search_warnings, status=_arxiv_count_tasks[task_id])
             # Subtract papers already in this project (any state: new/curated/trash)
             already_known = sum(1 for p in all_papers if base_arxiv_id(p["arxiv_id"]) in existing_arxiv_ids)
             new_papers = [p for p in all_papers if base_arxiv_id(p["arxiv_id"]) not in existing_arxiv_ids]
             previously_rejected = sum(1 for p in new_papers if base_arxiv_id(p["arxiv_id"]) in rejected_base_ids)
             new_arxiv = sum(1 for p in new_papers if p.get("source") != "semantic_scholar")
             new_scholar = sum(1 for p in new_papers if p.get("source") == "semantic_scholar")
+            new_citing = sum(1 for p in new_papers if any(v["via"] == "cites" for v in p["found_via"]))
             _arxiv_count_tasks[task_id] = {
                 "status": "done",
                 "count": len(new_papers),
                 "papers": new_papers,
                 "arxiv_count": new_arxiv,
                 "scholar_count": new_scholar,
+                "citing_count": new_citing,
                 "already_known": already_known,
                 "previously_rejected": previously_rejected,
                 "warnings": search_warnings,
@@ -470,6 +456,7 @@ def trigger_crawl(slug):
 
     use_arxiv = request.form.get("use_arxiv", "1") != "0"
     use_scholar = request.form.get("use_scholar", "1") != "0"
+    use_citations = request.form.get("use_citations", "1") != "0"
 
     _thread, crawl_log_id = start_crawl_async(
         project.id,
@@ -482,6 +469,7 @@ def trigger_crawl(slug):
         cached_papers=cached_papers,
         use_arxiv=use_arxiv,
         use_scholar=use_scholar,
+        use_citations=use_citations,
     )
 
     if request.headers.get("HX-Request"):

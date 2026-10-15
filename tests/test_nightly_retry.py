@@ -57,6 +57,8 @@ def _log(status, failed=(), msg=None, added=0):
 def test_failed_keywords_are_retried_once_at_end_and_no_email_if_retry_works(app):
     calls, notify, sleep = _run(app, [_log("error", ["a", "b"], "all failed"), _log("success", added=3)])
     assert calls == [["a", "b"], ["a", "b"]]
+    # the retry is arXiv only: the first pass already screened the recommendations and citing papers
+    assert notify.kwargs_seen[1]["use_scholar"] is False and notify.kwargs_seen[1]["use_citations"] is False
     sleep.assert_called_once()
     notify.assert_not_called()
 

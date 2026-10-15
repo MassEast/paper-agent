@@ -1953,6 +1953,132 @@ def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = 100)
         return []
 
 
+def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: date,
+                      progress=None) -> list[dict]:
+    """arXiv papers published in [date_from, date_to] that cite any of the seeds ((arXiv id, title) pairs,
+    the project's My Collection). One Semantic Scholar call per seed: it lists citing papers newest first,
+    so a page usually covers the whole window; it pages on while the page still reaches into the window.
+    A paper citing several seeds comes back once, with one found_via entry per seed. Same dict shape as
+    get_semantic_scholar_recommendations. progress(i, n) is called after each seed."""
+    found: dict[str, dict] = {}
+    started = time.time()
+    for i, (seed_id, seed_title) in enumerate(seeds, 1):
+        offset = 0
+        while True:
+            for attempt in range(4):
+                with _ScholarLockCtx():
+                    with _http_client(timeout=httpx.Timeout(30.0)) as http:
+                        r = http.get(
+                            f"https://api.semanticscholar.org/graph/v1/paper/ArXiv:{base_arxiv_id(seed_id)}/citations",
+                            params={"fields": "externalIds,title,authors,abstract,year,publicationDate",
+                                    "limit": 100, "offset": offset},
+                            headers=_scholar_headers(),
+                        )
+                if r.status_code != 429 or attempt == 3:
+                    break
+                wait = 15 * 3 ** attempt  # 15s, 45s, 135s
+                _log.warning("[citations] rate limited, retrying in %ds (attempt %d/4)", wait, attempt + 1)
+                time.sleep(wait)
+            if r.status_code != 200:  # 404: Semantic Scholar doesn't know the seed
+                _log.info("[citations] %s: Semantic Scholar answered %d", seed_id, r.status_code)
+                break
+            body = r.json()
+            oldest = None
+            for c in body.get("data") or []:
+                item = c.get("citingPaper") or {}
+                try:
+                    pub_date = date.fromisoformat(item.get("publicationDate") or "")
+                except ValueError:
+                    continue
+                oldest = pub_date if oldest is None else min(oldest, pub_date)
+                aid = (item.get("externalIds") or {}).get("ArXiv")
+                if not aid or not (date_from <= pub_date <= date_to):
+                    continue
+                via = {"via": "cites", "arxiv_id": base_arxiv_id(seed_id), "title": seed_title}
+                paper = found.setdefault(base_arxiv_id(aid), {
+                    "arxiv_id": base_arxiv_id(aid),
+                    "title": item.get("title") or "",
+                    "authors": [a.get("name", "") for a in (item.get("authors") or [])],
+                    "abstract": item.get("abstract") or "",
+                    "pdf_url": f"https://arxiv.org/pdf/{base_arxiv_id(aid)}",
+                    "published_date": pub_date,
+                    "year": pub_date.year,
+                    "categories": [],
+                    "source": "semantic_scholar",
+                    "found_via": [],
+                })
+                if via not in paper["found_via"]:
+                    paper["found_via"].append(via)
+            if body.get("next") is None or oldest is None or oldest < date_from:
+                break
+            offset = body["next"]
+        if progress:
+            progress(i, len(seeds))
+        if i % 10 == 0 or i == len(seeds):
+            elapsed = time.time() - started
+            _log.info("[citations] %d/%d seeds, %d citing papers so far, %.0fs (ETA %.0fs)",
+                      i, len(seeds), len(found), elapsed, elapsed / i * (len(seeds) - i))
+    _log.info("[citations] %d arXiv papers in %s–%s cite %d My Collection papers", len(found), date_from, date_to, len(seeds))
+    return list(found.values())
+
+
+def _matched_keywords(paper: dict, keywords: list[str]) -> list[str]:
+    """Which keywords appear in the title or abstract. The arXiv search sends all keywords as one OR query,
+    so arXiv doesn't say which matched; this is the local guess. arXiv also matches word variants, so it
+    can come back empty for a paper arXiv did find."""
+    norm = lambda t: re.sub(r"\s+", " ", (t or "").lower().replace("-", " "))
+    text = norm(paper.get("title", "") + " " + paper.get("abstract", ""))
+    return [k for k in keywords if norm(k).strip() and norm(k).strip() in text]
+
+
+def collection_seeds(collection: list) -> list[tuple[str, str]]:
+    """(arXiv id, title) of the My Collection papers that are on arXiv: the seeds for recommendations and
+    citations. collection: ProjectPaper links, best first (_collection_tag_tier)."""
+    return [(pp.paper.arxiv_id, pp.paper.title) for pp in collection if pp.paper and pp.paper.is_arxiv]
+
+
+def gather_candidates(keywords: list[str], seeds: list[tuple[str, str]], date_from: date, date_to: date,
+                      use_arxiv: bool = True, use_scholar: bool = True, use_citations: bool = True,
+                      failed_keywords: Optional[list[str]] = None, warnings: Optional[list[str]] = None,
+                      status: Optional[dict] = None) -> list[dict]:
+    """Candidates from the three sources, in this order: arXiv keyword search, Semantic Scholar
+    recommendations (seeded with My Collection), papers citing My Collection. A paper found more than
+    once comes back once, and its "found_via" lists every way it was found. seeds: collection_seeds().
+    status (optional dict) gets "scholar_status" and "citations" progress for the manual count step."""
+    sources = []
+    if use_arxiv:
+        found = search_arxiv_with_full_papers(keywords, date_from, date_to, warnings=warnings,
+                                              failed_keywords=failed_keywords)
+        for p in found:
+            names = _matched_keywords(p, keywords)
+            p["found_via"] = [{"via": "keyword", "name": k} for k in names] or [{"via": "keyword"}]
+        sources.append(found)
+    if use_scholar and seeds:
+        if status is not None:
+            status["scholar_status"] = "running"
+        recs = [p for p in get_semantic_scholar_recommendations([s[0] for s in seeds], limit=100)
+                # The recommendations API has no date filter, so it returns old papers too
+                if p.get("published_date") is not None and date_from <= p["published_date"] <= date_to]
+        for p in recs:
+            p["found_via"] = [{"via": "recommended"}]
+        sources.append(recs)
+    if use_citations and seeds:
+        def _progress(i, n):
+            if status is not None:
+                status["citations"] = f"{i}/{n}"
+        sources.append(get_citing_papers(seeds, date_from, date_to, progress=_progress))
+
+    merged: dict[str, dict] = {}
+    for found in sources:
+        for p in found:
+            key = base_arxiv_id(p["arxiv_id"])
+            if key in merged:
+                merged[key]["found_via"] += [v for v in p["found_via"] if v not in merged[key]["found_via"]]
+            else:
+                merged[key] = {**p, "found_via": list(p["found_via"])}
+    return list(merged.values())
+
+
 _citation_cache: dict[str, int] = {}
 _CITATION_429_GIVE_UP = 5  # consecutive papers that exhausted retries on 429 → pause citation fetches
 _CITATION_PAUSE_S = 900
@@ -2238,6 +2364,7 @@ def run_crawl(
     cached_papers: Optional[list[dict]] = None,
     use_arxiv: bool = True,
     use_scholar: bool = True,
+    use_citations: bool = True,
     defer_notification: bool = False,
     carry: Optional[dict] = None,
 ) -> Optional[CrawlLog]:
@@ -2340,31 +2467,12 @@ def run_crawl(
             papers_data = cached_papers
         else:
             _log.info("[crawl] searching arXiv for %d keywords, date range %s–%s", len(keywords), date_from, date_to)
-            arxiv_results = (
-                search_arxiv_with_full_papers(keywords, date_from, date_to, failed_keywords=failed_keywords)
-                if use_arxiv else []
-            )
-            _log.info("[crawl] arXiv: %d papers found", len(arxiv_results))
+            papers_data = gather_candidates(keywords, collection_seeds(_collection_pps), date_from, date_to, use_arxiv=use_arxiv,
+                                            use_scholar=use_scholar, use_citations=use_citations,
+                                            failed_keywords=failed_keywords)
             if failed_keywords:
                 _log.error("[crawl] arXiv search FAILED for %d/%d keywords: %s",
                            len(failed_keywords), len(keywords), failed_keywords)
-            seen_ids = {p["arxiv_id"] for p in arxiv_results}
-            scholar_results: list[dict] = []
-            if use_scholar:
-                seed_ids = [
-                    pp.paper.arxiv_id for pp in _collection_pps
-                    if pp.paper and pp.paper.arxiv_id
-                ]
-                if seed_ids:
-                    scholar_results = get_semantic_scholar_recommendations(seed_ids, limit=100)
-                    scholar_results = [
-                        p for p in scholar_results
-                        if p["arxiv_id"] not in seen_ids
-                        and p.get("published_date") is not None
-                        and date_from <= p["published_date"] <= date_to
-                    ]
-            _log.info("[crawl] Scholar: %d papers after date filter", len(scholar_results))
-            papers_data = arxiv_results + scholar_results
         # Subtract papers already linked to this project (any state) — same logic as the count step
         existing_project_ids = {
             base_arxiv_id(pp.paper.arxiv_id)
@@ -2378,8 +2486,10 @@ def run_crawl(
         sources = []
         if arxiv_papers_count > 0 or use_arxiv:
             sources.append("arxiv")
-        if scholar_papers_count > 0 or use_scholar:
+        if use_scholar:
             sources.append("ss")
+        if use_citations:
+            sources.append("citations")
         crawl_log.sources_used = ",".join(sources) if sources else "arxiv,ss"
         db.session.commit()  # persist papers_found before loop
 
@@ -2587,7 +2697,8 @@ def run_crawl(
                         paper = Paper.query.get(pd["existing_paper_id"])
                         db.session.add(ProjectPaper(project_id=project_id, paper_id=paper.id, origin="crawl",
                                                     relevance_reason=result["why"] or None,
-                                                    screen_source=result["screen_source"]))
+                                                    screen_source=result["screen_source"],
+                                                    found_via=json.dumps(pd.get("found_via") or [])))
                         newly_added_papers.append(paper)
                         papers_added += 1
                         crawl_log.papers_added = papers_added
@@ -2641,7 +2752,8 @@ def run_crawl(
                     if not link:
                         link = ProjectPaper(project_id=project_id, paper_id=paper.id, origin="crawl",
                                             relevance_reason=result["why"] or None,
-                                            screen_source=result["screen_source"])
+                                            screen_source=result["screen_source"],
+                                            found_via=json.dumps(pd.get("found_via") or []))
                         db.session.add(link)
                         newly_added_papers.append(paper)
                     db.session.commit()
@@ -3051,6 +3163,7 @@ def start_crawl_async(
     cached_papers: Optional[list[dict]] = None,
     use_arxiv: bool = True,
     use_scholar: bool = True,
+    use_citations: bool = True,
 ):
     """Create a "running" CrawlLog synchronously, then hand off run_crawl to a daemon thread.
 
@@ -3080,6 +3193,7 @@ def start_crawl_async(
                 cached_papers=cached_papers,
                 use_arxiv=use_arxiv,
                 use_scholar=use_scholar,
+                use_citations=use_citations,
             )
 
     with app.app_context():

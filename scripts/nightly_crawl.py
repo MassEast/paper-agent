@@ -244,7 +244,9 @@ def nightly_crawl():
             time.sleep(wait)
             still_failing = []
             for project, kws, d_from, d_to, carry in retry_queue:
+                # arXiv only: the first pass already screened the recommendations and citing papers
                 retry_log = run_crawl(project.id, d_from, d_to, triggered_by="cron", keywords_override=kws,
+                                      use_scholar=False, use_citations=False,
                                       carry=carry, defer_notification=not last)
                 failed = getattr(retry_log, "failed_keywords", None)
                 if retry_log.status == "error" and not failed:

@@ -198,16 +198,17 @@ class TestCountStepDedup:
 
         found = [_p("2605.23872v1"), _p("2609.00001v1"), _p("2609.00002v2")]
 
-        def fake_search(keywords, d_from, d_to, warnings=None):
+        def fake_search(keywords, d_from, d_to, warnings=None, failed_keywords=None):
             warnings.append("kw: cut off")
             return found
 
         with client.session_transaction() as sess:
             sess["logged_in"] = True
         with patch("threading.Thread", _SyncThread), \
-                patch("app.routes.projects.search_arxiv_with_full_papers", side_effect=fake_search):
+                patch("app.crawl.search_arxiv_with_full_papers", side_effect=fake_search):
             r = client.post(f"/projects/{project.slug}/arxiv-count", data={
                 "keywords_json": '["kw"]', "date_from": "2026-09-01", "date_to": "2026-09-02", "use_scholar": "0",
+                "use_citations": "0",
             })
             task_id = r.get_json()["task_id"]
         res = client.get(f"/projects/{project.slug}/arxiv-count-status/{task_id}").get_json()

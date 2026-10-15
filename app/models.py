@@ -180,6 +180,11 @@ class ProjectPaper(db.Model):
     # and not safely inferable (see the backfill in create_app).
     origin = db.Column(db.Text)
     origin_project_id = db.Column(db.Integer)
+    # For origin "crawl": JSON list of how the crawl found it, one entry per way: {"via": "keyword", "name": k}
+    # (no name when no keyword appears literally in title/abstract), {"via": "recommended"} (Semantic Scholar
+    # recommendations), {"via": "cites", "arxiv_id", "title"} (cites that My Collection paper). None: from
+    # before this was recorded
+    found_via = db.Column(db.Text)
 
     __table_args__ = (
         db.UniqueConstraint("project_id", "paper_id"),
@@ -193,6 +198,32 @@ class ProjectPaper(db.Model):
     @property
     def origin_project(self):
         return db.session.get(Project, self.origin_project_id) if self.origin_project_id else None
+
+    @property
+    def found_via_list(self) -> list[dict]:
+        return json.loads(self.found_via) if self.found_via else []
+
+    def found_via_text(self, full: bool = False) -> str:
+        """How the crawl found the paper, for the card: keywords by name, the recommendation, cited
+        My Collection papers by title. Short form for the card line (first cited paper + "(+N)"), full
+        form (every cited paper) for its tooltip. "" when not recorded."""
+        via = self.found_via_list
+        names = [v["name"] for v in via if v["via"] == "keyword" and v.get("name")]
+        cited = [v["title"] for v in via if v["via"] == "cites"]
+        parts = []
+        if names:
+            parts.append(("keyword " if len(names) == 1 else "keywords ") + ", ".join(f'"{n}"' for n in names))
+        elif any(v["via"] == "keyword" for v in via):
+            parts.append("arXiv keyword search")
+        if any(v["via"] == "recommended" for v in via):
+            parts.append("Semantic Scholar recommendation")
+        if cited:
+            if full:
+                parts.append("cites " + "; ".join(f'"{t}"' for t in cited))
+            else:
+                first = cited[0] if len(cited[0]) <= 50 else cited[0][:48].rstrip() + "…"
+                parts.append(f'cites "{first}"' + (f" (+{len(cited) - 1})" if len(cited) > 1 else ""))
+        return " · ".join(parts)
 
     @property
     def tags_list(self) -> list[str]:

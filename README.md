@@ -32,6 +32,7 @@ flowchart TD
         KW --> ARX
         ARX --> CAND["Candidate papers"]
         SS["Semantic Scholar<br/>recommendations"] --> CAND
+        CITE["New papers citing<br/>My Collection<br/>(Semantic Scholar)"] --> CAND
     end
 
     subgraph Phase2["2. Screen & enrich"]
@@ -50,26 +51,28 @@ flowchart TD
         COLL --> TRASH["Trash"]
         NEW --> TRASH
         NEW -->|"Re-screen<br/>(after interest change)"| TRASH
+        NEW -->|"Nightly full-text re-read<br/>(screened from abstract only)"| TRASH
         DB -->|"LLM: pick featured paper"| MAIL["Notification email"]
     end
 
     CAND -->|"LLM: quick relevance check<br/>(vs. research interest +<br/>Collection excerpts)"| Q
     SUM --> DB
     COLL -.->|"seeds"| SS
+    COLL -.->|"seeds"| CITE
 
     classDef external fill:#2563eb,color:#fff,stroke:#1e40af,stroke-width:1px
     classDef llm fill:#7c3aed,color:#fff,stroke:#5b21b6,stroke-width:1px
     classDef store fill:#334155,color:#fff,stroke:#1e293b,stroke-width:1px
     classDef endpoint fill:#16a34a,color:#fff,stroke:#15803d,stroke-width:1px
     classDef dropped fill:#64748b,color:#e2e8f0,stroke:#334155,stroke-width:1px,stroke-dasharray:3 3
-    class ARX,SS external
+    class ARX,SS,CITE external
     class Q,DEEP,SUM llm
     class DB store
     class RI,NEW,COLL,MAIL endpoint
     class DROP,TRASH dropped
 ```
 
-The dashed edge is a feedback loop: papers you've already curated into My Collection seed Semantic Scholar's recommendations directly. Collection papers also quietly inform two LLM steps not drawn above — keyword extraction and relevance screening both get calibration excerpts from your Collection too — so **the tool gets better targeted the more you curate**.
+The dashed edges are a feedback loop: papers you've already curated into My Collection seed Semantic Scholar's recommendations, and every one of them is also checked for new papers that cite it. A citing paper isn't necessarily relevant (widely cited papers are cited by work from every corner of the field), so these candidates go through the same screening as the rest. Collection papers also quietly inform two LLM steps not drawn above — keyword extraction and relevance screening both get calibration excerpts from your Collection too — so **the tool gets better targeted the more you curate**.
 
 Each paper card shows a neutral AI summary (shared by every project the paper is in) and, per project, a short **"Why it's relevant"** line that the deep relevance check writes against that project's research interest. A paper that fits a different project can be **copied or moved** into that project's My Collection from its card. After you change the research interest, **Re-screen** in New Papers re-checks the papers still waiting there and moves the ones that no longer fit to Trash, where you can restore them.
 
@@ -77,7 +80,7 @@ Next to "AI Summary" each card says what the summary was made from: the paper's 
 
 **Ask about a paper.** Every card has an "Ask about this paper" chat. The model reads the paper's full text (arXiv's HTML version, else the PDF; the chat says "⚠ Abstract only" when neither is available) together with the project's research interest, and answers in markdown with rendered math. The chat is saved with the paper, per project like the notes, and visible to everyone on the project; Copy / Move takes it along. Answers stream in as they are written (the model's thinking is never shown, stored, or sent back), keep going if you close the page, and can be stopped. Questions sent while an answer is coming are queued. The header shows how much of the model's context window the conversation fills; when it is full you clear the chat rather than have old turns silently dropped. Each question re-sends the paper, but the LLM server's prefix cache usually makes follow-up questions start answering within a second.
 
-Each card also says how the paper got into the project: found by a crawl, added by hand, or copied / moved from another project.
+Each card also says how the paper got into the project: found by a crawl, added by hand, or copied / moved from another project. For a crawl find it says which way, and lists all of them when there were several: the keyword it matched, a Semantic Scholar recommendation, or the My Collection paper it cites (e.g. *Found via keyword "sparse attention" · cites "Attention Is All You Need" (+2)*). arXiv is searched with all keywords at once, so the keyword is looked up in the title and abstract afterwards; when arXiv matched a word variant that isn't there literally, the card just says "arXiv keyword search".
 
 A paper you add by URL fills in its card while you watch: it shows what is being fetched ("Fetching the figure", "Writing the AI summary…") and redraws itself as the details arrive, no reload needed.
 

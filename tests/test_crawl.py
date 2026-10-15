@@ -48,6 +48,8 @@ class MockPatches:
     def __enter__(self):
         s = self._stack
         s.enter_context(patch("app.crawl.search_arxiv_with_full_papers", return_value=self._papers))
+        s.enter_context(patch("app.crawl.get_semantic_scholar_recommendations", return_value=[]))
+        s.enter_context(patch("app.crawl.get_citing_papers", return_value=[]))
         s.enter_context(patch("app.crawl.get_paper_content", return_value="Full paper text. " * 20))
         s.enter_context(patch("app.crawl.get_citation_count", return_value=3))
         s.enter_context(patch("app.crawl.get_paper_figure", return_value=(None, None)))
