@@ -25,7 +25,7 @@ except ImportError:
 
 from app import create_app, db
 from app.models import Project, Paper, ProjectPaper
-from app.crawl import run_crawl, send_carry_notification, _search_warning, backfill_missing_paper_metadata, get_citation_count, get_citation_count_by_scholar_id, send_notification
+from app.crawl import run_crawl, refresh_from_full_text, send_carry_notification, _search_warning, backfill_missing_paper_metadata, get_citation_count, get_citation_count_by_scholar_id, send_notification
 
 _log = logging.getLogger(__name__)
 
@@ -267,6 +267,12 @@ def nightly_crawl():
                     if not getattr(retry_log, "notified", False) and carry and carry["papers_added"]:
                         send_carry_notification(project.id, carry, d_from, d_to, None)  # retry found nothing new
             retry_queue = still_failing
+
+        # New Papers screened without the full text (none could be fetched then): read it now. Rejects go to
+        # Trash quietly, no email
+        for project in projects:
+            _log.info("[nightly] ── full-text re-read: %s ──────────────────────", project.name)
+            refresh_from_full_text(project.id)
 
         _log.info("[nightly] ── backfill: enriching incomplete papers ──────────────────────")
         filled = backfill_missing_paper_metadata()

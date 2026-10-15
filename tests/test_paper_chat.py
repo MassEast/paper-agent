@@ -20,7 +20,7 @@ import time
 import httpx
 import pytest
 
-from app import chat, db
+from app import chat, db, utils
 from app import llm
 from app.models import ChatMessage, Paper, PaperText, Project, ProjectPaper
 
@@ -587,8 +587,8 @@ def test_abstract_only_is_marked_and_the_download_retried_next_time(c, app, chat
 def test_failed_pdf_download_falls_back_to_the_abstract(monkeypatch):
     def boom(**kw):
         raise httpx.ConnectError("arxiv down")
-    monkeypatch.setattr(chat, "_http_client", boom)
-    monkeypatch.setattr(chat, "_ArxivLockCtx", contextlib.nullcontext)
+    monkeypatch.setattr(utils, "_http_client", boom)
+    monkeypatch.setattr(utils, "_ArxivLockCtx", contextlib.nullcontext)
     assert chat._pdf_text(f"https://arxiv.org/pdf/{ARXIV}", arxiv=True) is None
 
 

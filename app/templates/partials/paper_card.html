@@ -129,7 +129,12 @@
 
     {% if pp.relevance_reason %}
     <div class="mb-3 border-l-2 relevance-reason" style="border-color: var(--warning); padding-left: 12px;">
-        <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Why it's relevant for this project</p>
+        <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Why it's relevant for this project
+            {%- if pp.screen_source == "abstract" %}
+            <span class="summary-src summary-src-warn" data-tip="No full text could be fetched when this paper was screened, so the relevance check read only the abstract. While the paper is in New Papers, the nightly crawl tries the full text again and moves it to Trash if it turns out not to be relevant.">⚠ from abstract only</span>
+            {%- elif pp.screen_source == "full_text" %}
+            <span class="summary-src" data-tip="The relevance check read the paper's full text (arXiv HTML or PDF).">· from full text</span>
+            {%- endif %}</p>
         <p class="text-sm" style="color: var(--ink-2); line-height: 1.5;">{{ pp.relevance_reason }}</p>
     </div>
     {% endif %}
@@ -139,9 +144,9 @@
         {% set src = pp.paper.summary.content_source %}
         <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">AI Summary
             {%- if src == "abstract" %}
-            <span class="summary-src summary-src-warn" data-tip="No full text could be fetched when this summary was made (no arXiv HTML version, the download failed, or a web page without readable text), so the summary, the badges and the main contributions come from the abstract alone. Regenerate tries the full text again.">⚠ from abstract only</span>
+            <span class="summary-src summary-src-warn" data-tip="No full text could be fetched when this summary was made (neither an arXiv HTML version nor a readable PDF, or a web page without readable text), so the summary, the badges and the main contributions come from the abstract alone. Regenerate tries the full text again.">⚠ from abstract only</span>
             {%- elif src == "full_text" %}
-            <span class="summary-src" data-tip="The summary, the badges and the main contributions were made from the paper's full text (arXiv HTML version).">· from full text</span>
+            <span class="summary-src" data-tip="The summary, the badges and the main contributions were made from the paper's full text (arXiv HTML version, or the PDF if there is none).">· from full text</span>
             {%- elif src == "web_page" %}
             <span class="summary-src" data-tip="This paper was added from a web page; the summary, the badges and the main contributions were made from that page's text, not from a PDF.">· from the web page</span>
             {%- endif %}</p>

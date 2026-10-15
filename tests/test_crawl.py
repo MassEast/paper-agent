@@ -187,6 +187,9 @@ class TestRunCrawl:
         assert paper.summary.tokens_used == 280
         log = CrawlLog.query.filter_by(project_id=project.id).order_by(CrawlLog.id.desc()).first()
         assert log.total_tokens > paper.summary.tokens_used
+        from app.models import ProjectPaper
+        link = ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper.id).one()
+        assert link.screen_source == "full_text" and paper.summary.content_source == "full_text"
 
     def test_keywords_override_skips_keyword_extraction(self, app, project):
         from app.crawl import run_crawl

@@ -1,3 +1,4 @@
+import io
 import re
 import threading
 import time
@@ -94,19 +95,69 @@ def fetch_arxiv_title(arxiv_id: str) -> str | None:
     return None
 
 
+MIN_TEXT_CHARS = 2000  # anything shorter is an error page or a stub, not the paper
+
+# arXiv's own HTML has nearly every paper from the day it is announced; ar5iv converts with a lag of
+# weeks and, until then, redirects to the abstract page (which once passed for the full text)
+FULL_TEXT_HTML_URLS = ("https://arxiv.org/html/{}", "https://ar5iv.labs.arxiv.org/html/{}")
+
+
+def _html_to_text(html: str) -> str:
+    article = re.search(r"<article\b.*</article>", html, flags=re.DOTALL | re.IGNORECASE)
+    html = article.group(0) if article else html  # the paper only, not the site's menus
+    html = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()
+
+
 def fetch_paper_full_text(arxiv_id: str, max_chars: int = 80000) -> str | None:
-    try:
-        with _ArxivLockCtx():
-            with _http_client(timeout=30.0, follow_redirects=True) as http:
-                r = http.get(f"https://ar5iv.labs.arxiv.org/html/{arxiv_id}")
-                if r.status_code != 200:
-                    return None
-                html = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", r.text, flags=re.DOTALL | re.IGNORECASE)
-                text = re.sub(r"<[^>]+>", " ", html)
-                return re.sub(r"\s+", " ", text).strip()[:max_chars]
-    except Exception as e:
-        print(f"ar5iv fetch failed for {arxiv_id}: {e}")
+    """The paper's text from its HTML version, or None if there is none (yet)."""
+    for url in FULL_TEXT_HTML_URLS:
+        url = url.format(arxiv_id)
+        try:
+            with _ArxivLockCtx():
+                with _http_client(timeout=30.0, follow_redirects=True) as http:
+                    r = http.get(url)
+        except httpx.HTTPError as e:
+            print(f"HTML fetch failed for {url}: {e}")
+            continue
+        if r.status_code != 200 or not r.url.path.startswith("/html/"):  # e.g. redirected to /abs/
+            continue
+        text = _html_to_text(r.text)
+        if len(text) >= MIN_TEXT_CHARS:
+            return text[:max_chars]
     return None
+
+
+def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
+    """Text extracted from a PDF, or None if it can't be downloaded or read. arxiv=True waits for
+    the arXiv rate limit."""
+    from pypdf import PdfReader
+    from pypdf.errors import PdfReadError
+
+    def _get():
+        with _http_client(timeout=httpx.Timeout(60.0), follow_redirects=True) as http:
+            return http.get(url)
+
+    try:
+        if arxiv:
+            with _ArxivLockCtx():
+                r = _get()
+        else:
+            r = _get()
+    except httpx.HTTPError as e:
+        print(f"PDF download failed for {url}: {e}")
+        return None
+    if r.status_code != 200 or not r.content.startswith(b"%PDF"):
+        print(f"no PDF at {url} (HTTP {r.status_code})")
+        return None
+    try:
+        reader = PdfReader(io.BytesIO(r.content), strict=False)
+        text = " ".join(page.extract_text() or "" for page in reader.pages)
+    except PdfReadError as e:  # a broken PDF: the caller falls back to the abstract
+        print(f"unreadable PDF at {url}: {e}")
+        return None
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:max_chars] if len(text) >= MIN_TEXT_CHARS else None
 
 
 def fetch_paper_figure(arxiv_id: str) -> str | None:

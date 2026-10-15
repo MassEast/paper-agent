@@ -62,6 +62,8 @@ class Paper(db.Model):
     # link, ...) doesn't get re-attempted forever by the nightly cronjob.
     web_enrich_attempts = db.Column(db.Integer, default=0)
     web_enrich_last_attempt_at = db.Column(db.DateTime)
+    # Failed tries of the nightly full-text re-read (refresh_from_full_text) to get this paper's full text
+    full_text_attempts = db.Column(db.Integer, default=0)
 
     summary = db.relationship("PaperSummary", back_populates="paper", uselist=False)
     project_links = db.relationship("ProjectPaper", back_populates="paper")
@@ -168,6 +170,11 @@ class ProjectPaper(db.Model):
     # Per project (the summary is shared across projects): one or two sentences from the
     # screening LLM on why this paper matters for this project's research interest.
     relevance_reason = db.Column(db.Text, nullable=True)
+    # What the deep relevance check read: "full_text" or "abstract" (no full text could be fetched; the
+    # nightly refresh_from_full_text tries again). "unknown": screened before this was recorded and marked
+    # for that re-read too. None: never screened (added by hand, copied) or screened before this was recorded
+    screen_source = db.Column(db.Text)
+    trashed_reason = db.Column(db.Text)  # why an automatic step moved it to Trash; None when trashed by hand
     # How the paper came into this project: "crawl" (nightly or Find Papers, via New Papers), "manual" (added
     # by URL), "copied" / "moved" (Copy / Move from origin_project_id). None: from before this was recorded
     # and not safely inferable (see the backfill in create_app).

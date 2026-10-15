@@ -19,6 +19,7 @@ KINDS = {
     "add": "Adding papers",
     "regenerate": "Regenerate",
     "rescreen": "Re-screen",
+    "refresh": "Nightly full-text re-read",
     "relevance_reason": "Why-relevant lines (Copy / Move)",
     "keywords": "Keyword generation",
     "research_interest": "Research interest generation",

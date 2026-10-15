@@ -252,6 +252,7 @@ def restore_paper(arxiv_id):
         pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
         if pp:
             pp.trashed_at = None
+            pp.trashed_reason = None
             pp.manual_tag = None
             pp.collected_at = None
             db.session.commit()
@@ -299,6 +300,7 @@ def transfer_paper(arxiv_id):
                               origin="moved" if mode == "move" else "copied", origin_project_id=project_id)
         db.session.add(target)
     target.trashed_at = None
+    target.trashed_reason = None
     if target.manual_tag is None:
         target.manual_tag = "related"
         target.collected_at = now

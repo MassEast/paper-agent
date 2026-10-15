@@ -61,6 +61,12 @@ USAGE_BACKFILL_SQL = (
     "WHERE total_tokens > 0 AND NOT EXISTS (SELECT 1 FROM llm_usage)"
 )
 
+# The chat used to keep arXiv's abstract page as a paper's full text (ar5iv redirects there for papers it
+# hasn't converted yet); dropping those makes the next question fetch the real text
+STALE_PAPER_TEXT_SQL = (
+    "DELETE FROM paper_texts WHERE text LIKE '%Skip to main content%' AND text LIKE '%Submission history%'"
+)
+
 ORIGIN_BACKFILL_SQL = (
     "UPDATE project_papers SET origin = CASE WHEN (SELECT source FROM papers WHERE id = paper_id) IN ('manual', 'web') "
     "THEN 'manual' ELSE 'crawl' END WHERE origin IS NULL "
@@ -138,6 +144,10 @@ def create_app():
             "ALTER TABLE project_papers ADD COLUMN origin TEXT",
             "ALTER TABLE project_papers ADD COLUMN origin_project_id INTEGER",
             ORIGIN_BACKFILL_SQL,
+            "ALTER TABLE papers ADD COLUMN full_text_attempts INTEGER DEFAULT 0",
+            "ALTER TABLE project_papers ADD COLUMN screen_source TEXT",
+            "ALTER TABLE project_papers ADD COLUMN trashed_reason TEXT",
+            STALE_PAPER_TEXT_SQL,
             "CREATE INDEX IF NOT EXISTS idx_llm_usage_project ON llm_usage(project_id, kind)",
             USAGE_BACKFILL_SQL,
         ]

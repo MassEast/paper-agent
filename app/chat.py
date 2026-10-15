@@ -17,7 +17,6 @@ The worker never holds a SQLite write transaction while it streams, and writes i
 UPDATE ... WHERE id, so a chat cleared mid-answer just makes those writes no-ops.
 """
 
-import io
 import logging
 import os
 import re
@@ -32,7 +31,7 @@ from app import db, prompts
 from app.llm import MAX_TOKENS_CEILING, MODELS, LLMUnavailableError, _llm_stream
 from app.models import ChatMessage, PaperText, ProjectPaper
 from app.usage import counted
-from app.utils import _ArxivLockCtx, _http_client, fetch_paper_full_text
+from app.utils import MIN_TEXT_CHARS, fetch_paper_full_text, fetch_pdf_text
 
 _log = logging.getLogger(__name__)
 
@@ -41,7 +40,6 @@ _log = logging.getLogger(__name__)
 CONTEXT_LIMIT = int(os.environ.get("CHAT_CONTEXT_TOKENS", 196000))
 MAX_ANSWER_TOKENS = MAX_TOKENS_CEILING  # thinking + answer; the server counts it against the context
 MAX_PAPER_CHARS = 150_000  # ~40k tokens, the same cap the deep relevance check uses
-MIN_TEXT_CHARS = 2000  # anything shorter is an error page or a stub, not the paper
 MAX_QUESTION_CHARS = 20_000
 
 # Label on the chat and the tooltip explaining it
@@ -82,27 +80,7 @@ def render_markdown(text: str) -> Markup:
 # ── Paper text ───────────────────────────────────────────────────────────────
 
 def _pdf_text(url: str, arxiv: bool) -> str | None:
-    from pypdf import PdfReader
-
-    def _get():
-        with _http_client(timeout=httpx.Timeout(60.0), follow_redirects=True) as http:
-            return http.get(url)
-
-    try:
-        if arxiv:
-            with _ArxivLockCtx():
-                r = _get()
-        else:
-            r = _get()
-    except httpx.HTTPError as e:  # the chat then says "abstract only" and tries again next question
-        _log.warning("[chat] PDF download failed for %s: %s", url, e)
-        return None
-    if r.status_code != 200 or not r.content.startswith(b"%PDF"):
-        _log.info("[chat] no PDF at %s (HTTP %s)", url, r.status_code)
-        return None
-    reader = PdfReader(io.BytesIO(r.content), strict=False)
-    text = " ".join(page.extract_text() or "" for page in reader.pages)
-    return re.sub(r"\s+", " ", text).strip()[:MAX_PAPER_CHARS]
+    return fetch_pdf_text(url, arxiv=arxiv, max_chars=MAX_PAPER_CHARS)
 
 
 def _fetch_text(paper) -> tuple[str | None, str | None]:
