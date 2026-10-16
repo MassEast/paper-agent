@@ -24,7 +24,7 @@ except ImportError:
     pass
 
 from app import create_app, db
-from app.models import Project, Paper, ProjectPaper
+from app.models import CrawlLog, Project, Paper, ProjectPaper
 from app.crawl import run_crawl, refresh_from_full_text, send_carry_notification, _search_warning, backfill_missing_paper_metadata, get_citation_count, get_citation_count_by_scholar_id, send_notification
 
 _log = logging.getLogger(__name__)
@@ -147,8 +147,8 @@ def _notify_search_failed(project, tries):
     )
 
 
-def _scheduled_hour() -> int:
-    """UTC hour this run was scheduled for, not the hour it happens to start in.
+def _scheduled_time() -> datetime:
+    """UTC time this run was scheduled for, not the time it happens to start at.
 
     With concurrencyPolicy Forbid a run that overlaps the previous one starts late (02:00 job began at
     02:27 on 2026-10-07); past the next full hour, wall-clock would pick the wrong projects. CronJob
@@ -156,14 +156,34 @@ def _scheduled_hour() -> int:
     """
     m = re.search(r"-(\d{8,})-[a-z0-9]+$", os.environ.get("HOSTNAME", ""))
     if m:
-        return datetime.fromtimestamp(int(m.group(1)) * 60, timezone.utc).hour
-    return datetime.now(timezone.utc).hour
+        return datetime.fromtimestamp(int(m.group(1)) * 60, timezone.utc)
+    return datetime.now(timezone.utc)
+
+
+def _scheduled_hour() -> int:
+    return _scheduled_time().hour
+
+
+def _projects_for_run(all_projects, scheduled: datetime) -> tuple[list, list]:
+    """Projects for this run: those scheduled for its hour, plus catch-ups, i.e. projects whose hour already
+    passed today without a nightly crawl. With concurrencyPolicy Forbid, a run still going when the next
+    hour comes means that hour's run never starts (the controller only starts the latest missed schedule):
+    on 2026-10-16 the 02:00 run lasted until 04:05 and the 03:00 projects were not crawled at all.
+    Returns (projects, caught_up), earliest hour first."""
+    day_start = scheduled.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    crawled_today = {pid for (pid,) in db.session.query(CrawlLog.project_id).filter(
+        CrawlLog.triggered_by == "cron", CrawlLog.started_at >= day_start)}
+    caught_up = [p for p in all_projects
+                 if p.crawl_hour is not None and p.crawl_hour < scheduled.hour and p.id not in crawled_today]
+    due = [p for p in all_projects if p.crawl_hour == scheduled.hour]
+    return sorted(caught_up, key=lambda p: p.crawl_hour) + due, caught_up
 
 
 def nightly_crawl():
     _setup_crawl_log()
     app = create_app()
-    current_hour = _scheduled_hour()
+    scheduled = _scheduled_time()
+    current_hour = scheduled.hour
 
     with app.app_context():
         all_projects = Project.query.filter_by(trashed_at=None).all()
@@ -173,8 +193,12 @@ def nightly_crawl():
             projects = [p for p in all_projects if p.crawl_hour is not None]
             _log.info("[nightly] CRAWL_HOUR_OVERRIDE=all — crawling all %d enabled project(s)", len(projects))
         else:
-            projects = [p for p in all_projects if p.crawl_hour == current_hour]
-            _log.info("[nightly] Hour %02d:00 UTC — %d/%d project(s) scheduled now", current_hour, len(projects), len(all_projects))
+            projects, caught_up = _projects_for_run(all_projects, scheduled)
+            _log.info("[nightly] Hour %02d:00 UTC — %d/%d project(s) scheduled now", current_hour,
+                      len(projects) - len(caught_up), len(all_projects))
+            for p in caught_up:
+                _log.warning("[nightly] catching up %s (scheduled for %02d:00 UTC, no nightly crawl yet today)",
+                             p.name, p.crawl_hour)
 
         retry_queue: list = []
         for idx, project in enumerate(projects, 1):

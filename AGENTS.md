@@ -120,7 +120,7 @@ The nightly Pass-3 backfill (`backfill_missing_paper_metadata` in `crawl.py`) re
 ### Nightly crawl scheduling
 
 Each `Project` has a `crawl_hour` (integer 1–4 UTC, or `None` = disabled). A CronJob (see `k8s/cronjob.yaml.example`) runs `scripts/nightly_crawl.py` on a schedule. The script:
-- Filters to projects whose `crawl_hour` matches `datetime.now(UTC).hour` (trashed projects excluded)
+- Filters to projects whose `crawl_hour` matches the run's scheduled UTC hour (`_scheduled_time`, from the pod name, so a late start still picks the right projects; trashed projects excluded), plus catch-ups: projects whose hour already passed today without a nightly (`cron`) CrawlLog (`_projects_for_run`). With `concurrencyPolicy: Forbid` a run still going at the next hour means that hour's run never starts (the controller only starts the latest missed schedule), which dropped the 03:00 projects on 2026-10-16
 - Uses `project.saved_keywords` if set, otherwise generates via LLM and auto-saves them
 - Date range: five days back to today UTC (`CRAWL_DAYS_BACK` env var overrides, default 5 — arXiv only makes Fri/weekend submissions searchable Mon/Tue 00:00 UTC, so the lag is up to ~4 days; dedup + screening cache absorb the overlap)
 
