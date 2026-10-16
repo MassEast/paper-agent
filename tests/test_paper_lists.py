@@ -71,7 +71,9 @@ def test_page_shows_first_page_of_each_list_and_a_sentinel(c, big_project):
     html = c.get("/projects/pl-proj").data.decode()
     new = _cards(_section(html, "new"))
     assert new == [f"2602-{i:05d}" for i in range(PAGE_SIZE)]  # newest added first
-    assert f'section=new&offset={PAGE_SIZE}' in html and 'hx-trigger="intersect once"' in html
+    # New Papers is a one-card carousel: its next page loads when the carousel nears the end, not on scroll
+    assert f'section=new&offset={PAGE_SIZE}' in html and 'hx-trigger="loadmore once"' in html
+    assert f'data-left="{N_NEW - PAGE_SIZE}"' in html and 'data-carousel="next"' in html
     assert "New Papers <span id=\"new-count\">(25)</span>" in html
 
 
@@ -157,35 +159,42 @@ def test_bad_section_or_offset_is_rejected(c, big_project):
     assert c.get("/projects/pl-proj/papers/section?section=nope").status_code == 400
 
 
-# ── Browser (slow): scrolling loads more, collecting keeps your place ─────────
+# ── Browser (slow): one New Papers card at a time, collecting keeps your place ─────────
 
 @pytest.mark.slow
-def test_scroll_loads_more_and_collect_keeps_place_on_a_phone(live_server, browser_session, big_project):
+def test_new_papers_carousel_steps_loads_more_and_collect_shows_next_on_a_phone(live_server, browser_session, big_project):
     browser, state = browser_session
     from playwright.sync_api import sync_playwright  # noqa: F401  (browser_session skips without playwright)
     context = browser.new_context(storage_state=state, viewport={"width": 390, "height": 844}, is_mobile=True)
     pg = context.new_page()
     pg.goto(f"{live_server}/projects/pl-proj")
+    pos = lambda: pg.locator(".new-carousel-pos").inner_text()
+    shown = lambda: pg.locator("#new-papers-list > .paper-card:visible")
     count = lambda: pg.locator("#new-papers-list > .paper-card").count()
-    assert count() == PAGE_SIZE
-    pg.locator("#new-papers-list").scroll_into_view_if_needed()  # the list itself on screen, as when reading it
-    pg.locator("#new-papers-list").evaluate("el => el.scrollTop = el.scrollHeight")
-    pg.wait_for_function(f"() => document.querySelectorAll('#new-papers-list > .paper-card').length > {PAGE_SIZE}")
+    assert count() == PAGE_SIZE and shown().count() == 1 and pos() == f"1 / {N_NEW}"
+    assert pg.locator('[data-carousel="prev"]').is_disabled()
 
-    card = pg.locator('[id^="paper-card-2602-00012-"]')
-    card.scroll_into_view_if_needed()
-    scroll_before = pg.locator("#new-papers-list").evaluate("el => el.scrollTop")
-    loaded_before = count()
-    card.get_by_role("button", name="Move to My Collection").click()
-    pg.wait_for_function("() => !document.querySelector('#new-papers-list [id^=\"paper-card-2602-00012-\"]')")
-    assert pg.locator("#curated-list > .paper-card").first.get_attribute("id").startswith("paper-card-2602-00012-")
-    assert count() == loaded_before - 1  # the loaded pages stay; only that card went
-    assert abs(pg.locator("#new-papers-list").evaluate("el => el.scrollTop") - scroll_before) < 400
+    for _ in range(PAGE_SIZE - 1):  # nearing the last loaded card fetches the next page
+        pg.locator('[data-carousel="next"]').click()
+    pg.wait_for_function(f"() => document.querySelectorAll('#new-papers-list > .paper-card').length > {PAGE_SIZE}")
+    assert pos() == f"{PAGE_SIZE} / {N_NEW}" and shown().count() == 1
+    pg.keyboard.press("ArrowRight")
+    pg.keyboard.press("ArrowRight")
+    pg.keyboard.press("ArrowLeft")
+    assert pos() == f"{PAGE_SIZE + 1} / {N_NEW}"
+    assert shown().first.get_attribute("id").startswith(f"paper-card-2602-{PAGE_SIZE:05d}-")
+
+    shown().first.get_by_role("button", name="Move to My Collection").click()
+    pg.wait_for_function(f"() => !document.querySelector('#new-papers-list [id^=\"paper-card-2602-{PAGE_SIZE:05d}-\"]')")
+    assert pg.locator("#curated-list > .paper-card").first.get_attribute("id").startswith(f"paper-card-2602-{PAGE_SIZE:05d}-")
+    assert shown().count() == 1 and pos() == f"{PAGE_SIZE + 1} / {N_NEW - 1}"  # the next paper takes its place
+    assert shown().first.get_attribute("id").startswith(f"paper-card-2602-{PAGE_SIZE + 1:05d}-")
     assert pg.locator("#new-count").inner_text() == f"({N_NEW - 1})"
 
-    # sorting is done by the server and still pages
+    # sorting is done by the server and starts again at the first card
     pg.get_by_role("button", name="Release date").first.click()
-    pg.wait_for_function(f"() => document.querySelector('#new-papers-list > .paper-card').id.startsWith('paper-card-2602-{N_NEW - 1:05d}')")
+    pg.wait_for_function(f"() => document.querySelector('#new-papers-list > .paper-card:not([style*=\"none\"])').id.startsWith('paper-card-2602-{N_NEW - 1:05d}')")
+    assert pos() == f"1 / {N_NEW - 1}"
     context.close()
 
 

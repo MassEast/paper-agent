@@ -234,8 +234,12 @@ def test_search_warning_names_the_keywords_and_says_nothing_is_lost_yet():
 
 def test_merge_carry_adds_up_deferred_passes():
     from app.crawl import _merge_carry
-    a = {"papers_found": 3, "papers_added": 1, "papers_checked": 2, "arxiv": 0, "scholar": 3, "papers": ["p1"], "keywords": ["a", "b"]}
-    b = {"papers_found": 2, "papers_added": 1, "papers_checked": 2, "arxiv": 0, "scholar": 2, "papers": ["p2"], "keywords": ["a", "b"]}
+    a = {"papers_found": 3, "papers_added": 1, "papers_checked": 2, "papers": ["p1"],
+         "sources": {"keyword": {"found": 1, "added": 0}, "cites": {"found": 2, "added": 1}}, "keywords": ["a", "b"]}
+    b = {"papers_found": 2, "papers_added": 1, "papers_checked": 2, "papers": ["p2"],
+         "sources": {"cites": {"found": 2, "added": 1}}, "keywords": ["a", "b"]}
     assert _merge_carry(None, b) is b
     m = _merge_carry(a, b)
     assert (m["papers_found"], m["papers_added"], m["papers"], m["keywords"]) == (5, 2, ["p1", "p2"], ["a", "b"])
+    assert m["sources"] == {"keyword": {"found": 1, "added": 0}, "recommended": {"found": 0, "added": 0},
+                            "cites": {"found": 4, "added": 2}}

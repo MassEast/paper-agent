@@ -1169,8 +1169,7 @@ def notify_crawl_complete(
     keywords_used: list = None,
     papers_screened: int = None,
     paper_limit: int = None,
-    arxiv_count: Optional[int] = None,
-    scholar_count: Optional[int] = None,
+    source_counts: Optional[dict] = None,
     date_from=None,
     date_to=None,
     keywords_auto_generated: bool = False,
@@ -1191,20 +1190,18 @@ def notify_crawl_complete(
     if paper_limit and paper_limit > 0 and papers_found > paper_limit:
         screened_note = f" (limit: {paper_limit} of {papers_found} found)"
 
-    # Source breakdown rows for stats table
-    if arxiv_count is not None and scholar_count is not None:
-        source_rows = (
-            f'<tr style="border-bottom: 1px solid #f3f4f6;">'
-            f'<td style="padding: 7px 0; color: #6b7280;">arXiv</td>'
-            f'<td style="padding: 7px 0; text-align: right; font-weight: 600; color: #111827;">{arxiv_count}</td>'
-            f'</tr>'
-            f'<tr style="border-bottom: 1px solid #f3f4f6;">'
-            f'<td style="padding: 7px 0; color: #6b7280;">Semantic Scholar</td>'
-            f'<td style="padding: 7px 0; text-align: right; font-weight: 600; color: #111827;">{scholar_count}</td>'
-            f'</tr>'
-        )
-    else:
-        source_rows = ""
+    # Source breakdown rows: a paper found several ways counts in each of its rows, the total counts it once
+    source_rows = ""
+    if source_counts:
+        for via, label in EMAIL_SOURCE_LABELS:
+            c = source_counts.get(via) or {"found": 0, "added": 0}
+            source_rows += (
+                f'<tr style="border-bottom: 1px solid #f3f4f6;">'
+                f'<td style="padding: 7px 0; color: #6b7280;">{label}</td>'
+                f'<td style="padding: 7px 0; text-align: right; font-weight: 600; color: #111827;">{c["found"]}'
+                f'<span style="font-weight: 400; color: #6b7280;"> ({c["added"]} added)</span></td>'
+                f'</tr>'
+            )
 
     stats_html = (
         '<table cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse;'
@@ -1212,7 +1209,11 @@ def notify_crawl_complete(
         '<tbody>'
         + source_rows
         + f'<tr style="border-bottom: 2px solid #e5e7eb;">'
-        f'<td style="padding: 9px 0; color: #374151; font-weight: 600;">Total found</td>'
+        f'<td style="padding: 9px 0; color: #374151; font-weight: 600;">Total found'
+        + ('<div style="font-weight: 400; font-size: 12px; color: #9ca3af;">A paper found several ways counts in'
+           ' each row, so the rows add up to more than the total, but nothing is screened twice.</div>'
+           if source_counts else '')
+        + '</td>'
         f'<td style="padding: 9px 0; text-align: right; font-weight: 700; color: #111827;">{papers_found}</td>'
         f'</tr>'
         f'<tr style="border-bottom: 1px solid #f3f4f6;">'
@@ -1389,7 +1390,10 @@ def notify_crawl_complete(
     message = (
         f'Crawl finished for "{project_name}"\n'
         + date_range_text
-        + f'\narXiv: {arxiv_count or "?"} · Semantic Scholar: {scholar_count or "?"} · Total: {papers_found}\n'
+        + ''.join(f'\n{label}: {(source_counts.get(via) or {}).get("found", 0)} '
+                  f'({(source_counts.get(via) or {}).get("added", 0)} added)'
+                  for via, label in EMAIL_SOURCE_LABELS if source_counts)
+        + f'\nTotal found: {papers_found}\n'
         f'Added: {papers_added} · Skipped: {screened - papers_added}\n\n'
         f'View and tag papers: {dashboard_url}'
         + (f'\n\nIncomplete search: {warning}' if warning else '')
@@ -2313,12 +2317,36 @@ def generate_summary_with_full_content(
         )
 
 
-def _make_carry(crawl_log, papers_added, papers_checked, papers, arxiv_count, scholar_count) -> dict:
+EMAIL_SOURCE_LABELS = [("keyword", "arXiv keyword search"), ("recommended", "Semantic Scholar recommendations"),
+                       ("cites", "Papers citing My Collection")]
+
+
+def _count_sources(papers: list[dict], counts: Optional[dict] = None, key: str = "found") -> dict:
+    """Add each paper once to every source it was found by ({via: {"found": n, "added": m}})."""
+    counts = counts if counts is not None else {via: {"found": 0, "added": 0} for via, _ in EMAIL_SOURCE_LABELS}
+    for p in papers:
+        for via in {fv.get("via") for fv in p.get("found_via") or []}:
+            if via in counts:
+                counts[via][key] += 1
+    return counts
+
+
+def _merge_sources(a: Optional[dict], b: Optional[dict]) -> dict:
+    out = {via: {"found": 0, "added": 0} for via, _ in EMAIL_SOURCE_LABELS}
+    for c in (a or {}, b or {}):
+        for via, n in c.items():
+            if via in out:
+                out[via]["found"] += n.get("found", 0)
+                out[via]["added"] += n.get("added", 0)
+    return out
+
+
+def _make_carry(crawl_log, papers_added, papers_checked, papers, source_counts) -> dict:
     """First-pass numbers handed to the retry pass so both produce one combined email."""
     return {
         "papers_found": crawl_log.papers_found, "papers_added": papers_added, "papers_checked": papers_checked,
         "papers": list(papers), "keywords": list(crawl_log.keywords_list or []),
-        "arxiv": arxiv_count, "scholar": scholar_count,
+        "sources": source_counts,
     }
 
 
@@ -2326,7 +2354,8 @@ def _merge_carry(earlier: Optional[dict], later: dict) -> dict:
     """Add up two deferred passes (first pass + a retry round that failed again and deferred too)."""
     if not earlier:
         return later
-    merged = {k: earlier.get(k, 0) + later.get(k, 0) for k in ("papers_found", "papers_added", "papers_checked", "arxiv", "scholar")}
+    merged = {k: earlier.get(k, 0) + later.get(k, 0) for k in ("papers_found", "papers_added", "papers_checked")}
+    merged["sources"] = _merge_sources(earlier.get("sources"), later.get("sources"))
     merged["papers"] = list(earlier.get("papers", [])) + list(later.get("papers", []))
     merged["keywords"] = list(dict.fromkeys(list(earlier.get("keywords", [])) + list(later.get("keywords", []))))
     return merged
@@ -2336,7 +2365,8 @@ def _search_warning(failed: list[str]) -> str:
     """Email banner text when arXiv never answered. All keywords go in one query, so it is all or nothing."""
     days_back = int(os.environ.get("CRAWL_DAYS_BACK", "5"))
     return (f"arXiv did not answer tonight (rate limited or unavailable), so papers from the arXiv keyword search "
-            f"({', '.join(failed)}) may be missing; the papers here come from Semantic Scholar recommendations. "
+            f"({', '.join(failed)}) may be missing; the papers here come from Semantic Scholar (recommendations and "
+            f"papers citing My Collection). "
             f"Each night searches the last {days_back} days, so the next nights cover these days again.")
 
 
@@ -2348,7 +2378,7 @@ def send_carry_notification(project_id: int, carry: dict, date_from, date_to, wa
     return notify_crawl_complete(
         project.name, project.slug, carry["papers_found"], carry["papers_added"],
         [featured] if featured else [], project_id=project_id, keywords_used=carry["keywords"],
-        papers_screened=carry["papers_checked"], arxiv_count=carry["arxiv"], scholar_count=carry["scholar"],
+        papers_screened=carry["papers_checked"], source_counts=carry.get("sources"),
         date_from=date_from, date_to=date_to, warning=warning,
     )
 
@@ -2483,6 +2513,7 @@ def run_crawl(
         papers_data = [p for p in papers_data if base_arxiv_id(p["arxiv_id"]) not in existing_project_ids]
         arxiv_papers_count = sum(1 for p in papers_data if p.get("source") != "semantic_scholar")
         scholar_papers_count = sum(1 for p in papers_data if p.get("source") == "semantic_scholar")
+        source_counts = _count_sources(papers_data)  # for the email; "added" filled in as papers are added
         crawl_log.papers_found = len(papers_data)
         sources = []
         if arxiv_papers_count > 0 or use_arxiv:
@@ -2505,7 +2536,7 @@ def run_crawl(
             crawl_log.failed_keywords = failed_keywords  # transient attr, read by the nightly retry pass
             if defer_notification and failed_keywords:
                 crawl_log.notify_carry = _merge_carry(
-                    carry, _make_carry(crawl_log, 0, 0, [], arxiv_papers_count, scholar_papers_count))
+                    carry, _make_carry(crawl_log, 0, 0, [], source_counts))
             return crawl_log
 
         papers_to_process = papers_data if paper_limit <= 0 else papers_data[:paper_limit]
@@ -2701,6 +2732,7 @@ def run_crawl(
                                                     screen_source=result["screen_source"],
                                                     found_via=json.dumps(pd.get("found_via") or [])))
                         newly_added_papers.append(paper)
+                        _count_sources([pd], source_counts, "added")
                         papers_added += 1
                         crawl_log.papers_added = papers_added
                         crawl_log.papers_checked = papers_checked
@@ -2745,6 +2777,7 @@ def run_crawl(
                     )
                     db.session.add(summary)
                     papers_added += 1
+                    _count_sources([pd], source_counts, "added")
                     crawl_log.papers_added = papers_added
                     crawl_log.papers_checked = papers_checked
                     crawl_log.total_tokens = tokens_used
@@ -2787,7 +2820,7 @@ def run_crawl(
         carry = carry or {}
         if defer_notification and failed_keywords and not cancelled:
             crawl_log.notify_carry = _merge_carry(carry, _make_carry(crawl_log, papers_added, papers_checked, newly_added_papers,
-                                                                     arxiv_papers_count, scholar_papers_count))
+                                                                     source_counts))
             should_notify = False
         else:
             should_notify = not cancelled and (papers_added + carry.get("papers_added", 0)) > 0
@@ -2813,8 +2846,7 @@ def run_crawl(
                     keywords_used=list(dict.fromkeys(carry.get("keywords", []) + list(crawl_log.keywords_list or []))),
                     papers_screened=papers_checked + carry.get("papers_checked", 0),
                     paper_limit=paper_limit,
-                    arxiv_count=arxiv_papers_count + carry.get("arxiv", 0),
-                    scholar_count=scholar_papers_count + carry.get("scholar", 0),
+                    source_counts=_merge_sources(carry.get("sources"), source_counts),
                     date_from=date_from,
                     date_to=date_to,
                     keywords_auto_generated=keywords_auto_generated,

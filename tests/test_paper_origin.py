@@ -113,7 +113,7 @@ def test_card_line_per_origin(c, app, two):
         db.session.commit()
     html = c.get("/projects/origin-a").data.decode()
     text, tip = _date_line(html, "2612.00006")
-    assert text.startswith("Found by crawl") and "| Collected" in text and "Found by a crawl" in tip
+    assert text.startswith("Found by crawl") and "| Collected" in text and "by a crawl (nightly or Find Papers)" in tip
     text, tip = _date_line(html, "2612.00007")
     assert text.startswith("Added by hand") and "Collected" not in text and "pasted link" in tip
     text, tip = _date_line(html, "2612.00008")

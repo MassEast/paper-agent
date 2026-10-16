@@ -25,7 +25,20 @@
                 {% with sec='new', by=state.new_by, dir=state.new_dir %}{% include "partials/_sort_buttons.html" %}{% endwith %}
             </span>
         </h3>
-        <div id="new-papers-list" class="space-y-3" style="max-height: 52vh; overflow-y: auto; padding-right: 4px;">
+        {# One card at a time (there is never a reason to compare two new papers side by side): ← / → buttons,
+           arrow keys or a swipe step through them; script in project_detail.html (newCarousel). #}
+        <div class="new-carousel-nav" style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 10px;">
+            <button type="button" class="focus-ring rw-chip-btn" data-carousel="prev" aria-label="Previous paper"
+                style="padding: 4px 12px; border-radius: var(--radius-md); cursor: pointer; display: inline-flex; align-items: center;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-chevron-left"></use></svg>
+            </button>
+            <span class="new-carousel-pos" style="font-size: 0.8rem; color: var(--ink-3); min-width: 6ch; text-align: center; font-variant-numeric: tabular-nums;">1 / {{ s.new|length }}</span>
+            <button type="button" class="focus-ring rw-chip-btn" data-carousel="next" aria-label="Next paper"
+                style="padding: 4px 12px; border-radius: var(--radius-md); cursor: pointer; display: inline-flex; align-items: center;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-chevron-right"></use></svg>
+            </button>
+        </div>
+        <div id="new-papers-list" class="new-carousel">
             {% with section='new', papers=s.new, offset=0 %}{% include "partials/paper_page.html" %}{% endwith %}
         </div>
     </div>

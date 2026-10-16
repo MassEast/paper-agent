@@ -225,6 +225,26 @@ class ProjectPaper(db.Model):
                 parts.append(f'cites "{first}"' + (f" (+{len(cited) - 1})" if len(cited) > 1 else ""))
         return " · ".join(parts)
 
+    def found_via_tip(self) -> str:
+        """The card tooltip's longer version of found_via_text: one sentence per way the paper was found."""
+        via = self.found_via_list
+        quote = lambda xs: ", ".join(f'"{x}"' for x in xs[:-1]) + (" and " if len(xs) > 1 else "") + f'"{xs[-1]}"'
+        names = [v["name"] for v in via if v["via"] == "keyword" and v.get("name")]
+        cited = [v["title"] for v in via if v["via"] == "cites"]
+        out = []
+        if names:
+            out.append(f"Its title or abstract contains your keyword{'s' if len(names) > 1 else ''} {quote(names)}"
+                       " (arXiv keyword search).")
+        elif any(v["via"] == "keyword" for v in via):
+            out.append("The arXiv keyword search found it.")
+        if any(v["via"] == "recommended" for v in via):
+            out.append("Semantic Scholar recommends it as similar to papers in My Collection.")
+        if len(cited) == 1:
+            out.append(f'It cites "{cited[0]}" from My Collection.')
+        elif cited:
+            out.append(f"It cites {len(cited)} papers from My Collection: " + "; ".join(f'"{t}"' for t in cited) + ".")
+        return " ".join(out)
+
     @property
     def tags_list(self) -> list[str]:
         if self.paper_tags:

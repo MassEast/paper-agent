@@ -7,6 +7,7 @@ Semantic Scholar is a mocked httpx transport; the arXiv search and the recommend
 
 import contextlib
 import json
+import re
 from datetime import date
 from unittest.mock import patch
 
@@ -168,7 +169,31 @@ def test_crawl_stores_how_it_found_the_paper_and_the_card_shows_it(app, proj, cl
         sess["logged_in"] = True
     html = client.get("/projects/citations-proj").get_data(as_text=True)
     assert 'Found via cites &#34;Seed Paper A&#34; (+1),' in html
-    assert 'Found via cites &#34;Seed Paper A&#34;; &#34;Another Seed&#34;' in html  # tooltip
+    assert 'It cites 2 papers from My Collection: &#34;Seed Paper A&#34;; &#34;Another Seed&#34;.' in html  # tooltip
+
+
+def test_email_counts_each_source_with_how_many_were_added(app, proj):
+    """A paper found several ways counts in each of its rows; the total counts it once."""
+    from tests.test_crawl import MockPatches
+
+    both = {"arxiv_id": "2610.00043", "title": "Found Twice", "authors": ["A"], "abstract": "abs", "pdf_url": "",
+            "published_date": date(2026, 10, 12), "year": 2026, "categories": [], "source": "arxiv",
+            "found_via": [{"via": "keyword", "name": "kw"},
+                          {"via": "cites", "arxiv_id": "2401.00001", "title": "Seed Paper A"}]}
+    cited = dict(both, arxiv_id="2610.00044", title="Only Cites", source="semantic_scholar",
+                 found_via=[{"via": "cites", "arxiv_id": "2401.00001", "title": "Seed Paper A"}])
+    with app.app_context():
+        with MockPatches([]), patch.object(crawl, "gather_candidates", return_value=[both, cited]), \
+                patch.object(crawl, "send_notification", return_value=True) as send:
+            crawl.run_crawl(proj, D_FROM, D_TO, keywords_override=["kw"])
+    subject, text = send.call_args.args[:2]
+    html = re.sub(r"<[^>]+>", " ", send.call_args.kwargs["content_html"])
+    html = re.sub(r"\s+", " ", html)
+    assert "arXiv keyword search 1 (1 added)" in html
+    assert "Semantic Scholar recommendations 0 (0 added)" in html
+    assert "Papers citing My Collection 2 (2 added)" in html
+    assert "Total found A paper found several ways counts in each row" in html and "nothing is screened twice" in html
+    assert "Papers citing My Collection: 2 (2 added)" in text and "Total found: 2" in text
 
 
 def test_found_via_text_names_keywords_and_the_recommendation():
@@ -180,3 +205,15 @@ def test_found_via_text_names_keywords_and_the_recommendation():
     long = "A" * 60
     assert ProjectPaper(found_via=json.dumps([{"via": "cites", "arxiv_id": "1", "title": long}])).found_via_text() \
         == f'cites "{"A" * 48}…"'
+
+
+def test_found_via_tip_says_in_words_how_each_source_found_it():
+    pp = ProjectPaper(found_via=json.dumps([{"via": "keyword", "name": "sparse attention"},
+                                            {"via": "keyword", "name": "state space"},
+                                            {"via": "recommended"},
+                                            {"via": "cites", "arxiv_id": "1", "title": "Seed Paper A"}]))
+    assert pp.found_via_tip() == (
+        'Its title or abstract contains your keywords "sparse attention" and "state space" (arXiv keyword search). '
+        "Semantic Scholar recommends it as similar to papers in My Collection. "
+        'It cites "Seed Paper A" from My Collection.')
+    assert ProjectPaper(found_via='[{"via": "keyword"}]').found_via_tip() == "The arXiv keyword search found it."

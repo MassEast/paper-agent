@@ -682,8 +682,17 @@
                         <li>
                             <strong>Semantic Scholar recommendations</strong> (if you have papers in My
                             Collection): fetches papers similar to your collection via the Semantic Scholar
-                            recommendations API. Only recommendations that have an arXiv version and fall in your
-                            date range are kept, merged with the arXiv results.
+                            recommendations API, from up to 100 My Collection papers in groups of 10 (the API ranks by
+                            similarity, not date, so smaller groups reach more recent papers). Only recommendations
+                            that have an arXiv version and fall in your date range are kept.
+                        </li>
+                        <li>
+                            <strong>Papers citing My Collection</strong> (the "Citations" source): for every arXiv
+                            paper in My Collection, asks Semantic Scholar which papers cite it, and keeps the ones on
+                            arXiv dated in your date range. One request per My Collection paper (the groups of 10 are only for
+                            the recommendations), so this is the slowest source.
+                            A paper found by several sources is screened once; its card says how it was found
+                            ("Found via keyword …", "Semantic Scholar recommendation", "cites …").
                         </li>
                         <li>
                             <strong>Quick relevance filter:</strong> LLM receives your research interest + My Collection
@@ -780,24 +789,29 @@
                         </div>
                     </div>
 
-                    <div style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--ink-3);">
-                        <label
-                            style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                    {# Sources, one per line (side by side they overflowed the sidebar); names as in the crawl email #}
+                    <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; color: var(--ink-3);">
+                        <span style="color: var(--ink-4);">Sources</span>
+                        <label data-tip="Papers on arXiv whose title or abstract contains one of your keywords"
+                            style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
                             <input type="checkbox" id="use-arxiv-checkbox" checked
-                                style="width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;">
-                            arXiv <span style="color: var(--ink-4);">(slower)</span>
+                                style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
+                            <span style="min-width: 0;">arXiv keyword search</span>
+                            <span style="margin-left: auto; padding-left: 8px; color: var(--ink-4);">slower</span>
                         </label>
-                        <label
-                            style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                        <label data-tip="Papers Semantic Scholar finds similar to papers in My Collection"
+                            style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
                             <input type="checkbox" id="use-scholar-checkbox" checked
-                                style="width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;">
-                            Semantic Scholar <span style="color: var(--ink-4);">(fast)</span>
+                                style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
+                            <span style="min-width: 0;">Semantic Scholar recommendations</span>
+                            <span style="margin-left: auto; padding-left: 8px; color: var(--ink-4);">fast</span>
                         </label>
                         <label data-tip="New papers that cite a paper in My Collection (looked up on Semantic Scholar, one request per My Collection paper)"
-                            style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                            style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
                             <input type="checkbox" id="use-citations-checkbox" checked
-                                style="width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;">
-                            Citations <span style="color: var(--ink-4);">(slow)</span>
+                                style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
+                            <span style="min-width: 0;">Papers citing My Collection</span>
+                            <span style="margin-left: auto; padding-left: 8px; color: var(--ink-4);">slow</span>
                         </label>
                     </div>
                     <button class="focus-ring" type="button" id="arxiv-search-btn" onclick="handleArxivSearch()"
@@ -1467,4 +1481,65 @@
         ×
     </button>
 </div>
+<script>
+    // New Papers carousel: one card at a time; ← / → buttons, arrow keys (outside text fields) or a swipe.
+    // Cards stay server-rendered in pages of PAGE_SIZE; nearing the last loaded card fires 'loadmore' on
+    // the page sentinel. A card that leaves (collect / trash) is removed by htmx, so the next one moves
+    // into the same position; a re-rendered section (sort change, crawl) starts again at the first card.
+    (function () {
+        let idx = 0, list = null;
+        function cards() { return list ? Array.from(list.querySelectorAll(':scope > .paper-card')) : []; }
+        function show() {
+            list = document.getElementById('new-papers-list');
+            if (!list) return;
+            if (!list.dataset.carouselInit) { list.dataset.carouselInit = '1'; idx = 0; }  // a freshly rendered section
+            const cs = cards(), more = list.querySelector(':scope > .list-more');
+            const total = cs.length + (more ? parseInt(more.dataset.left, 10) : 0);
+            idx = Math.max(0, Math.min(idx, cs.length - 1));
+            cs.forEach((c, i) => { c.style.display = i === idx ? '' : 'none'; });
+            const sec = document.getElementById('new-section');
+            const pos = sec.querySelector('.new-carousel-pos');
+            if (pos) pos.textContent = cs.length ? (idx + 1) + ' / ' + total : '0 / 0';
+            sec.querySelector('[data-carousel="prev"]').disabled = idx <= 0;
+            sec.querySelector('[data-carousel="next"]').disabled = idx >= total - 1;
+            if (more) { more.style.display = 'none'; if (idx >= cs.length - 2) htmx.trigger(more, 'loadmore'); }
+        }
+        function step(d) {
+            if (!list) return;
+            const before = idx;
+            idx = Math.max(0, Math.min(idx + d, cards().length - 1));
+            if (idx === before) return;
+            show();
+            const top = document.getElementById('new-section').getBoundingClientRect().top;
+            if (top < 0) document.getElementById('new-section').scrollIntoView({ block: 'start' });
+        }
+        document.addEventListener('click', function (e) {
+            const b = e.target.closest('button[data-carousel]');
+            if (b && b.closest('#new-section')) step(b.dataset.carousel === 'next' ? 1 : -1);
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            const t = e.target;
+            if (t.closest('input, textarea, select, [contenteditable="true"], .chat-panel')) return;
+            if (!document.getElementById('new-papers-list')) return;
+            e.preventDefault();
+            step(e.key === 'ArrowRight' ? 1 : -1);
+        });
+        let sx = null, sy = null;
+        document.addEventListener('touchstart', function (e) {
+            if (!e.target.closest('#new-papers-list') || e.touches.length !== 1) { sx = null; return; }
+            sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+        }, { passive: true });
+        document.addEventListener('touchend', function (e) {
+            if (sx === null) return;
+            const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+            sx = null;
+            if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(dx < 0 ? 1 : -1);
+        }, { passive: true });
+        document.addEventListener('htmx:afterSwap', show);  // before settle, so a fresh page never flashes
+        document.addEventListener('htmx:afterSettle', show);
+        document.addEventListener('DOMContentLoaded', show);
+    })();
+</script>
 {% endblock %}
