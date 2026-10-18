@@ -151,6 +151,7 @@ def create_app():
             STALE_PAPER_TEXT_SQL,
             "CREATE INDEX IF NOT EXISTS idx_llm_usage_project ON llm_usage(project_id, kind)",
             USAGE_BACKFILL_SQL,
+            "ALTER TABLE projects ADD COLUMN use_biorxiv BOOLEAN DEFAULT 0",
         ]
         for _sql in _migrations:
             try:

@@ -243,6 +243,7 @@ def nightly_crawl():
                 triggered_by="cron",
                 keywords_override=keywords_override,
                 defer_notification=True,  # if keywords fail, the retry pass sends one combined email
+                use_biorxiv=bool(project.use_biorxiv),
             )
             failed_kws = getattr(crawl_log, "failed_keywords", None)
             if failed_kws:
@@ -268,7 +269,7 @@ def nightly_crawl():
             time.sleep(wait)
             still_failing = []
             for project, kws, d_from, d_to, carry in retry_queue:
-                # arXiv only: the first pass already screened the recommendations and citing papers
+                # arXiv only: the first pass already screened the recommendations, citing papers and bioRxiv
                 retry_log = run_crawl(project.id, d_from, d_to, triggered_by="cron", keywords_override=kws,
                                       use_scholar=False, use_citations=False,
                                       carry=carry, defer_notification=not last)

@@ -327,6 +327,7 @@ def arxiv_count(slug):
     use_arxiv = request.form.get("use_arxiv", "1") != "0"
     use_scholar = request.form.get("use_scholar", "1") != "0"
     use_citations = request.form.get("use_citations", "1") != "0"
+    use_biorxiv = request.form.get("use_biorxiv") == "1"  # off unless asked for
 
     task_id = uuid.uuid4().hex[:12]
     _arxiv_count_tasks[task_id] = {"status": "running"}
@@ -360,12 +361,14 @@ def arxiv_count(slug):
         try:
             all_papers = gather_candidates(keywords, seeds, date_from, date_to, use_arxiv=use_arxiv,
                                            use_scholar=use_scholar, use_citations=use_citations,
-                                           warnings=search_warnings, status=_arxiv_count_tasks[task_id])
+                                           warnings=search_warnings, status=_arxiv_count_tasks[task_id],
+                                           use_biorxiv=use_biorxiv)
             # Subtract papers already in this project (any state: new/curated/trash)
             already_known = sum(1 for p in all_papers if base_arxiv_id(p["arxiv_id"]) in existing_arxiv_ids)
             new_papers = [p for p in all_papers if base_arxiv_id(p["arxiv_id"]) not in existing_arxiv_ids]
             previously_rejected = sum(1 for p in new_papers if base_arxiv_id(p["arxiv_id"]) in rejected_base_ids)
-            new_arxiv = sum(1 for p in new_papers if p.get("source") != "semantic_scholar")
+            new_arxiv = sum(1 for p in new_papers if p.get("source") not in ("semantic_scholar", "biorxiv"))
+            new_biorxiv = sum(1 for p in new_papers if p.get("source") == "biorxiv")
             new_scholar = sum(1 for p in new_papers if p.get("source") == "semantic_scholar")
             new_citing = sum(1 for p in new_papers if any(v["via"] == "cites" for v in p["found_via"]))
             _arxiv_count_tasks[task_id] = {
@@ -373,6 +376,7 @@ def arxiv_count(slug):
                 "count": len(new_papers),
                 "papers": new_papers,
                 "arxiv_count": new_arxiv,
+                "biorxiv_count": new_biorxiv,
                 "scholar_count": new_scholar,
                 "citing_count": new_citing,
                 "already_known": already_known,
@@ -457,6 +461,7 @@ def trigger_crawl(slug):
     use_arxiv = request.form.get("use_arxiv", "1") != "0"
     use_scholar = request.form.get("use_scholar", "1") != "0"
     use_citations = request.form.get("use_citations", "1") != "0"
+    use_biorxiv = request.form.get("use_biorxiv") == "1"
 
     _thread, crawl_log_id = start_crawl_async(
         project.id,
@@ -470,6 +475,7 @@ def trigger_crawl(slug):
         use_arxiv=use_arxiv,
         use_scholar=use_scholar,
         use_citations=use_citations,
+        use_biorxiv=use_biorxiv,
     )
 
     if request.headers.get("HX-Request"):
@@ -694,6 +700,16 @@ def toggle_nightly_crawl(slug):
         schedule_html = '<span id="crawl-schedule-text" style="color:var(--ink-4);">Off</span>'
 
     return setup_changed(schedule_html)
+
+
+@projects_bp.route("/<slug>/toggle-biorxiv", methods=["POST"])
+@login_required
+def toggle_biorxiv(slug):
+    """Search bioRxiv too: in this project's nightly crawl, and as the starting choice in Find Papers."""
+    project = Project.query.filter_by(slug=slug).first_or_404()
+    project.use_biorxiv = request.form.get("enabled") == "1"
+    db.session.commit()
+    return "", 204
 
 
 @projects_bp.route("/health-check", methods=["GET"])

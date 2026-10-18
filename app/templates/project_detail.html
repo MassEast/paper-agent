@@ -540,6 +540,13 @@
                     {% endif %}
                     <span style="color: var(--ink-5);">&nbsp;· spread across 01–04 UTC</span>
                 </p>
+                <label data-tip="Also search bioRxiv in the nightly crawl, and have it ticked in Find Papers"
+                    style="display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.75rem; color: var(--ink-3); cursor: pointer; user-select: none;">
+                    <input type="checkbox" {% if project.use_biorxiv %}checked{% endif %}
+                        onchange="fetch('/projects/{{ project.slug }}/toggle-biorxiv', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'enabled=' + (this.checked ? '1' : '0')}).then(function (r) { if (!r.ok) alert('Could not save this setting.'); })"
+                        style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
+                    <span>Also search bioRxiv</span>
+                </label>
                 </div>
                 <script>
                     function onCrawlToggle(event, pid) {
@@ -680,6 +687,14 @@
                             the end of the run.
                         </li>
                         <li>
+                            <strong>bioRxiv keyword search</strong> (off unless ticked; the option under Nightly crawl
+                            sets it for the nightly run and for Find Papers): bioRxiv cannot search by keyword, so
+                            the whole date range is read from its public API and a paper is kept when its title or
+                            abstract contains all words of one of your keywords (any order; word endings are
+                            ignored). Only first versions count. A bioRxiv paper is judged on its abstract, not
+                            the full text, and has no figure; its card links to bioRxiv.
+                        </li>
+                        <li>
                             <strong>Semantic Scholar recommendations</strong> (if you have papers in My
                             Collection): fetches papers similar to your collection via the Semantic Scholar
                             recommendations API, from up to 100 My Collection papers in groups of 10 (the API ranks by
@@ -798,6 +813,13 @@
                                 style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
                             <span style="min-width: 0;">arXiv keyword search</span>
                             <span style="margin-left: auto; padding-left: 8px; color: var(--ink-4);">slower</span>
+                        </label>
+                        <label data-tip="Preprints on bioRxiv (biology and medicine) whose title or abstract contains the words of one of your keywords. They are judged on the abstract; the full text is not fetched"
+                            style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="use-biorxiv-checkbox" {% if project.use_biorxiv %}checked{% endif %}
+                                style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
+                            <span style="min-width: 0;">bioRxiv keyword search</span>
+                            <span style="margin-left: auto; padding-left: 8px; color: var(--ink-4);">fast</span>
                         </label>
                         <label data-tip="Papers Semantic Scholar finds similar to papers in My Collection"
                             style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
@@ -1034,7 +1056,8 @@
                         const useArxiv = document.getElementById('use-arxiv-checkbox').checked;
                         const useScholar = document.getElementById('use-scholar-checkbox').checked;
                         const useCitations = document.getElementById('use-citations-checkbox').checked;
-                        if (!useArxiv && !useScholar && !useCitations) { alert('Enable at least one source.'); return; }
+                        const useBiorxiv = document.getElementById('use-biorxiv-checkbox').checked;
+                        if (!useArxiv && !useBiorxiv && !useScholar && !useCitations) { alert('Enable at least one source.'); return; }
 
                         searchBtn.disabled = true;
                         searchBtn.innerHTML = _spinnerHtml + ' Searching...';
@@ -1042,10 +1065,10 @@
 
                         const startTime = Date.now();
                         let elapsedInterval = null;
-                        const sourceLabel = [useArxiv && 'arXiv', useScholar && 'Semantic Scholar', useCitations && 'citations']
+                        const sourceLabel = [useArxiv && 'arXiv', useBiorxiv && 'bioRxiv', useScholar && 'Semantic Scholar', useCitations && 'citations']
                             .filter(Boolean).join(' + ');
                         const typicalTime = useCitations ? 'citations take ~1–7s per My Collection paper'
-                            : useArxiv ? '20–60s typical' : '~3s typical';
+                            : useArxiv ? '20–60s typical' : useBiorxiv ? 'bioRxiv takes ~5s per day of the range' : '~3s typical';
 
                         function updateElapsed() {
                             const s = Math.round((Date.now() - startTime) / 1000);
@@ -1063,8 +1086,9 @@
                         formData.append('use_arxiv', useArxiv ? '1' : '0');
                         formData.append('use_scholar', useScholar ? '1' : '0');
                         formData.append('use_citations', useCitations ? '1' : '0');
+                        formData.append('use_biorxiv', useBiorxiv ? '1' : '0');
 
-                        function showCountResult(count, arxivCount, ssCount, alreadyKnown, previouslyRejected, warnings, citingCount) {
+                        function showCountResult(count, arxivCount, ssCount, alreadyKnown, previouslyRejected, warnings, citingCount, biorxivCount) {
                             clearInterval(elapsedInterval);
                             searchBtn.disabled = false;
                             searchBtn.innerHTML = _searchBtnOrigHtml;
@@ -1078,6 +1102,7 @@
                             let sourceNote = '';
                             if (arxivCount !== undefined) {
                                 const parts = ['arXiv: ' + arxivCount];
+                                if (biorxivCount > 0) parts.push('bioRxiv: ' + biorxivCount);
                                 if (ssCount > 0) parts.push('Semantic Scholar: ' + ssCount);
                                 if (citingCount > 0) parts.push(citingCount + ' cite My Collection');
                                 if (alreadyKnown > 0) parts.push(alreadyKnown + ' already in project (skipped)');
@@ -1119,7 +1144,7 @@
                                 .then(data => {
                                     if (data.status === 'done') {
                                         currentArxivTaskId = taskId;
-                                        showCountResult(data.count, data.arxiv_count, data.scholar_count || 0, data.already_known || 0, data.previously_rejected || 0, data.warnings || [], data.citing_count || 0);
+                                        showCountResult(data.count, data.arxiv_count, data.scholar_count || 0, data.already_known || 0, data.previously_rejected || 0, data.warnings || [], data.citing_count || 0, data.biorxiv_count || 0);
                                     } else if (data.status === 'error') {
                                         showCountError(data.error || 'arXiv search failed');
                                     } else {
@@ -1184,6 +1209,7 @@
                         formData.append('use_arxiv', document.getElementById('use-arxiv-checkbox').checked ? '1' : '0');
                         formData.append('use_scholar', document.getElementById('use-scholar-checkbox').checked ? '1' : '0');
                         formData.append('use_citations', document.getElementById('use-citations-checkbox').checked ? '1' : '0');
+                        formData.append('use_biorxiv', document.getElementById('use-biorxiv-checkbox').checked ? '1' : '0');
                         if (currentArxivTaskId) formData.append('arxiv_task_id', currentArxivTaskId);
 
                         fetch('/projects/' + projectSlug + '/crawl', { method: 'POST', body: new URLSearchParams(formData) })
@@ -1365,7 +1391,7 @@
                             const addedStr = log.papers_added + ' added';
                             const counts = [foundStr, skippedStr, addedStr].filter(Boolean).join(' · ');
                             const srcs = (log.sources_used || 'arxiv,ss').split(',');
-                            const srcLabels = srcs.map(s => s === 'arxiv' ? 'arXiv' : (s === 'ss' || s === 'semantic_scholar') ? 'Semantic Scholar' : s === 'citations' ? 'citations' : s).join(' + ');
+                            const srcLabels = srcs.map(s => s === 'arxiv' ? 'arXiv' : s === 'biorxiv' ? 'bioRxiv' : (s === 'ss' || s === 'semantic_scholar') ? 'Semantic Scholar' : s === 'citations' ? 'citations' : s).join(' + ');
                             html += '<div style="background-color: var(--paper-3); border-radius: var(--radius-sm); padding: 8px; font-size: 0.75rem; color: var(--ink-2); margin-bottom: 4px;">'
                                 + '<span style="color: ' + statusColor + '; font-weight: 600;">' + log.status + '</span>'
                                 + ' · <span style="color: ' + triggerColor + '; font-weight: 600;">' + triggerLabel + '</span>'
