@@ -241,5 +241,5 @@ def test_merge_carry_adds_up_deferred_passes():
     assert _merge_carry(None, b) is b
     m = _merge_carry(a, b)
     assert (m["papers_found"], m["papers_added"], m["papers"], m["keywords"]) == (5, 2, ["p1", "p2"], ["a", "b"])
-    assert m["sources"] == {"keyword": {"found": 1, "added": 0}, "recommended": {"found": 0, "added": 0},
-                            "cites": {"found": 4, "added": 2}}
+    assert m["sources"] == {"keyword": {"found": 1, "added": 0}, "biorxiv": {"found": 0, "added": 0},
+                            "recommended": {"found": 0, "added": 0}, "cites": {"found": 4, "added": 2}}

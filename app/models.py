@@ -17,6 +17,7 @@ class Project(db.Model):
     notification_emails = db.Column(db.Text)
     saved_keywords = db.Column(db.Text)  # JSON array; persisted per project for nightly crawl
     crawl_hour = db.Column(db.Integer)   # hour (1-4 UTC) when the nightly CronJob crawls this project
+    use_biorxiv = db.Column(db.Boolean, default=False)  # nightly crawl also searches bioRxiv; Find Papers starts from it
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     trashed_at = db.Column(db.DateTime, nullable=True)
 
@@ -182,7 +183,8 @@ class ProjectPaper(db.Model):
     origin_project_id = db.Column(db.Integer)
     # For origin "crawl": JSON list of how the crawl found it, one entry per way: {"via": "keyword", "name": k}
     # (no name when no keyword appears literally in title/abstract), {"via": "recommended"} (Semantic Scholar
-    # recommendations), {"via": "cites", "arxiv_id", "title"} (cites that My Collection paper). None: from
+    # recommendations), {"via": "biorxiv", "name": k} (bioRxiv keyword search), {"via": "cites", "arxiv_id",
+    # "title"} (cites that My Collection paper). None: from
     # before this was recorded
     found_via = db.Column(db.Text)
     # When a crawl last asked Semantic Scholar which papers cite this My Collection paper (and got an answer):
@@ -212,12 +214,18 @@ class ProjectPaper(db.Model):
         form (every cited paper) for its tooltip. "" when not recorded."""
         via = self.found_via_list
         names = [v["name"] for v in via if v["via"] == "keyword" and v.get("name")]
+        bio_names = [v["name"] for v in via if v["via"] == "biorxiv" and v.get("name")]
         cited = [v["title"] for v in via if v["via"] == "cites"]
         parts = []
         if names:
             parts.append(("keyword " if len(names) == 1 else "keywords ") + ", ".join(f'"{n}"' for n in names))
         elif any(v["via"] == "keyword" for v in via):
             parts.append("arXiv keyword search")
+        if bio_names:
+            parts.append(("bioRxiv keyword " if len(bio_names) == 1 else "bioRxiv keywords ")
+                         + ", ".join(f'"{n}"' for n in bio_names))
+        elif any(v["via"] == "biorxiv" for v in via):
+            parts.append("bioRxiv keyword search")
         if any(v["via"] == "recommended" for v in via):
             parts.append("Semantic Scholar recommendation")
         if cited:
@@ -233,6 +241,7 @@ class ProjectPaper(db.Model):
         via = self.found_via_list
         quote = lambda xs: ", ".join(f'"{x}"' for x in xs[:-1]) + (" and " if len(xs) > 1 else "") + f'"{xs[-1]}"'
         names = [v["name"] for v in via if v["via"] == "keyword" and v.get("name")]
+        bio_names = [v["name"] for v in via if v["via"] == "biorxiv" and v.get("name")]
         cited = [v["title"] for v in via if v["via"] == "cites"]
         out = []
         if names:
@@ -240,6 +249,9 @@ class ProjectPaper(db.Model):
                        " (arXiv keyword search).")
         elif any(v["via"] == "keyword" for v in via):
             out.append("The arXiv keyword search found it.")
+        if bio_names:
+            out.append(f"Its title or abstract contains your keyword{'s' if len(bio_names) > 1 else ''} "
+                       f"{quote(bio_names)} (bioRxiv keyword search).")
         if any(v["via"] == "recommended" for v in via):
             out.append("Semantic Scholar recommends it as similar to papers in My Collection.")
         if len(cited) == 1:

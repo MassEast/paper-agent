@@ -21,6 +21,7 @@ from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog, Scr
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
 from app.usage import counted, counts
+from app.biorxiv import search_biorxiv
 from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id
 
 API_KEY = os.environ.get("LLM_API_KEY")
@@ -1193,7 +1194,7 @@ def notify_crawl_complete(
     # Source breakdown rows: a paper found several ways counts in each of its rows, the total counts it once
     source_rows = ""
     if source_counts:
-        for via, label in EMAIL_SOURCE_LABELS:
+        for via, label in _email_source_rows(source_counts):
             c = source_counts.get(via) or {"found": 0, "added": 0}
             source_rows += (
                 f'<tr style="border-bottom: 1px solid #f3f4f6;">'
@@ -1252,6 +1253,9 @@ def notify_crawl_complete(
         year_span = f' <span style="font-weight: 400; color: #6b7280; font-size: 15px;">({year})</span>' if year else ""
         citation_count = getattr(top, "citation_count", None) or 0
         arxiv_id = getattr(top, "arxiv_id", "")
+        # A non-arXiv paper (bioRxiv) links to its own page
+        paper_link = (f"https://arxiv.org/abs/{arxiv_id}" if getattr(top, "is_arxiv", True)
+                      else (getattr(top, "pdf_url", None) or ""))
 
         authors_list = getattr(top, "authors_list", [])
         if not authors_list:
@@ -1326,8 +1330,8 @@ def notify_crawl_complete(
             + institutions_html
             + badges_html
             + f'<p style="margin: 10px 0 0 0; font-size: 12px;">'
-            f'<a href="https://arxiv.org/abs/{arxiv_id}" style="color: #7c3aed; text-decoration: none;">'
-            f'arxiv.org/abs/{arxiv_id}</a></p>'
+            f'<a href="{html.escape(paper_link)}" style="color: #7c3aed; text-decoration: none;">'
+            f'{html.escape(paper_link.removeprefix("https://"))}</a></p>'
             + main_contributions_html
             + '</div>'
         )
@@ -1392,7 +1396,7 @@ def notify_crawl_complete(
         + date_range_text
         + ''.join(f'\n{label}: {(source_counts.get(via) or {}).get("found", 0)} '
                   f'({(source_counts.get(via) or {}).get("added", 0)} added)'
-                  for via, label in EMAIL_SOURCE_LABELS if source_counts)
+                  for via, label in _email_source_rows(source_counts) if source_counts)
         + f'\nTotal found: {papers_found}\n'
         f'Added: {papers_added} · Skipped: {screened - papers_added}\n\n'
         f'View and tag papers: {dashboard_url}'
@@ -2081,13 +2085,13 @@ def gather_candidates(keywords: list[str], seeds: list[tuple[str, str]], date_fr
                       use_arxiv: bool = True, use_scholar: bool = True, use_citations: bool = True,
                       failed_keywords: Optional[list[str]] = None, warnings: Optional[list[str]] = None,
                       status: Optional[dict] = None, cite_seeds: Optional[list[tuple[str, str]]] = None,
-                      citations_checked: Optional[list[str]] = None) -> list[dict]:
-    """Candidates from the three sources, in this order: arXiv keyword search, Semantic Scholar
-    recommendations (seeded with My Collection), papers citing My Collection. A paper found more than
-    once comes back once, and its "found_via" lists every way it was found. seeds: collection_seeds(),
-    for the recommendations; cite_seeds: citation_seeds() for the citations (defaults to seeds).
-    citations_checked: see get_citing_papers. status (optional dict) gets "scholar_status" and
-    "citations" progress for the manual count step."""
+                      citations_checked: Optional[list[str]] = None, use_biorxiv: bool = False) -> list[dict]:
+    """Candidates from the sources, in this order: arXiv keyword search, bioRxiv keyword search (off unless
+    asked for), Semantic Scholar recommendations (seeded with My Collection), papers citing My Collection.
+    A paper found more than once comes back once, and its "found_via" lists every way it was found.
+    seeds: collection_seeds(), for the recommendations; cite_seeds: citation_seeds() for the citations
+    (defaults to seeds). citations_checked: see get_citing_papers. status (optional dict) gets
+    "scholar_status" and "citations" progress for the manual count step."""
     sources = []
     if use_arxiv:
         found = search_arxiv_with_full_papers(keywords, date_from, date_to, warnings=warnings,
@@ -2096,6 +2100,8 @@ def gather_candidates(keywords: list[str], seeds: list[tuple[str, str]], date_fr
             names = _matched_keywords(p, keywords)
             p["found_via"] = [{"via": "keyword", "name": k} for k in names] or [{"via": "keyword"}]
         sources.append(found)
+    if use_biorxiv:
+        sources.append(search_biorxiv(keywords, date_from, date_to, warnings=warnings))
     if use_scholar and seeds:
         if status is not None:
             status["scholar_status"] = "running"
@@ -2357,8 +2363,16 @@ def generate_summary_with_full_content(
         )
 
 
-EMAIL_SOURCE_LABELS = [("keyword", "arXiv keyword search"), ("recommended", "Semantic Scholar recommendations"),
+EMAIL_SOURCE_LABELS = [("keyword", "arXiv keyword search"), ("biorxiv", "bioRxiv keyword search"),
+                       ("recommended", "Semantic Scholar recommendations"),
                        ("cites", "Papers citing My Collection")]
+
+
+def _email_source_rows(source_counts: Optional[dict]) -> list[tuple[str, str]]:
+    """The sources an email lists: all of them, except bioRxiv when the crawl did not find or add anything
+    from it (most projects never search it)."""
+    return [(via, label) for via, label in EMAIL_SOURCE_LABELS
+            if via != "biorxiv" or any((source_counts or {}).get(via, {}).values())]
 
 
 def _count_sources(papers: list[dict], counts: Optional[dict] = None, key: str = "found") -> dict:
@@ -2438,6 +2452,7 @@ def run_crawl(
     use_citations: bool = True,
     defer_notification: bool = False,
     carry: Optional[dict] = None,
+    use_biorxiv: bool = False,
 ) -> Optional[CrawlLog]:
     """Run one crawl end-to-end: keywords → search → screen → summarize → enrich → notify.
 
@@ -2539,11 +2554,15 @@ def run_crawl(
         else:
             _log.info("[crawl] searching arXiv for %d keywords, date range %s–%s", len(keywords), date_from, date_to)
             citations_checked: list[str] = []
+            search_warnings: list[str] = []
             papers_data = gather_candidates(keywords, collection_seeds(_collection_pps), date_from, date_to, use_arxiv=use_arxiv,
                                             use_scholar=use_scholar, use_citations=use_citations,
                                             failed_keywords=failed_keywords, cite_seeds=citation_seeds(_collection_pps),
-                                            citations_checked=citations_checked)
+                                            citations_checked=citations_checked, warnings=search_warnings,
+                                            use_biorxiv=use_biorxiv)
             mark_citations_checked(project_id, citations_checked)
+            for w in search_warnings:
+                _log.warning("[crawl] search warning: %s", w)
             if failed_keywords:
                 _log.error("[crawl] arXiv search FAILED for %d/%d keywords: %s",
                            len(failed_keywords), len(keywords), failed_keywords)
@@ -2554,13 +2573,16 @@ def run_crawl(
             if pp.paper and pp.paper.arxiv_id
         }
         papers_data = [p for p in papers_data if base_arxiv_id(p["arxiv_id"]) not in existing_project_ids]
-        arxiv_papers_count = sum(1 for p in papers_data if p.get("source") != "semantic_scholar")
+        arxiv_papers_count = sum(1 for p in papers_data if p.get("source") not in ("semantic_scholar", "biorxiv"))
         scholar_papers_count = sum(1 for p in papers_data if p.get("source") == "semantic_scholar")
+        biorxiv_papers_count = sum(1 for p in papers_data if p.get("source") == "biorxiv")
         source_counts = _count_sources(papers_data)  # for the email; "added" filled in as papers are added
         crawl_log.papers_found = len(papers_data)
         sources = []
         if arxiv_papers_count > 0 or use_arxiv:
             sources.append("arxiv")
+        if use_biorxiv:
+            sources.append("biorxiv")
         if use_scholar:
             sources.append("ss")
         if use_citations:
@@ -2568,8 +2590,8 @@ def run_crawl(
         crawl_log.sources_used = ",".join(sources) if sources else "arxiv,ss"
         db.session.commit()  # persist papers_found before loop
 
-        _log.info("[crawl] found %d new papers (arXiv: %d, Scholar: %d) after dedup against existing",
-                  len(papers_data), arxiv_papers_count, scholar_papers_count)
+        _log.info("[crawl] found %d new papers (arXiv: %d, bioRxiv: %d, Scholar: %d) after dedup against existing",
+                  len(papers_data), arxiv_papers_count, biorxiv_papers_count, scholar_papers_count)
 
         if not papers_data:
             _log.info("[crawl] no new papers found for date range — nothing to process")
@@ -2664,7 +2686,8 @@ def run_crawl(
                     # Only fetch full paper content (arXiv HTML / PDF) for candidates that already passed
                     # the abstract-only quick check — avoids an outbound fetch per candidate for
                     # papers that get rejected immediately.
-                    paper_content = get_paper_content(arxiv_id)
+                    # A non-arXiv candidate (bioRxiv) is screened on its abstract: no full text is fetched
+                    paper_content = get_paper_content(arxiv_id) if not arxiv_id.startswith("web:") else None
 
                     deep_relevant, _reason, _, _, deep_tokens, why = _screen_paper_deep(
                         title=pd["title"],
@@ -2685,8 +2708,12 @@ def run_crawl(
                         return {"relevant": True, "paper_data": pd, "tokens": rel_tokens, "why": why,
                                 "screen_source": screen_source}
 
-                    figure_url, figure_caption = get_paper_figure(arxiv_id)
-                    citation_count = get_citation_count(arxiv_id)
+                    if arxiv_id.startswith("web:"):
+                        figure_url, figure_caption = None, None
+                        citation_count = _fetch_citations(f"DOI:{pd['doi']}") if pd.get("doi") else None
+                    else:
+                        figure_url, figure_caption = get_paper_figure(arxiv_id)
+                        citation_count = get_citation_count(arxiv_id)
                     summary_data, sum_model, sum_elapsed, sum_tokens = generate_summary_with_full_content(
                         title=pd["title"],
                         abstract=pd["abstract"],
@@ -2791,7 +2818,8 @@ def run_crawl(
                         pdf_url=pd["pdf_url"],
                         published_date=pd["published_date"],
                         year=pd["year"],
-                        source="arxiv",
+                        institutions=json.dumps(pd["institutions"]) if pd.get("institutions") else None,
+                        source="biorxiv" if pd.get("source") == "biorxiv" else "arxiv",
                         figure_url=result["figure_url"],
                         figure_caption=result["figure_caption"],
                         enrich_complete=1,
@@ -2852,10 +2880,10 @@ def run_crawl(
                 pp.paper for pp in ProjectPaper.query.filter_by(project_id=project_id).all()
                 if pp.paper
             ]
-            papers_needing_institutions = [p for p in all_new_papers if not p.institutions]
+            papers_needing_institutions = [p for p in all_new_papers if not p.institutions and p.is_arxiv]
             if papers_needing_institutions:
                 enrich_institutions_from_scholar(papers_needing_institutions)
-            papers_needing_pages = [p for p in all_new_papers if not p.page_count]
+            papers_needing_pages = [p for p in all_new_papers if not p.page_count and p.is_arxiv]
             if papers_needing_pages:
                 enrich_page_counts(papers_needing_pages)
             db.session.commit()
@@ -3240,6 +3268,7 @@ def start_crawl_async(
     use_arxiv: bool = True,
     use_scholar: bool = True,
     use_citations: bool = True,
+    use_biorxiv: bool = False,
 ):
     """Create a "running" CrawlLog synchronously, then hand off run_crawl to a daemon thread.
 
@@ -3270,6 +3299,7 @@ def start_crawl_async(
                 use_arxiv=use_arxiv,
                 use_scholar=use_scholar,
                 use_citations=use_citations,
+                use_biorxiv=use_biorxiv,
             )
 
     with app.app_context():
@@ -3404,6 +3434,7 @@ def backfill_missing_paper_metadata() -> int:
     # still be manually retried from its card in the UI (resets the counter to 0).
     needs_web_enrich = Paper.query.filter(
         Paper.arxiv_id.like("web:%"),
+        or_(Paper.source.is_(None), Paper.source != "biorxiv"),  # screened on the abstract, no PDF is read
         or_(Paper.page_count.is_(None), Paper.institutions.is_(None)),
         Paper.web_enrich_attempts < MAX_WEB_ENRICH_ATTEMPTS,
     ).limit(20).all()
