@@ -148,6 +148,7 @@ def create_app():
             "ALTER TABLE project_papers ADD COLUMN screen_source TEXT",
             "ALTER TABLE project_papers ADD COLUMN trashed_reason TEXT",
             "ALTER TABLE project_papers ADD COLUMN found_via TEXT",
+            "ALTER TABLE project_papers ADD COLUMN citations_checked_at DATETIME",
             STALE_PAPER_TEXT_SQL,
             "CREATE INDEX IF NOT EXISTS idx_llm_usage_project ON llm_usage(project_id, kind)",
             USAGE_BACKFILL_SQL,

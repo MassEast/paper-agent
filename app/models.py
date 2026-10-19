@@ -185,6 +185,9 @@ class ProjectPaper(db.Model):
     # recommendations), {"via": "cites", "arxiv_id", "title"} (cites that My Collection paper). None: from
     # before this was recorded
     found_via = db.Column(db.Text)
+    # When a crawl last asked Semantic Scholar which papers cite this My Collection paper (and got an answer):
+    # the citations source checks the CITATION_MAX_SEEDS checked longest ago first (citation_seeds)
+    citations_checked_at = db.Column(db.DateTime, nullable=True)
 
     __table_args__ = (
         db.UniqueConstraint("project_id", "paper_id"),

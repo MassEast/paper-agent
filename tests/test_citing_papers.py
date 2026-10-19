@@ -75,6 +75,28 @@ def test_pages_on_only_while_the_page_still_reaches_into_the_window(scholar):
     assert len(found) == 101
 
 
+def test_checks_only_the_first_capped_seeds_and_reports_which_got_an_answer(scholar, monkeypatch):
+    pages, seen = scholar
+    monkeypatch.setattr(crawl, "CITATION_MAX_SEEDS", 3)
+    monkeypatch.setattr(crawl.time, "sleep", lambda s: None)
+    pages["2401.00001"] = [{"data": []}]
+    real = crawl._http_client
+
+    def rate_limited_for_one_seed(**kw):
+        def handler(request):
+            if "2401.00002" in request.url.path:
+                return httpx.Response(429, json={"message": "Too Many Requests"})
+            return httpx.Response(200, json={"data": []}) if "2401.00001" in request.url.path else httpx.Response(404)
+        return httpx.Client(transport=httpx.MockTransport(handler), **kw)
+
+    monkeypatch.setattr(crawl, "_http_client", rate_limited_for_one_seed)
+    checked = []
+    crawl.get_citing_papers([(f"2401.{i:05d}", f"Seed {i}") for i in range(1, 6)], D_FROM, D_TO, checked=checked)
+    # 00001 answered, 00002 given up on after 429s (stays first in line next time), 00003 unknown (404, counts
+    # as checked); 00004 and 00005 are over the cap
+    assert checked == ["2401.00001", "2401.00003"]
+
+
 def test_keyword_names_are_found_in_title_and_abstract():
     paper = {"title": "Sparse Attention in LMs", "abstract": "We study layer-wise  pruning of experts."}
     assert crawl._matched_keywords(paper, ["sparse attention", "layer wise pruning", "state space"]) == [
@@ -217,3 +239,45 @@ def test_found_via_tip_says_in_words_how_each_source_found_it():
         "Semantic Scholar recommends it as similar to papers in My Collection. "
         'It cites "Seed Paper A" from My Collection.')
     assert ProjectPaper(found_via='[{"via": "keyword"}]').found_via_tip() == "The arXiv keyword search found it."
+
+
+def test_the_citations_source_rotates_through_a_large_collection(app, proj, scholar, monkeypatch):
+    """Each crawl checks the CITATION_MAX_SEEDS My Collection papers checked longest ago."""
+    from tests.test_crawl import MockPatches
+
+    pages, seen = scholar
+    monkeypatch.setattr(crawl, "CITATION_MAX_SEEDS", 2)
+    with app.app_context():
+        for i in range(2, 6):
+            paper = Paper(arxiv_id=f"2401.0000{i}", title=f"Seed {i}", abstract="x", source="arxiv")
+            db.session.add(paper)
+            db.session.flush()
+            db.session.add(ProjectPaper(project_id=proj, paper_id=paper.id, manual_tag="related"))
+        db.session.commit()
+        per_crawl = []
+        for _ in range(3):
+            seen.clear()
+            real_citing = crawl.get_citing_papers  # MockPatches stubs it; here the mocked Scholar answers
+            with MockPatches([]), patch.object(crawl, "get_citing_papers", real_citing):
+                crawl.run_crawl(proj, D_FROM, D_TO, keywords_override=["kw"])
+            per_crawl.append([s[0] for s in seen])
+    assert per_crawl == [["2401.00001", "2401.00002"], ["2401.00003", "2401.00004"], ["2401.00005", "2401.00001"]]
+
+
+def test_the_find_papers_count_step_also_marks_the_seeds_it_checked(app, proj, client, scholar):
+    import time as _time
+
+    pages, seen = scholar
+    with client.session_transaction() as sess:
+        sess["logged_in"] = True
+    r = client.post("/projects/citations-proj/arxiv-count", data={
+        "keywords_json": '["kw"]', "date_from": str(D_FROM), "date_to": str(D_TO), "use_arxiv": "0", "use_scholar": "0"})
+    task_id = r.get_json()["task_id"]
+    for _ in range(100):
+        status = client.get(f"/projects/citations-proj/arxiv-count-status/{task_id}").get_json()
+        if status["status"] != "running":
+            break
+        _time.sleep(0.05)
+    assert status["status"] == "done" and seen == [("2401.00001", 0)]
+    with app.app_context():
+        assert ProjectPaper.query.filter_by(project_id=proj).one().citations_checked_at is not None

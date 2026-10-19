@@ -57,8 +57,8 @@ flowchart TD
 
     CAND -->|"LLM: quick relevance check<br/>(vs. research interest +<br/>Collection excerpts)"| Q
     SUM --> DB
-    COLL -.->|"seeds"| SS
-    COLL -.->|"seeds"| CITE
+    COLL -.->|"seeds<br/>(up to 100)"| SS
+    COLL -.->|"seeds (50 per crawl,<br/>in turn)"| CITE
 
     classDef external fill:#2563eb,color:#fff,stroke:#1e40af,stroke-width:1px
     classDef llm fill:#7c3aed,color:#fff,stroke:#5b21b6,stroke-width:1px
@@ -72,7 +72,7 @@ flowchart TD
     class DROP,TRASH dropped
 ```
 
-The dashed edges are a feedback loop: papers you've already curated into My Collection seed Semantic Scholar's recommendations, and every one of them is also checked for new papers that cite it. The recommendations are asked for in groups of 10 seed papers (up to 100, best-tagged first): Semantic Scholar returns at most 500 per request, ranked by similarity over the last few months rather than by date, so a single request has only a few papers from the last days among them; each smaller group gets its own 500, and together they reach many more recent papers. A citing paper isn't necessarily relevant (widely cited papers are cited by work from every corner of the field), so these candidates go through the same screening as the rest. Collection papers also quietly inform two LLM steps not drawn above — keyword extraction and relevance screening both get calibration excerpts from your Collection too — so **the tool gets better targeted the more you curate**.
+The dashed edges are a feedback loop: papers you've already curated into My Collection seed Semantic Scholar's recommendations, and they are also checked for new papers that cite them (up to 50 per crawl, the ones checked longest ago first, so a larger collection is covered in turn over a few nights). The recommendations are asked for in groups of 10 seed papers (up to 100, best-tagged first): Semantic Scholar returns at most 500 per request, ranked by similarity over the last few months rather than by date, so a single request has only a few papers from the last days among them; each smaller group gets its own 500, and together they reach many more recent papers. A citing paper isn't necessarily relevant (widely cited papers are cited by work from every corner of the field), so these candidates go through the same screening as the rest. Collection papers also quietly inform two LLM steps not drawn above — keyword extraction and relevance screening both get calibration excerpts from your Collection too — so **the tool gets better targeted the more you curate**.
 
 Each paper card shows a neutral AI summary (shared by every project the paper is in) and, per project, a short **"Why it's relevant"** line that the deep relevance check writes against that project's research interest. A paper that fits a different project can be **copied or moved** into that project's My Collection from its card. After you change the research interest, **Re-screen** in New Papers re-checks the papers still waiting there and moves the ones that no longer fit to Trash, where you can restore them.
 

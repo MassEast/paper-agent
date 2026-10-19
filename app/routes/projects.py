@@ -20,6 +20,8 @@ from app.crawl import (
     extract_keywords_with_usage,
     gather_candidates,
     collection_seeds,
+    citation_seeds,
+    mark_citations_checked,
     _collection_tag_tier,
     arxiv_queue_depth,
     start_collection_add_async,
@@ -334,13 +336,16 @@ def arxiv_count(slug):
     # My Collection (seeds for recommendations and citations) and existing paper IDs before the thread starts
     project_obj = Project.query.filter_by(slug=slug).first()
     seeds = []
+    cite_seeds = []
     existing_arxiv_ids = set()
     if project_obj:
         for pp in project_obj.papers:
             if pp.paper and pp.paper.arxiv_id:
                 existing_arxiv_ids.add(base_arxiv_id(pp.paper.arxiv_id))
-        seeds = collection_seeds(sorted([pp for pp in project_obj.papers if not pp.trashed_at and pp.manual_tag],
-                                        key=_collection_tag_tier))
+        _collection_pps = sorted([pp for pp in project_obj.papers if not pp.trashed_at and pp.manual_tag],
+                                 key=_collection_tag_tier)
+        seeds = collection_seeds(_collection_pps)
+        cite_seeds = citation_seeds(_collection_pps)
 
     # Papers rejected earlier under the *current* screening context — re-screening them is an instant
     # cache hit (no LLM call), so the UI reports them separately from genuinely new papers.
@@ -355,12 +360,19 @@ def arxiv_count(slug):
         }
 
     search_warnings: list[str] = []
+    _app = current_app._get_current_object()
+    project_id = project_obj.id if project_obj else None
 
     def _run():
         try:
+            citations_checked: list[str] = []
             all_papers = gather_candidates(keywords, seeds, date_from, date_to, use_arxiv=use_arxiv,
                                            use_scholar=use_scholar, use_citations=use_citations,
-                                           warnings=search_warnings, status=_arxiv_count_tasks[task_id])
+                                           warnings=search_warnings, status=_arxiv_count_tasks[task_id],
+                                           cite_seeds=cite_seeds, citations_checked=citations_checked)
+            if project_id is not None:
+                with _app.app_context():
+                    mark_citations_checked(project_id, citations_checked)
             # Subtract papers already in this project (any state: new/curated/trash)
             already_known = sum(1 for p in all_papers if base_arxiv_id(p["arxiv_id"]) in existing_arxiv_ids)
             new_papers = [p for p in all_papers if base_arxiv_id(p["arxiv_id"]) not in existing_arxiv_ids]

@@ -1958,13 +1958,25 @@ def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = RECO
     return list(papers.values())
 
 
+# At most this many My Collection papers are checked for new citing papers per crawl, the ones checked longest
+# ago first (citation_seeds), so a larger collection is covered in turn over a few nights. Semantic Scholar
+# answers many of these calls with 429s at night, so checking a large collection in one crawl took hours and
+# held up the projects scheduled after it.
+CITATION_MAX_SEEDS = 50
+
+
 def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: date,
-                      progress=None) -> list[dict]:
+                      progress=None, checked: Optional[list[str]] = None) -> list[dict]:
     """arXiv papers published in [date_from, date_to] that cite any of the seeds ((arXiv id, title) pairs,
-    the project's My Collection). One Semantic Scholar call per seed: it lists citing papers newest first,
-    so a page usually covers the whole window; it pages on while the page still reaches into the window.
-    A paper citing several seeds comes back once, with one found_via entry per seed. Same dict shape as
-    get_semantic_scholar_recommendations. progress(i, n) is called after each seed."""
+    from citation_seeds; only the first CITATION_MAX_SEEDS are used). One Semantic Scholar call per seed: it
+    lists citing papers newest first, so a page usually covers the whole window; it pages on while the page
+    still reaches into the window. A paper citing several seeds comes back once, with one found_via entry per
+    seed. Same dict shape as get_semantic_scholar_recommendations. progress(i, n) is called after each seed.
+    checked (optional list) gets the id of every seed Semantic Scholar answered for (not one it gave up on
+    with 429s), for mark_citations_checked."""
+    if len(seeds) > CITATION_MAX_SEEDS:
+        _log.info("[citations] %d My Collection papers, checking the %d checked longest ago", len(seeds), CITATION_MAX_SEEDS)
+        seeds = seeds[:CITATION_MAX_SEEDS]
     found: dict[str, dict] = {}
     started = time.time()
     for i, (seed_id, seed_title) in enumerate(seeds, 1):
@@ -1984,6 +1996,8 @@ def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: da
                 wait = 15 * 3 ** attempt  # 15s, 45s, 135s
                 _log.warning("[citations] rate limited, retrying in %ds (attempt %d/4)", wait, attempt + 1)
                 time.sleep(wait)
+            if r.status_code != 429 and checked is not None and seed_id not in checked:
+                checked.append(seed_id)
             if r.status_code != 200:  # 404: Semantic Scholar doesn't know the seed
                 _log.info("[citations] %s: Semantic Scholar answered %d", seed_id, r.status_code)
                 break
@@ -2042,14 +2056,38 @@ def collection_seeds(collection: list) -> list[tuple[str, str]]:
     return [(pp.paper.arxiv_id, pp.paper.title) for pp in collection if pp.paper and pp.paper.is_arxiv]
 
 
+def citation_seeds(collection: list) -> list[tuple[str, str]]:
+    """collection_seeds() ordered for the citations source: never checked first (in collection order), then
+    the ones checked longest ago (ProjectPaper.citations_checked_at)."""
+    ordered = sorted(collection, key=lambda pp: (pp.citations_checked_at is not None,
+                                                 pp.citations_checked_at or datetime.min))
+    return collection_seeds(ordered)
+
+
+def mark_citations_checked(project_id: int, arxiv_ids: list[str]) -> None:
+    """Stamp the My Collection papers the citations source just got an answer for, so the next crawl starts
+    with the others (citation_seeds)."""
+    if not arxiv_ids:
+        return
+    ids = {base_arxiv_id(a) for a in arxiv_ids}
+    now = datetime.utcnow()
+    for pp in ProjectPaper.query.filter_by(project_id=project_id).all():
+        if pp.paper and base_arxiv_id(pp.paper.arxiv_id) in ids:
+            pp.citations_checked_at = now
+    db.session.commit()
+
+
 def gather_candidates(keywords: list[str], seeds: list[tuple[str, str]], date_from: date, date_to: date,
                       use_arxiv: bool = True, use_scholar: bool = True, use_citations: bool = True,
                       failed_keywords: Optional[list[str]] = None, warnings: Optional[list[str]] = None,
-                      status: Optional[dict] = None) -> list[dict]:
+                      status: Optional[dict] = None, cite_seeds: Optional[list[tuple[str, str]]] = None,
+                      citations_checked: Optional[list[str]] = None) -> list[dict]:
     """Candidates from the three sources, in this order: arXiv keyword search, Semantic Scholar
     recommendations (seeded with My Collection), papers citing My Collection. A paper found more than
-    once comes back once, and its "found_via" lists every way it was found. seeds: collection_seeds().
-    status (optional dict) gets "scholar_status" and "citations" progress for the manual count step."""
+    once comes back once, and its "found_via" lists every way it was found. seeds: collection_seeds(),
+    for the recommendations; cite_seeds: citation_seeds() for the citations (defaults to seeds).
+    citations_checked: see get_citing_papers. status (optional dict) gets "scholar_status" and
+    "citations" progress for the manual count step."""
     sources = []
     if use_arxiv:
         found = search_arxiv_with_full_papers(keywords, date_from, date_to, warnings=warnings,
@@ -2067,11 +2105,13 @@ def gather_candidates(keywords: list[str], seeds: list[tuple[str, str]], date_fr
         for p in recs:
             p["found_via"] = [{"via": "recommended"}]
         sources.append(recs)
-    if use_citations and seeds:
+    cite_seeds = seeds if cite_seeds is None else cite_seeds
+    if use_citations and cite_seeds:
         def _progress(i, n):
             if status is not None:
                 status["citations"] = f"{i}/{n}"
-        sources.append(get_citing_papers(seeds, date_from, date_to, progress=_progress))
+        sources.append(get_citing_papers(cite_seeds, date_from, date_to, progress=_progress,
+                                         checked=citations_checked))
 
     merged: dict[str, dict] = {}
     for found in sources:
@@ -2498,9 +2538,12 @@ def run_crawl(
             papers_data = cached_papers
         else:
             _log.info("[crawl] searching arXiv for %d keywords, date range %s–%s", len(keywords), date_from, date_to)
+            citations_checked: list[str] = []
             papers_data = gather_candidates(keywords, collection_seeds(_collection_pps), date_from, date_to, use_arxiv=use_arxiv,
                                             use_scholar=use_scholar, use_citations=use_citations,
-                                            failed_keywords=failed_keywords)
+                                            failed_keywords=failed_keywords, cite_seeds=citation_seeds(_collection_pps),
+                                            citations_checked=citations_checked)
+            mark_citations_checked(project_id, citations_checked)
             if failed_keywords:
                 _log.error("[crawl] arXiv search FAILED for %d/%d keywords: %s",
                            len(failed_keywords), len(keywords), failed_keywords)
