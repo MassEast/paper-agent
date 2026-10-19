@@ -209,6 +209,8 @@ def test_email_counts_each_source_with_how_many_were_added(app, proj):
                 patch.object(crawl, "send_notification", return_value=True) as send:
             crawl.run_crawl(proj, D_FROM, D_TO, keywords_override=["kw"])
     subject, text = send.call_args.args[:2]
+    # "18 (1 added)" stays on one line next to a long source name
+    assert len(re.findall(r'white-space: nowrap;">\d+<span', send.call_args.kwargs["content_html"])) == 3
     html = re.sub(r"<[^>]+>", " ", send.call_args.kwargs["content_html"])
     html = re.sub(r"\s+", " ", html)
     assert "arXiv keyword search 1 (1 added)" in html

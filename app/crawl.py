@@ -1198,7 +1198,7 @@ def notify_crawl_complete(
             source_rows += (
                 f'<tr style="border-bottom: 1px solid #f3f4f6;">'
                 f'<td style="padding: 7px 0; color: #6b7280;">{label}</td>'
-                f'<td style="padding: 7px 0; text-align: right; font-weight: 600; color: #111827;">{c["found"]}'
+                f'<td style="padding: 7px 0; text-align: right; font-weight: 600; color: #111827; white-space: nowrap;">{c["found"]}'
                 f'<span style="font-weight: 400; color: #6b7280;"> ({c["added"]} added)</span></td>'
                 f'</tr>'
             )
