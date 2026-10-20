@@ -699,13 +699,17 @@
                             <strong>Semantic Scholar recommendations</strong> (if you have papers in My
                             Collection): fetches papers similar to your collection via the Semantic Scholar
                             recommendations API, from up to 100 My Collection papers in groups of 10 (the API ranks by
-                            similarity, not date, so smaller groups reach more recent papers). Only recommendations
-                            that have an arXiv version and fall in your date range are kept.
+                            similarity, not date, so smaller groups reach more recent papers). A My Collection paper
+                            that is not on arXiv is used by its DOI (or found on Semantic Scholar by its title). The
+                            recommendations in your date range are kept: arXiv papers, bioRxiv preprints (read from
+                            their PDF) and journal papers with a DOI and an abstract (judged on the abstract, unless
+                            their PDF is openly available from a site on the open-access list).
                         </li>
                         <li>
-                            <strong>Papers citing My Collection</strong> (the "Citations" source): for each arXiv
-                            paper in My Collection (up to 50 per crawl, the ones checked longest ago first), asks Semantic Scholar
-                            which papers cite it, and keeps the ones on arXiv dated in your date range. One request per
+                            <strong>Papers citing My Collection</strong> (the "Citations" source): for each paper
+                            in My Collection that Semantic Scholar knows (up to 50 per crawl, the ones checked longest ago
+                            first), asks Semantic Scholar which papers cite it, and keeps the ones dated in your date
+                            range, the same kinds as for the recommendations. One request per
                             My Collection paper (the groups of 10 are only for the recommendations), so this is the slowest source.
                             A paper found by several sources is screened once; its card says how it was found
                             ("Found via keyword …", "Semantic Scholar recommendation", "cites …").

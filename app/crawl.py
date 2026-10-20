@@ -4,6 +4,7 @@ import re
 import threading
 import os
 import time
+import hashlib
 import html
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, date, timedelta
@@ -21,7 +22,7 @@ from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog, Scr
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
 from app.usage import counted, counts
-from app.biorxiv import search_biorxiv
+from app.biorxiv import search_biorxiv, biorxiv_paper_id, PDF_URL as BIORXIV_PDF_URL
 from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id
 
 API_KEY = os.environ.get("LLM_API_KEY")
@@ -198,6 +199,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                             paper.year = pub_date.year
                             paper.categories = json.dumps(r.categories)
                             paper.source = "manual"
+                            paper.doi = paper.doi or r.doi or None  # the journal version's, when the authors gave one
                             db.session.commit()
                             _log.info("[collection-add] arXiv metadata fetched for %s: %s", arxiv_id, r.title)
                 except Exception as e:
@@ -446,6 +448,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
             if info.get("page_count"):
                 paper.page_count = info["page_count"]
             paper.source = "web"
+            paper.doi = info.get("doi") or doi_from_url(url) or doi_from_url(paper.pdf_url)
             db.session.commit()
             _log.info("[web-add] stored web paper: %s → %s (pdf=%s)", url, page_title, paper.pdf_url)
 
@@ -1569,6 +1572,7 @@ def _fetch_arxiv_window(keywords: list[str], d_from: date, d_to: date, max_resul
                             "published_date": pub_date,
                             "year": pub_date.year,
                             "categories": [cat for cat in result.categories],
+                            "doi": result.doi or None,  # the journal version's, when the authors gave one
                         }
                     )
                 break  # success — don't retry
@@ -1896,6 +1900,44 @@ def select_featured_paper_llm(papers: list, research_interest: str) -> tuple:
     return papers[0], 0
 
 
+SCHOLAR_PAPER_FIELDS = "externalIds,title,authors,abstract,year,publicationDate,venue,openAccessPdf"
+
+
+def journal_paper_id(doi: str) -> str:
+    """Id of a non-arXiv, non-bioRxiv paper found through Semantic Scholar (a journal article), from its DOI.
+    No slash or dot: it goes into URLs and DOM ids."""
+    return "web:doi-" + hashlib.sha256(doi.lower().encode()).hexdigest()[:12]
+
+
+def _scholar_paper(item: dict, pub_date: Optional[date]) -> Optional[dict]:
+    """A Semantic Scholar result as a candidate. An arXiv paper by its arXiv id; a bioRxiv preprint like a
+    bioRxiv keyword find (same id, read from its PDF on bioRxiv); any other paper with a DOI and an abstract
+    (mostly journal articles, most of what bio and chemistry seeds bring) under journal_paper_id, read from
+    its open-access PDF only if that is on OPEN_ACCESS_PDF_DOMAINS, else screened on the abstract. None for
+    the rest (no DOI, or no abstract to screen)."""
+    ext = item.get("externalIds") or {}
+    aid, doi = ext.get("ArXiv"), ext.get("DOI") or None
+    paper = {
+        "title": item.get("title") or "",
+        "authors": [a.get("name", "") for a in (item.get("authors") or [])],
+        "abstract": item.get("abstract") or "",
+        "doi": doi,
+        "published_date": pub_date,
+        "year": pub_date.year if pub_date else (item.get("year") or None),
+        "categories": [],
+        "source": "semantic_scholar",
+    }
+    if aid:
+        return {**paper, "arxiv_id": base_arxiv_id(aid), "pdf_url": f"https://arxiv.org/pdf/{base_arxiv_id(aid)}"}
+    if not doi or not paper["abstract"]:
+        return None
+    if (item.get("venue") or "").lower() == "biorxiv":
+        return {**paper, "arxiv_id": biorxiv_paper_id(doi), "pdf_url": BIORXIV_PDF_URL.format(doi=doi, version=1)}
+    oa = (item.get("openAccessPdf") or {}).get("url") or ""
+    return {**paper, "arxiv_id": journal_paper_id(doi),
+            "pdf_url": oa if oa and _is_open_access_pdf_domain(oa) else f"https://doi.org/{doi}"}
+
+
 # Semantic Scholar's recommendations endpoint takes at most 100 seed papers and returns at most 500
 # recommendations per call, ranked by similarity, not date, and spread over the last few months. The crawl keeps
 # only the ones published in its window (5 days nightly), so a single call with all seeds has few of those.
@@ -1908,11 +1950,12 @@ RECOMMENDATION_LIMIT = 500
 
 
 def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = RECOMMENDATION_LIMIT) -> list[dict]:
-    """Recommended arXiv papers for the seed papers (best first, the first RECOMMENDATION_MAX_SEEDS used), asked
-    for in groups of RECOMMENDATION_GROUP_SIZE seeds with `limit` results each (why: see the comment above).
+    """Recommended papers (_scholar_paper) for the seeds (collection_seeds, best first, the first
+    RECOMMENDATION_MAX_SEEDS used), asked for in groups of RECOMMENDATION_GROUP_SIZE seeds with `limit` results
+    each (why: see the comment above).
     A paper recommended for several groups comes back once. Returns a list of paper dicts compatible with the
     arXiv search result format."""
-    seeds = [f"ArXiv:{base_arxiv_id(aid)}" for aid in arxiv_ids[:RECOMMENDATION_MAX_SEEDS]]
+    seeds = [_scholar_ref(s) for s in arxiv_ids[:RECOMMENDATION_MAX_SEEDS]]
     groups = [seeds[i:i + RECOMMENDATION_GROUP_SIZE] for i in range(0, len(seeds), RECOMMENDATION_GROUP_SIZE)]
     papers: dict[str, dict] = {}
     for g, group in enumerate(groups, 1):
@@ -1923,7 +1966,7 @@ def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = RECO
                         r = http.post(
                             "https://api.semanticscholar.org/recommendations/v1/papers/",
                             json={"positivePaperIds": group},
-                            params={"fields": "externalIds,title,authors,abstract,year,publicationDate", "limit": limit},
+                            params={"fields": SCHOLAR_PAPER_FIELDS, "limit": limit},
                             headers=_scholar_headers(),
                         )
                 if r.status_code != 429 or attempt == 3:
@@ -1936,30 +1979,19 @@ def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = RECO
                              r.status_code, g, len(groups), r.text[:200])
                 continue
             for item in r.json().get("recommendedPapers", []):
-                aid = (item.get("externalIds") or {}).get("ArXiv")
-                if not aid or base_arxiv_id(aid) in papers:
-                    continue  # skip non-arXiv papers and repeats from earlier groups
                 pub_date_str = item.get("publicationDate") or ""
                 try:
                     pub_date = date.fromisoformat(pub_date_str) if pub_date_str else None
                 except ValueError:
                     pub_date = None
-                papers[base_arxiv_id(aid)] = {
-                    "arxiv_id": aid,
-                    "title": item.get("title", ""),
-                    "authors": [a.get("name", "") for a in (item.get("authors") or [])],
-                    "abstract": item.get("abstract") or "",
-                    "pdf_url": f"https://arxiv.org/pdf/{aid}.pdf",
-                    "published_date": pub_date,
-                    "year": pub_date.year if pub_date else (item.get("year") or None),
-                    "categories": [],
-                    "source": "semantic_scholar",
-                }
+                paper = _scholar_paper(item, pub_date)
+                if paper and paper["arxiv_id"] not in papers:  # repeats from earlier groups come back once
+                    papers[paper["arxiv_id"]] = paper
         except Exception as e:
             _log.warning("[Scholar] Recommendations error for group %d/%d: %s", g, len(groups), e)
-        _log.info("[Scholar] recommendations: group %d/%d done, %d arXiv papers so far", g, len(groups), len(papers))
+        _log.info("[Scholar] recommendations: group %d/%d done, %d papers so far", g, len(groups), len(papers))
 
-    _log.info("[Scholar] Got %d arXiv recommendations from %d seeds in %d groups", len(papers), len(seeds), len(groups))
+    _log.info("[Scholar] Got %d recommendations from %d seeds in %d groups", len(papers), len(seeds), len(groups))
     return list(papers.values())
 
 
@@ -1972,8 +2004,8 @@ CITATION_MAX_SEEDS = 50
 
 def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: date,
                       progress=None, checked: Optional[list[str]] = None) -> list[dict]:
-    """arXiv papers published in [date_from, date_to] that cite any of the seeds ((arXiv id, title) pairs,
-    from citation_seeds; only the first CITATION_MAX_SEEDS are used). One Semantic Scholar call per seed: it
+    """Papers (_scholar_paper) published in [date_from, date_to] that cite any of the seeds ((seed, title)
+    pairs, from citation_seeds; only the first CITATION_MAX_SEEDS are used). One Semantic Scholar call per seed: it
     lists citing papers newest first, so a page usually covers the whole window; it pages on while the page
     still reaches into the window. A paper citing several seeds comes back once, with one found_via entry per
     seed. Same dict shape as get_semantic_scholar_recommendations. progress(i, n) is called after each seed.
@@ -1991,9 +2023,8 @@ def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: da
                 with _ScholarLockCtx():
                     with _http_client(timeout=httpx.Timeout(30.0)) as http:
                         r = http.get(
-                            f"https://api.semanticscholar.org/graph/v1/paper/ArXiv:{base_arxiv_id(seed_id)}/citations",
-                            params={"fields": "externalIds,title,authors,abstract,year,publicationDate",
-                                    "limit": 100, "offset": offset},
+                            f"https://api.semanticscholar.org/graph/v1/paper/{_scholar_ref(seed_id)}/citations",
+                            params={"fields": SCHOLAR_PAPER_FIELDS, "limit": 100, "offset": offset},
                             headers=_scholar_headers(),
                         )
                 if r.status_code != 429 or attempt == 3:
@@ -2015,22 +2046,14 @@ def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: da
                 except ValueError:
                     continue
                 oldest = pub_date if oldest is None else min(oldest, pub_date)
-                aid = (item.get("externalIds") or {}).get("ArXiv")
-                if not aid or not (date_from <= pub_date <= date_to):
+                if not (date_from <= pub_date <= date_to):
                     continue
-                via = {"via": "cites", "arxiv_id": base_arxiv_id(seed_id), "title": seed_title}
-                paper = found.setdefault(base_arxiv_id(aid), {
-                    "arxiv_id": base_arxiv_id(aid),
-                    "title": item.get("title") or "",
-                    "authors": [a.get("name", "") for a in (item.get("authors") or [])],
-                    "abstract": item.get("abstract") or "",
-                    "pdf_url": f"https://arxiv.org/pdf/{base_arxiv_id(aid)}",
-                    "published_date": pub_date,
-                    "year": pub_date.year,
-                    "categories": [],
-                    "source": "semantic_scholar",
-                    "found_via": [],
-                })
+                cand = _scholar_paper(item, pub_date)
+                if not cand:
+                    continue
+                via = ({"via": "cites", "seed": seed_id, "title": seed_title} if _scholar_ref(seed_id) == seed_id
+                       else {"via": "cites", "arxiv_id": base_arxiv_id(seed_id), "title": seed_title})
+                paper = found.setdefault(cand["arxiv_id"], {**cand, "found_via": []})
                 if via not in paper["found_via"]:
                     paper["found_via"].append(via)
             if body.get("next") is None or oldest is None or oldest < date_from:
@@ -2042,7 +2065,7 @@ def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: da
             elapsed = time.time() - started
             _log.info("[citations] %d/%d seeds, %d citing papers so far, %.0fs (ETA %.0fs)",
                       i, len(seeds), len(found), elapsed, elapsed / i * (len(seeds) - i))
-    _log.info("[citations] %d arXiv papers in %s–%s cite %d My Collection papers", len(found), date_from, date_to, len(seeds))
+    _log.info("[citations] %d papers in %s–%s cite %d My Collection papers", len(found), date_from, date_to, len(seeds))
     return list(found.values())
 
 
@@ -2055,10 +2078,74 @@ def _matched_keywords(paper: dict, keywords: list[str]) -> list[str]:
     return [k for k in keywords if norm(k).strip() and norm(k).strip() in text]
 
 
+_DOI_RE = re.compile(r"10\.\d{4,9}/[^\s?&#]+")
+
+
+def doi_from_url(url: Optional[str]) -> Optional[str]:
+    """The DOI in a paper's URL (doi.org/10..., a publisher path or query with the DOI in it), or None."""
+    m = _DOI_RE.search(url or "")
+    if not m:
+        return None
+    doi = re.sub(r"/(pdf|full|abstract|epdf)$", "", m.group(0))
+    doi = re.sub(r"(v\d+)?(\.full)?(\.pdf)?$", "", doi) if doi.startswith(("10.1101/", "10.64898/")) else doi  # bioRxiv
+    return re.sub(r"\.pdf$", "", doi).rstrip("/.")
+
+
+def scholar_seed(paper) -> Optional[str]:
+    """How Semantic Scholar knows a My Collection paper, as a seed: its arXiv id; else "DOI:<doi>"; else the
+    Semantic Scholar id found by title (resolve_scholar_ids); None if none of these (a blog post, say)."""
+    if paper.is_arxiv:
+        return base_arxiv_id(paper.arxiv_id)
+    if paper.doi:
+        return f"DOI:{paper.doi}"
+    return paper.semantic_scholar_id or None
+
+
+def _scholar_ref(seed: str) -> str:
+    """The Semantic Scholar paper id for a seed: "ArXiv:<id>" for an arXiv id; a "DOI:" or Semantic Scholar
+    id as it is."""
+    if seed.startswith("DOI:") or re.fullmatch(r"[0-9a-f]{40}", seed):
+        return seed
+    return f"ArXiv:{base_arxiv_id(seed)}"
+
+
+def resolve_scholar_ids(collection: list) -> None:
+    """Give the non-arXiv My Collection papers a seed for the Semantic Scholar sources: the DOI in their URL,
+    else a Semantic Scholar title match (checked with _titles_match). Each paper is looked up once
+    (scholar_lookup_at); after a 429 it is left for the next crawl."""
+    for pp in collection:
+        paper = pp.paper
+        if not paper or paper.is_arxiv or paper.doi or paper.semantic_scholar_id or paper.scholar_lookup_at:
+            continue
+        doi = doi_from_url(paper.pdf_url)
+        if doi:
+            paper.doi = doi
+            continue
+        try:
+            with _ScholarLockCtx():
+                with _http_client(timeout=httpx.Timeout(30.0)) as http:
+                    r = http.get("https://api.semanticscholar.org/graph/v1/paper/search/match",
+                                 params={"query": paper.title, "fields": "title,externalIds"},
+                                 headers=_scholar_headers())
+        except httpx.HTTPError as e:
+            _log.warning("[Scholar] title lookup failed for %s: %s", paper.arxiv_id, e)
+            continue
+        if r.status_code == 429:
+            continue
+        paper.scholar_lookup_at = datetime.utcnow()
+        match = ((r.json().get("data") or [{}])[0]) if r.status_code == 200 else {}
+        if match.get("paperId") and _titles_match(paper.title, match.get("title") or ""):
+            paper.semantic_scholar_id = match["paperId"]
+            paper.doi = (match.get("externalIds") or {}).get("DOI") or None
+        _log.info("[Scholar] %s %r: %s", paper.arxiv_id, paper.title[:60],
+                  f"found ({paper.doi or paper.semantic_scholar_id})" if paper.semantic_scholar_id else "not found")
+    db.session.commit()
+
+
 def collection_seeds(collection: list) -> list[tuple[str, str]]:
-    """(arXiv id, title) of the My Collection papers that are on arXiv: the seeds for recommendations and
-    citations. collection: ProjectPaper links, best first (_collection_tag_tier)."""
-    return [(pp.paper.arxiv_id, pp.paper.title) for pp in collection if pp.paper and pp.paper.is_arxiv]
+    """(seed, title) of the My Collection papers Semantic Scholar can know (scholar_seed): the seeds for
+    recommendations and citations. collection: ProjectPaper links, best first (_collection_tag_tier)."""
+    return [(seed, pp.paper.title) for pp in collection if pp.paper and (seed := scholar_seed(pp.paper))]
 
 
 def citation_seeds(collection: list) -> list[tuple[str, str]]:
@@ -2069,15 +2156,15 @@ def citation_seeds(collection: list) -> list[tuple[str, str]]:
     return collection_seeds(ordered)
 
 
-def mark_citations_checked(project_id: int, arxiv_ids: list[str]) -> None:
+def mark_citations_checked(project_id: int, arxiv_ids: list[str]) -> None:  # seeds, see collection_seeds
     """Stamp the My Collection papers the citations source just got an answer for, so the next crawl starts
     with the others (citation_seeds)."""
     if not arxiv_ids:
         return
-    ids = {base_arxiv_id(a) for a in arxiv_ids}
+    ids = {_scholar_ref(a) for a in arxiv_ids}
     now = datetime.utcnow()
     for pp in ProjectPaper.query.filter_by(project_id=project_id).all():
-        if pp.paper and base_arxiv_id(pp.paper.arxiv_id) in ids:
+        if pp.paper and (seed := scholar_seed(pp.paper)) and _scholar_ref(seed) in ids:
             pp.citations_checked_at = now
     db.session.commit()
 
@@ -2559,6 +2646,8 @@ def run_crawl(
             _log.info("[crawl] searching arXiv for %d keywords, date range %s–%s", len(keywords), date_from, date_to)
             citations_checked: list[str] = []
             search_warnings: list[str] = []
+            if use_scholar or use_citations:
+                resolve_scholar_ids(_collection_pps)
             papers_data = gather_candidates(keywords, collection_seeds(_collection_pps), date_from, date_to, use_arxiv=use_arxiv,
                                             use_scholar=use_scholar, use_citations=use_citations,
                                             failed_keywords=failed_keywords, cite_seeds=citation_seeds(_collection_pps),
@@ -2800,6 +2889,7 @@ def run_crawl(
                     pd = result["paper_data"]
                     if pd.get("existing_paper_id"):
                         paper = Paper.query.get(pd["existing_paper_id"])
+                        paper.doi = paper.doi or pd.get("doi")
                         db.session.add(ProjectPaper(project_id=project_id, paper_id=paper.id, origin="crawl",
                                                     relevance_reason=result["why"] or None,
                                                     screen_source=result["screen_source"],
@@ -2819,10 +2909,12 @@ def run_crawl(
                         authors=json.dumps(pd["authors"]),
                         abstract=pd["abstract"],
                         pdf_url=pd["pdf_url"],
+                        doi=pd.get("doi"),
                         published_date=pd["published_date"],
                         year=pd["year"],
                         institutions=json.dumps(pd["institutions"]) if pd.get("institutions") else None,
-                        source="biorxiv" if pd.get("source") == "biorxiv" else "arxiv",
+                        source=("biorxiv" if pd["arxiv_id"].startswith("web:biorxiv-")
+                                else "journal" if pd["arxiv_id"].startswith("web:") else "arxiv"),
                         figure_url=result["figure_url"],
                         figure_caption=result["figure_caption"],
                         enrich_complete=1,
@@ -3437,7 +3529,7 @@ def backfill_missing_paper_metadata() -> int:
     # still be manually retried from its card in the UI (resets the counter to 0).
     needs_web_enrich = Paper.query.filter(
         Paper.arxiv_id.like("web:%"),
-        or_(Paper.source.is_(None), Paper.source != "biorxiv"),  # the crawl had everything from the bioRxiv API
+        or_(Paper.source.is_(None), Paper.source == "web"),  # added by hand; not crawl finds (bioRxiv, journal)
         or_(Paper.page_count.is_(None), Paper.institutions.is_(None)),
         Paper.web_enrich_attempts < MAX_WEB_ENRICH_ATTEMPTS,
     ).limit(20).all()

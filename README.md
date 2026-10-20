@@ -33,7 +33,7 @@ flowchart TD
         KW --> BIO["bioRxiv<br/>(if switched on)"]
         ARX --> CAND["Candidate papers"]
         BIO --> CAND
-        SS["Semantic Scholar<br/>recommendations"] --> CAND
+        SS["Semantic Scholar<br/>recommendations<br/>(arXiv, bioRxiv, journals)"] --> CAND
         CITE["New papers citing<br/>My Collection<br/>(Semantic Scholar)"] --> CAND
     end
 

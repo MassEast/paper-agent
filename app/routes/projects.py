@@ -20,6 +20,7 @@ from app.crawl import (
     extract_keywords_with_usage,
     gather_candidates,
     collection_seeds,
+    resolve_scholar_ids,
     citation_seeds,
     mark_citations_checked,
     _collection_tag_tier,
@@ -345,6 +346,8 @@ def arxiv_count(slug):
                 existing_arxiv_ids.add(base_arxiv_id(pp.paper.arxiv_id))
         _collection_pps = sorted([pp for pp in project_obj.papers if not pp.trashed_at and pp.manual_tag],
                                  key=_collection_tag_tier)
+        if use_scholar or use_citations:
+            resolve_scholar_ids(_collection_pps)
         seeds = collection_seeds(_collection_pps)
         cite_seeds = citation_seeds(_collection_pps)
 

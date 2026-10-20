@@ -218,7 +218,7 @@
     </details>
     {% endif %}
 
-    {% if pp.paper.abstract and (pp.paper.is_arxiv or pp.paper.source == 'biorxiv') %}
+    {% if pp.paper.abstract and (pp.paper.is_arxiv or pp.paper.source in ('biorxiv', 'journal')) %}
     <details class="mb-3">
         <summary
             style="font-size: 0.75rem; color: var(--ink-3); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; outline: none; list-style: none;">

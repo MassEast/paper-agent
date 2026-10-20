@@ -52,7 +52,9 @@ class Paper(db.Model):
     citation_attempted_at = db.Column(db.DateTime)  # last backfill fetch attempt, success or not (cooldown)
     citation_manual = db.Column(db.Boolean, default=False)
     page_count = db.Column(db.Integer)
-    semantic_scholar_id = db.Column(db.Text)
+    semantic_scholar_id = db.Column(db.Text)  # a non-arXiv paper's Semantic Scholar id, found by title (scholar_seed)
+    doi = db.Column(db.Text)  # when the source gives one (bioRxiv, Semantic Scholar, the arXiv API, a pasted page)
+    scholar_lookup_at = db.Column(db.DateTime)  # when resolve_scholar_ids looked a non-arXiv paper up by title
     source = db.Column(db.Text)
     figure_url = db.Column(db.Text)
     figure_caption = db.Column(db.Text)
