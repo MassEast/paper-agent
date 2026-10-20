@@ -2,7 +2,7 @@
 
 bioRxiv's public API (api.biorxiv.org/details) lists every preprint posted in a date range but has no keyword
 search, so a search here reads the whole window page by page and keeps the papers whose title or abstract
-contain a keyword. A nightly window of five days is a few hundred papers, a handful of requests.
+contain a keyword. A nightly window of five days is about 800 first versions, read in about a minute.
 
 The result has the same shape as an arXiv candidate. A bioRxiv paper has no arXiv id, so it is stored under a
 synthetic "web:biorxiv-<hash of the DOI>" id like any non-arXiv paper (Paper.is_arxiv is False). The id has no
@@ -30,28 +30,19 @@ def biorxiv_paper_id(doi: str) -> str:
     return "web:biorxiv-" + hashlib.sha256(doi.lower().encode()).hexdigest()[:12]
 
 
-_STOPWORDS = {"and", "for", "the", "with", "from", "into", "via"}
-
-
-def _stem(word: str) -> str:
-    return word[:6]  # crude: "resistance" and "resistant" meet, "microscopy" and "microscope" meet
-
-
 def _words(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", (text or "").lower())
+    """Lowercase words, a plural "s" dropped ("models" and "model" meet); hyphens split words."""
+    return [w[:-1] if len(w) > 3 and w.endswith("s") else w for w in re.findall(r"[a-z0-9]+", (text or "").lower())]
 
 
 def matched_keywords(text: str, keywords: list[str]) -> list[str]:
-    """Keywords whose words all appear in text (any order, word endings ignored). Looser than arXiv's phrase
-    search on purpose: the screening decides, and a phrase like "antimicrobial resistance morphology" would
-    almost never appear verbatim."""
-    present = {_stem(w) for w in _words(text)}
-    out = []
-    for k in keywords:
-        stems = [_stem(w) for w in _words(k) if len(w) > 2 and w not in _STOPWORDS]
-        if stems and all(s in present for s in stems):
-            out.append(k)
-    return out
+    """Keywords that appear in text as a phrase: their words in order, next to each other, whole words only,
+    as arXiv's abs:"phrase" search does. Matching the words anywhere and in any order, or cutting them to
+    their first letters, matched far too much on 30 days of bioRxiv (checked 2026-10-20 with the projects'
+    keywords: "generator" matched "general", "mechanistic interpretability" matched any paper about a
+    mechanism that it interprets)."""
+    text_words = " " + " ".join(_words(text)) + " "
+    return [k for k in keywords if _words(k) and " " + " ".join(_words(k)) + " " in text_words]
 
 
 def _get_page(http, start: date, end: date, cursor: int) -> Optional[dict]:

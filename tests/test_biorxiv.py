@@ -44,16 +44,18 @@ def _serve(monkeypatch, pages, status=200):
 
 
 class TestKeywordMatch:
-    def test_all_words_in_any_order_with_word_endings_ignored(self):
-        text = "Resistant bacteria change their morphology under the microscope"
-        assert biorxiv.matched_keywords(text, ["bacterial morphology microscopy"]) == ["bacterial morphology microscopy"]
+    def test_a_keyword_matches_as_a_phrase_with_plurals_and_hyphens_ignored(self):
+        text = "Tabular foundation models falter on genetic data; in context learning helps"
+        assert biorxiv.matched_keywords(text, ["tabular foundation model", "in-context learning"]) == [
+            "tabular foundation model", "in-context learning"]
 
-    def test_a_missing_word_is_no_match(self):
-        assert biorxiv.matched_keywords("Cell shape of bacteria", ["bacterial resistance"]) == []
+    def test_the_words_must_be_next_to_each_other_and_in_order(self):
+        text = "We interpret the mechanistic basis of resistance; learning in context"
+        assert biorxiv.matched_keywords(text, ["mechanistic interpretability", "in-context learning"]) == []
 
-    def test_short_and_filler_words_are_not_required(self):
-        assert biorxiv.matched_keywords("in-context learning for spectra", ["learning for spectra"]) == [
-            "learning for spectra"]
+    def test_whole_words_only(self):
+        # "generator" is not "general", "VLA" is not "Vladimir"
+        assert biorxiv.matched_keywords("A general model by Vladimir", ["generator", "VLA"]) == []
 
 
 class TestSearch:
@@ -184,6 +186,20 @@ class TestPresentation:
         assert "biorxiv" not in [v for v, _ in _email_source_rows(zero)]
         assert "biorxiv" in [v for v, _ in _email_source_rows(some)]
         assert "biorxiv" not in [v for v, _ in _email_source_rows(None)]
+
+    def test_the_card_shows_the_abstract_it_was_judged_on(self, app, client, project):
+        with client.session_transaction() as sess:
+            sess["logged_in"] = True
+        paper = Paper(arxiv_id="web:biorxiv-abcdefabcdef", title="Cell shape", source="biorxiv",
+                      abstract="Resistant cells grow wider under beta-lactams.",
+                      pdf_url="https://www.biorxiv.org/content/10.64898/x", enrich_complete=1)
+        db.session.add(paper)
+        db.session.flush()
+        db.session.add(ProjectPaper(project_id=project.id, paper_id=paper.id, origin="crawl"))
+        db.session.commit()
+        page = client.get(f"/projects/{project.slug}").get_data(as_text=True)
+        assert "Resistant cells grow wider under beta-lactams." in page
+        assert "https://www.biorxiv.org/content/10.64898/x" in page
 
     def test_featured_paper_email_links_to_biorxiv_not_arxiv(self):
         from types import SimpleNamespace
