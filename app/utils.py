@@ -3,6 +3,7 @@ import re
 import threading
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -166,6 +167,13 @@ def fetch_paper_full_text(arxiv_id: str, max_chars: int = 80000) -> str | None:
     return None
 
 
+# bioRxiv PDFs: one at a time, 7 s apart (Crawl-delay in biorxiv.org/robots.txt). The wait is before a
+# download, for what is left of the gap since the last one, so a single download (a chat) doesn't wait
+_biorxiv_lock = threading.Lock()
+_biorxiv_last = [float("-inf")]  # time.monotonic() when the last bioRxiv download ended
+BIORXIV_GAP_S = 7
+
+
 def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
     """Text extracted from a PDF, or None if it can't be downloaded or read. arxiv=True waits for
     the arXiv rate limit."""
@@ -181,6 +189,13 @@ def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
         if arxiv:
             with _ArxivLockCtx():
                 r = _get()
+        elif (urlparse(url).hostname or "").endswith("biorxiv.org"):
+            with _biorxiv_lock:  # bioRxiv's robots.txt asks for 7 s between requests
+                time.sleep(max(0.0, _biorxiv_last[0] + BIORXIV_GAP_S - time.monotonic()))
+                try:
+                    r = _get()
+                finally:
+                    _biorxiv_last[0] = time.monotonic()
         else:
             r = _get()
     except httpx.HTTPError as e:

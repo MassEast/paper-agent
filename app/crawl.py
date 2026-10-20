@@ -51,6 +51,7 @@ OPEN_ACCESS_PDF_DOMAINS = {
     "ojs.aaai.org",  # AAAI / IAAI proceedings — open access by AAAI policy
     "ijcai.org",  # IJCAI proceedings
     "jmlr.org",  # Journal of Machine Learning Research — always open
+    "biorxiv.org",  # welcomes machine reading, link back instead of re-hosting (biorxiv.org/tdm); 7 s apart, see utils
 }
 
 
@@ -2191,11 +2192,14 @@ def get_citation_count_by_scholar_id(scholar_id: str) -> Optional[int]:
     return _fetch_citations(scholar_id)
 
 
-def get_paper_content(arxiv_id: str) -> Optional[str]:
+def get_paper_content(arxiv_id: str, pdf_url: Optional[str] = None) -> Optional[str]:
     """Return the paper's full text (arXiv HTML, else the PDF), or None. Every caller already has the
-    abstract and falls back to it, so there is no extra arXiv API request for it here."""
+    abstract and falls back to it, so there is no extra arXiv API request for it here. A non-arXiv paper
+    (a bioRxiv find) has only its PDF, read only from an open-access domain."""
     from app.utils import fetch_paper_full_text, fetch_pdf_text
 
+    if arxiv_id.startswith("web:"):
+        return fetch_pdf_text(pdf_url, arxiv=False) if pdf_url and _is_open_access_pdf_domain(pdf_url) else None
     return fetch_paper_full_text(arxiv_id) or fetch_pdf_text(f"https://arxiv.org/pdf/{arxiv_id}", arxiv=True)
 
 
@@ -2686,8 +2690,7 @@ def run_crawl(
                     # Only fetch full paper content (arXiv HTML / PDF) for candidates that already passed
                     # the abstract-only quick check — avoids an outbound fetch per candidate for
                     # papers that get rejected immediately.
-                    # A non-arXiv candidate (bioRxiv) is screened on its abstract: no full text is fetched
-                    paper_content = get_paper_content(arxiv_id) if not arxiv_id.startswith("web:") else None
+                    paper_content = get_paper_content(arxiv_id, pd.get("pdf_url"))
 
                     deep_relevant, _reason, _, _, deep_tokens, why = _screen_paper_deep(
                         title=pd["title"],
@@ -3073,7 +3076,7 @@ def run_rescreen(project_id: int) -> dict:
             state["skipped"] += 1
             continue
         todo.append({
-            "link_id": pp.id, "arxiv_id": pp.paper.arxiv_id, "is_arxiv": pp.paper.is_arxiv,
+            "link_id": pp.id, "arxiv_id": pp.paper.arxiv_id, "pdf_url": pp.paper.pdf_url,
             "title": pp.paper.title, "abstract": pp.paper.abstract or "",
         })
     state["total"] = len(todo)
@@ -3087,7 +3090,7 @@ def run_rescreen(project_id: int) -> dict:
         )
         if not relevant:
             return item, reason, "", None
-        content = get_paper_content(item["arxiv_id"]) if item["is_arxiv"] else None
+        content = get_paper_content(item["arxiv_id"], item["pdf_url"])
         _, reason, _, _, _, why = _screen_paper_deep(
             item["title"], item["abstract"], content or item["abstract"], research_interest, ref_dicts
         )
@@ -3187,8 +3190,8 @@ def refresh_from_full_text(project_id: int, limit: int = FULL_TEXT_REFRESH_PER_N
     MAX_FULL_TEXT_ATTEMPTS times."""
     research_interest, ref_dicts, context_hash, links = _screening_context(project_id)
     todo = sorted(
-        [pp for pp in links if pp.manual_tag is None and not pp.trashed_at and pp.paper and pp.paper.is_arxiv
-         and pp.screen_source in ("abstract", "unknown")
+        [pp for pp in links if pp.manual_tag is None and not pp.trashed_at and pp.paper
+         and (pp.paper.is_arxiv or pp.paper.source == "biorxiv") and pp.screen_source in ("abstract", "unknown")
          and (pp.paper.full_text_attempts or 0) < MAX_FULL_TEXT_ATTEMPTS],
         key=lambda pp: pp.added_at or datetime.min, reverse=True,
     )[:limit]
@@ -3197,11 +3200,11 @@ def refresh_from_full_text(project_id: int, limit: int = FULL_TEXT_REFRESH_PER_N
               project_id, len(todo))
     if not todo:
         return stats
-    items = [{"link_id": pp.id, "paper_id": pp.paper_id, "arxiv_id": pp.paper.arxiv_id,
+    items = [{"link_id": pp.id, "paper_id": pp.paper_id, "arxiv_id": pp.paper.arxiv_id, "pdf_url": pp.paper.pdf_url,
               "title": pp.paper.title, "abstract": pp.paper.abstract or ""} for pp in todo]
 
     def _check(item):
-        content = get_paper_content(item["arxiv_id"])
+        content = get_paper_content(item["arxiv_id"], item["pdf_url"])
         if not content:
             return item, None, None, ""
         _, reason, _, _, _, why = _screen_paper_deep(
@@ -3434,7 +3437,7 @@ def backfill_missing_paper_metadata() -> int:
     # still be manually retried from its card in the UI (resets the counter to 0).
     needs_web_enrich = Paper.query.filter(
         Paper.arxiv_id.like("web:%"),
-        or_(Paper.source.is_(None), Paper.source != "biorxiv"),  # screened on the abstract, no PDF is read
+        or_(Paper.source.is_(None), Paper.source != "biorxiv"),  # the crawl had everything from the bioRxiv API
         or_(Paper.page_count.is_(None), Paper.institutions.is_(None)),
         Paper.web_enrich_attempts < MAX_WEB_ENRICH_ATTEMPTS,
     ).limit(20).all()

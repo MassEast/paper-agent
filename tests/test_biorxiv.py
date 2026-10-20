@@ -75,7 +75,7 @@ class TestSearch:
         assert p["source"] == "biorxiv"
         assert p["authors"] == ["Smith, A. B.", "Jones, C."]
         assert p["institutions"] == ["HTW Berlin"]
-        assert p["pdf_url"] == "https://www.biorxiv.org/content/10.64898/2026.04.02.715584v1"
+        assert p["pdf_url"] == "https://www.biorxiv.org/content/10.64898/2026.04.02.715584v1.full.pdf"
         assert p["published_date"] == date(2026, 10, 10) and p["year"] == 2026
         assert p["found_via"] == [{"via": "biorxiv", "name": "cell shape"}]
 
@@ -112,26 +112,27 @@ class TestCrawl:
         return {
             "arxiv_id": biorxiv.biorxiv_paper_id(self.DOI), "doi": self.DOI,
             "title": "Cell shape reveals beta-lactamase resistance", "authors": ["Smith, A. B."],
-            "abstract": "Resistant cells are wider.", "pdf_url": f"https://www.biorxiv.org/content/{self.DOI}v1",
+            "abstract": "Resistant cells are wider.", "pdf_url": f"https://www.biorxiv.org/content/{self.DOI}v1.full.pdf",
             "published_date": date(2026, 10, 10), "year": 2026, "institutions": ["HTW Berlin"],
             "categories": ["microbiology"], "source": "biorxiv",
             "found_via": [{"via": "biorxiv", "name": "cell shape"}],
         }
 
-    def test_a_biorxiv_paper_is_screened_on_its_abstract_and_stored_as_a_non_arxiv_paper(self, app, project):
+    def test_a_biorxiv_paper_is_screened_on_its_pdf_and_stored_as_a_non_arxiv_paper(self, app, project):
         from app.crawl import run_crawl
         from tests.test_crawl import MockPatches
 
         with MockPatches([], relevant=True), \
                 patch("app.crawl.search_biorxiv", return_value=[self._candidate()]), \
-                patch("app.crawl.get_paper_content") as content, \
+                patch("app.crawl.get_paper_content", return_value="Full bioRxiv text. " * 100) as content, \
                 patch("app.crawl.get_paper_figure") as figure, \
                 patch("app.crawl.get_citation_count") as arxiv_citations, \
                 patch("app.crawl._fetch_citations", return_value=7) as citations:
             log = run_crawl(project.id, date(2026, 10, 8), date(2026, 10, 12), keywords_override=["cell shape"],
                             use_arxiv=False, use_scholar=False, use_citations=False, use_biorxiv=True)
 
-        content.assert_not_called()          # nothing is fetched from arXiv for it
+        cand = self._candidate()
+        content.assert_called_once_with(cand["arxiv_id"], cand["pdf_url"])  # its bioRxiv PDF
         figure.assert_not_called()
         arxiv_citations.assert_not_called()
         citations.assert_called_once_with(f"DOI:{self.DOI}")  # Semantic Scholar knows it by DOI
@@ -143,9 +144,9 @@ class TestCrawl:
         assert paper.source == "biorxiv" and not paper.is_arxiv
         assert paper.citation_count == 7
         assert json.loads(paper.institutions) == ["HTW Berlin"]
-        assert PaperSummary.query.filter_by(paper_id=paper.id).one().content_source == "abstract"
+        assert PaperSummary.query.filter_by(paper_id=paper.id).one().content_source == "full_text"
         link = ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper.id).one()
-        assert link.origin == "crawl" and link.screen_source == "abstract"
+        assert link.origin == "crawl" and link.screen_source == "full_text"
         assert link.found_via_text() == 'bioRxiv keyword "cell shape"'
 
     def test_the_nightly_backfill_leaves_it_alone(self, app):
@@ -169,6 +170,60 @@ class TestCrawl:
             finally:
                 db.session.delete(Paper.query.get(paper.id))
                 db.session.commit()
+
+
+class TestFullText:
+    PDF = "https://www.biorxiv.org/content/10.64898/2026.10.10.999001v1.full.pdf"
+
+    def test_a_biorxiv_paper_is_read_from_its_pdf_and_no_other_web_paper_is(self):
+        from app.crawl import get_paper_content
+        with patch("app.utils.fetch_pdf_text", return_value="text") as pdf, \
+                patch("app.utils.fetch_paper_full_text") as arxiv_html:
+            assert get_paper_content("web:biorxiv-0123456789ab", self.PDF) == "text"
+            pdf.assert_called_once_with(self.PDF, arxiv=False)
+            pdf.reset_mock()
+            assert get_paper_content("web:abc", "https://www.sciencedirect.com/x.pdf") is None
+            assert get_paper_content("web:abc", None) is None
+            pdf.assert_not_called()
+        arxiv_html.assert_not_called()
+
+    def test_biorxiv_downloads_are_one_at_a_time_7_s_apart(self, monkeypatch):
+        from app import utils
+        sleeps, held, clock = [], [], [1000.0]
+        monkeypatch.setattr(utils.time, "sleep", lambda s: (sleeps.append(s), clock.__setitem__(0, clock[0] + s)))
+        monkeypatch.setattr(utils.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(utils, "_biorxiv_last", [float("-inf")])
+        real = utils._http_client
+
+        def handler(request):
+            held.append(utils._biorxiv_lock.locked())
+            return httpx.Response(200, content=b"not a pdf")
+        monkeypatch.setattr(utils, "_http_client", lambda **kw: real(transport=httpx.MockTransport(handler), **{
+            k: v for k, v in kw.items() if k != "public_only"}))
+        utils.fetch_pdf_text(self.PDF, arxiv=False)
+        clock[0] += 2  # the next one comes 2 s later
+        utils.fetch_pdf_text(self.PDF, arxiv=False)
+        assert held == [True, True] and utils.BIORXIV_GAP_S == 7
+        assert sleeps == [0.0, 5.0]  # the first doesn't wait, the second waits out the rest of the 7 s
+        utils.fetch_pdf_text("https://aclanthology.org/x.pdf", arxiv=False)
+        assert held[-1] is False and len(sleeps) == 2  # other hosts are not slowed down
+
+    def test_the_chat_downloads_it(self):
+        from app.chat import _nothing_to_download
+        assert not _nothing_to_download(Paper(arxiv_id="web:biorxiv-0123456789ab", pdf_url=self.PDF))
+
+    def test_the_nightly_full_text_reread_includes_it(self, app, project):
+        from app.crawl import refresh_from_full_text
+        paper = Paper(arxiv_id="web:biorxiv-0123456789ab", title="Cell shape", source="biorxiv",
+                      abstract="Resistant cells are wider.", pdf_url=self.PDF, enrich_complete=1)
+        db.session.add(paper)
+        db.session.flush()
+        db.session.add(ProjectPaper(project_id=project.id, paper_id=paper.id, origin="crawl",
+                                    screen_source="abstract", added_at=datetime.utcnow()))
+        db.session.commit()
+        with patch("app.crawl.get_paper_content", return_value=None) as content:
+            refresh_from_full_text(project.id)
+        content.assert_called_once_with("web:biorxiv-0123456789ab", self.PDF)
 
 
 class TestPresentation:

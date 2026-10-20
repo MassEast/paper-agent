@@ -6,8 +6,9 @@ contain a keyword. A nightly window of five days is about 800 first versions, re
 
 The result has the same shape as an arXiv candidate. A bioRxiv paper has no arXiv id, so it is stored under a
 synthetic "web:biorxiv-<hash of the DOI>" id like any non-arXiv paper (Paper.is_arxiv is False). The id has no
-slash because it goes into URLs. Its DOI is in the landing page link kept as pdf_url. Only the abstract is
-screened: bioRxiv is not on OPEN_ACCESS_PDF_DOMAINS, so no full text is fetched.
+slash because it goes into URLs. pdf_url is its PDF on bioRxiv (the DOI is in it), which the deep screening,
+the summary and the chat read like an arXiv PDF: bioRxiv is on OPEN_ACCESS_PDF_DOMAINS (machine reading is
+welcome, biorxiv.org/tdm), and fetch_pdf_text keeps its downloads 7 s apart.
 """
 
 import hashlib
@@ -22,7 +23,7 @@ from app.utils import _http_client
 _log = logging.getLogger(__name__)
 
 API_URL = "https://api.biorxiv.org/details/biorxiv/{start}/{end}/{cursor}/json"
-LANDING_URL = "https://www.biorxiv.org/content/{doi}v{version}"
+PDF_URL = "https://www.biorxiv.org/content/{doi}v{version}.full.pdf"
 REQUEST_TRIES = 3
 
 
@@ -98,7 +99,7 @@ def _candidate(item: dict, names: list[str]) -> Optional[dict]:
         "title": " ".join(title.split()),
         "authors": [a.strip() for a in (item.get("authors") or "").split(";") if a.strip()],
         "abstract": " ".join((item.get("abstract") or "").split()),
-        "pdf_url": LANDING_URL.format(doi=doi, version=item.get("version") or 1),
+        "pdf_url": PDF_URL.format(doi=doi, version=item.get("version") or 1),
         "published_date": posted,
         "year": posted.year if posted else None,
         "institutions": [institution] if institution else [],

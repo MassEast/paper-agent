@@ -142,7 +142,7 @@ def _refresh(pid, verdicts, texts=None, **kw):
         deep_calls.append(arxiv_id)
         return verdicts[arxiv_id] == "relevant", verdicts[arxiv_id], "m", 1, 10, "new why"
 
-    with patch("app.crawl.get_paper_content", side_effect=lambda a: texts.get(a, "FULL TEXT " * 500)), \
+    with patch("app.crawl.get_paper_content", side_effect=lambda a, pdf_url=None: texts.get(a, "FULL TEXT " * 500)), \
          patch("app.crawl._screen_paper_deep", side_effect=deep), \
          patch("app.crawl.generate_summary_with_full_content", return_value=({"summary": "new"}, "m", 1, 100)), \
          patch("app.crawl.extract_main_contributions", return_value=("c", "", 1, 50)):

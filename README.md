@@ -30,7 +30,9 @@ flowchart TD
         RI["Research interest<br/>(free text — or LLM-drafted from<br/>papers already in My Collection)"] -->|"LLM: extract keywords<br/>(or enter manually)"| KW["Keywords<br/>(saved & reused across crawls)"]
         SCHED["Crawl trigger<br/>(manual date range, or<br/>nightly auto)"] --> ARX["arXiv search"]
         KW --> ARX
+        KW --> BIO["bioRxiv<br/>(if switched on)"]
         ARX --> CAND["Candidate papers"]
+        BIO --> CAND
         SS["Semantic Scholar<br/>recommendations"] --> CAND
         CITE["New papers citing<br/>My Collection<br/>(Semantic Scholar)"] --> CAND
     end
@@ -65,7 +67,7 @@ flowchart TD
     classDef store fill:#334155,color:#fff,stroke:#1e293b,stroke-width:1px
     classDef endpoint fill:#16a34a,color:#fff,stroke:#15803d,stroke-width:1px
     classDef dropped fill:#64748b,color:#e2e8f0,stroke:#334155,stroke-width:1px,stroke-dasharray:3 3
-    class ARX,SS,CITE external
+    class ARX,BIO,SS,CITE external
     class Q,DEEP,SUM llm
     class DB store
     class RI,NEW,COLL,MAIL endpoint
