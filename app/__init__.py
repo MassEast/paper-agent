@@ -154,6 +154,7 @@ def create_app():
             USAGE_BACKFILL_SQL,
             "ALTER TABLE projects ADD COLUMN use_biorxiv BOOLEAN DEFAULT 0",
             "ALTER TABLE papers ADD COLUMN doi TEXT",
+            "ALTER TABLE papers ADD COLUMN page_url TEXT",
             "ALTER TABLE papers ADD COLUMN scholar_lookup_at DATETIME",
         ]
         for _sql in _migrations:

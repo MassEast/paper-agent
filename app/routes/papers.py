@@ -510,8 +510,7 @@ def export_csv(slug):
             authors = "; ".join(json.loads(p.authors)) if p.authors else ""
         except (json.JSONDecodeError, TypeError):
             authors = p.authors or ""
-        # Same link as the card: arXiv abs page, or the stored URL of a web-added paper
-        url = f"https://arxiv.org/abs/{base_arxiv_id(p.arxiv_id)}" if p.is_arxiv else (p.pdf_url or "")
+        url = p.landing_url  # same link as the card title
         writer.writerow([p.title or "", authors, url, pp.manual_tag or "untagged", p.abstract or ""])
 
     csv_bytes = buf.getvalue().encode("utf-8")

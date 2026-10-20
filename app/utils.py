@@ -308,6 +308,19 @@ def fetch_paper_figure(arxiv_id: str) -> str | None:
     return None
 
 
+_DOI_RE = re.compile(r"10\.\d{4,9}/[^\s?&#]+")
+
+
+def doi_from_url(url: Optional[str]) -> Optional[str]:
+    """The DOI in a paper's URL (doi.org/10..., a publisher path or query with the DOI in it), or None."""
+    m = _DOI_RE.search(url or "")
+    if not m:
+        return None
+    doi = re.sub(r"/(pdf|full|abstract|epdf)$", "", m.group(0))
+    doi = re.sub(r"(v\d+)?(\.full)?(\.pdf)?$", "", doi) if doi.startswith(("10.1101/", "10.64898/")) else doi  # bioRxiv
+    return re.sub(r"\.pdf$", "", doi).rstrip("/.")
+
+
 def base_arxiv_id(arxiv_id: str) -> str:
     """Strip a trailing version suffix: '2605.23872v2' -> '2605.23872'. Non-arXiv ids pass through."""
     return re.sub(r"v\d+$", "", arxiv_id)

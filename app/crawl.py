@@ -24,7 +24,7 @@ import app.prompts as prompts
 from app.usage import counted, counts
 from app.biorxiv import search_biorxiv, biorxiv_paper_id, fetch_versions as biorxiv_versions, PDF_URL as BIORXIV_PDF_URL
 from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id, \
-    _is_biorxiv, _biorxiv_gap, fetch_biorxiv_figure
+    _is_biorxiv, _biorxiv_gap, fetch_biorxiv_figure, doi_from_url
 
 API_KEY = os.environ.get("LLM_API_KEY")
 SCHOLAR_API_KEY = os.environ.get("SCHOLAR_API_KEY")
@@ -1140,13 +1140,9 @@ def notify_important_paper(
         + citations_html + institutions_html + badges_html
         + (
             f'<p style="margin:10px 0 0 0;font-size:12px;">'
-            f'<a href="https://arxiv.org/abs/{paper.arxiv_id}" style="color:#7c3aed;text-decoration:none;">'
-            f'arxiv.org/abs/{paper.arxiv_id}</a></p>'
-            if paper.is_arxiv and paper.pdf_url else
-            f'<p style="margin:10px 0 0 0;font-size:12px;">'
-            f'<a href="{html.escape(paper.pdf_url or "")}" style="color:#7c3aed;text-decoration:none;">'
-            f'{html.escape(paper.pdf_url or "(no source URL)")}</a></p>'
-            if paper.pdf_url else ""
+            f'<a href="{html.escape(paper.landing_url)}" style="color:#7c3aed;text-decoration:none;">'
+            f'{html.escape(paper.landing_url.removeprefix("https://"))}</a></p>'
+            if paper.landing_url else ""
         )
         + notes_html + summary_html + contributions_html
         + '</div>'
@@ -1268,8 +1264,7 @@ def notify_crawl_complete(
         citation_count = getattr(top, "citation_count", None) or 0
         arxiv_id = getattr(top, "arxiv_id", "")
         # A non-arXiv paper (bioRxiv) links to its own page
-        paper_link = (f"https://arxiv.org/abs/{arxiv_id}" if getattr(top, "is_arxiv", True)
-                      else (getattr(top, "pdf_url", None) or ""))
+        paper_link = getattr(top, "landing_url", None) or f"https://arxiv.org/abs/{arxiv_id}"
 
         authors_list = getattr(top, "authors_list", [])
         if not authors_list:
@@ -2086,19 +2081,6 @@ def _matched_keywords(paper: dict, keywords: list[str]) -> list[str]:
     norm = lambda t: re.sub(r"\s+", " ", (t or "").lower().replace("-", " "))
     text = norm(paper.get("title", "") + " " + paper.get("abstract", ""))
     return [k for k in keywords if norm(k).strip() and norm(k).strip() in text]
-
-
-_DOI_RE = re.compile(r"10\.\d{4,9}/[^\s?&#]+")
-
-
-def doi_from_url(url: Optional[str]) -> Optional[str]:
-    """The DOI in a paper's URL (doi.org/10..., a publisher path or query with the DOI in it), or None."""
-    m = _DOI_RE.search(url or "")
-    if not m:
-        return None
-    doi = re.sub(r"/(pdf|full|abstract|epdf)$", "", m.group(0))
-    doi = re.sub(r"(v\d+)?(\.full)?(\.pdf)?$", "", doi) if doi.startswith(("10.1101/", "10.64898/")) else doi  # bioRxiv
-    return re.sub(r"\.pdf$", "", doi).rstrip("/.")
 
 
 def scholar_seed(paper) -> Optional[str]:

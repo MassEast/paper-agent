@@ -17,7 +17,7 @@
     {% endif %}
     <div class="flex flex-col sm:flex-row items-start gap-2 sm:gap-4 mb-3">
         <div class="flex-1 min-w-0">
-            <a href="{{ 'https://arxiv.org/abs/' + pp.paper.arxiv_id if pp.paper.is_arxiv else (pp.paper.pdf_url or '#') }}" target="_blank"
+            <a href="{{ pp.paper.landing_url or '#' }}" target="_blank"
                 style="font-size: 1rem; font-weight: 600; color: var(--ink-1); line-height: 1.35; display: block; text-decoration: none;"
                 onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--ink-1)'">
                 {{ pp.paper.title }}
@@ -237,8 +237,9 @@
         {% if pp.paper.is_arxiv %}
         <a href="https://arxiv.org/abs/{{ pp.paper.arxiv_id }}" target="_blank" style="color: var(--ink-3);">arXiv</a>
         <a href="https://arxiv.org/pdf/{{ pp.paper.arxiv_id }}.pdf" target="_blank" style="color: var(--ink-3);">PDF</a>
-        {% elif pp.paper.pdf_url %}
-        <a href="{{ pp.paper.pdf_url }}" target="_blank" style="color: var(--ink-3);" data-tip="{{ pp.paper.pdf_url }}">Source ↗</a>
+        {% elif pp.paper.landing_url %}
+        <a href="{{ pp.paper.landing_url }}" target="_blank" style="color: var(--ink-3);" data-tip="{{ pp.paper.landing_url }}">Source ↗</a>
+        {% if pp.paper.pdf_link %}<a href="{{ pp.paper.pdf_link }}" target="_blank" style="color: var(--ink-3);" data-tip="{{ pp.paper.pdf_link }}">PDF</a>{% endif %}
         {% endif %}
         {% if pp.paper.figure_url %}
         <span style="color: var(--accent); display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer;"

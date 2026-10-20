@@ -53,6 +53,7 @@ class Paper(db.Model):
     citation_manual = db.Column(db.Boolean, default=False)
     page_count = db.Column(db.Integer)
     semantic_scholar_id = db.Column(db.Text)  # a non-arXiv paper's Semantic Scholar id, found by title (scholar_seed)
+    page_url = db.Column(db.Text)  # the link a paper was added from by hand (its page; pdf_url may be the PDF)
     doi = db.Column(db.Text)  # when the source gives one (bioRxiv, Semantic Scholar, the arXiv API, a pasted page)
     scholar_lookup_at = db.Column(db.DateTime)  # when resolve_scholar_ids looked a non-arXiv paper up by title
     source = db.Column(db.Text)
@@ -70,6 +71,31 @@ class Paper(db.Model):
 
     summary = db.relationship("PaperSummary", back_populates="paper", uselist=False)
     project_links = db.relationship("ProjectPaper", back_populates="paper")
+
+    @property
+    def landing_url(self) -> str:
+        """The paper's page, for the card title, "Source" and email links: the arXiv abstract page; the bioRxiv
+        page; doi.org (the publisher's article page); the link it was added from; else its PDF. Not the PDF
+        first: Frontiers and PLOS, for example, send it as a download (Content-Disposition: attachment)."""
+        from app.utils import doi_from_url
+        if self.is_arxiv:
+            return f"https://arxiv.org/abs/{self.arxiv_id}"
+        doi = self.doi or doi_from_url(self.page_url) or doi_from_url(self.pdf_url)
+        if doi and doi.startswith(("10.1101/", "10.64898/")):
+            return f"https://www.biorxiv.org/content/{doi}"
+        if doi:
+            return f"https://doi.org/{doi}"
+        return self.page_url or self.pdf_url or ""
+
+    @property
+    def pdf_link(self) -> str | None:
+        """The PDF to offer next to the page link, if we have one that is not just the page link."""
+        if self.is_arxiv:
+            return f"https://arxiv.org/pdf/{self.arxiv_id}"
+        url = self.pdf_url or ""
+        if not url or url == self.landing_url or url.startswith("https://doi.org/") or url == self.page_url and not url.lower().split("?")[0].endswith(".pdf"):
+            return None
+        return url
 
     @property
     def is_arxiv(self) -> bool:

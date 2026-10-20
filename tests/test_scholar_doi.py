@@ -248,3 +248,45 @@ def test_the_monthly_citation_refresh_covers_hand_added_arxiv_papers_and_doi_pap
         ProjectPaper.query.filter_by(project_id=proj).delete()
         db.session.delete(Paper.query.filter_by(arxiv_id="2401.77777").one())
         db.session.commit()
+
+
+class TestLinks:
+    """The card title, "Source" and the emails open the paper's page, not its PDF (Frontiers and PLOS send their
+    PDFs as downloads); the PDF gets its own link when there is one."""
+
+    def test_page_and_pdf_links(self):
+        frontiers = Paper(arxiv_id="web:a", page_url="https://www.frontiersin.org/journals/microbiology/articles/10.3389/fmicb.2023.1154620/full",
+                          pdf_url="https://www.frontiersin.org/journals/microbiology/articles/10.3389/fmicb.2023.1154620/pdf")
+        assert frontiers.landing_url == "https://doi.org/10.3389/fmicb.2023.1154620"
+        assert frontiers.pdf_link == frontiers.pdf_url
+        plos = Paper(arxiv_id="web:b", pdf_url="https://journals.plos.org/plospathogens/article/file?id=10.1371/journal.ppat.1013546&type=printable")
+        assert plos.landing_url == "https://doi.org/10.1371/journal.ppat.1013546"  # added before page_url was kept
+        bio = Paper(arxiv_id="web:biorxiv-x", doi="10.1101/2025.04.28.651001",
+                    pdf_url="https://www.biorxiv.org/content/10.1101/2025.04.28.651001v1.full.pdf")
+        assert (bio.landing_url, bio.pdf_link) == ("https://www.biorxiv.org/content/10.1101/2025.04.28.651001", bio.pdf_url)
+        journal = Paper(arxiv_id="web:doi-x", doi="10.1/j", pdf_url="https://doi.org/10.1/j")
+        assert (journal.landing_url, journal.pdf_link) == ("https://doi.org/10.1/j", None)
+        acl = Paper(arxiv_id="web:c", page_url="https://aclanthology.org/2025.acl-long.1369/",
+                    pdf_url="https://aclanthology.org/2025.acl-long.1369.pdf")
+        assert (acl.landing_url, acl.pdf_link) == ("https://aclanthology.org/2025.acl-long.1369/", acl.pdf_url)
+        blog = Paper(arxiv_id="web:d", page_url="https://x.github.io/posts/rys/", pdf_url="https://x.github.io/posts/rys/")
+        assert (blog.landing_url, blog.pdf_link) == ("https://x.github.io/posts/rys/", None)
+        arx = Paper(arxiv_id="2401.00001")
+        assert (arx.landing_url, arx.pdf_link) == ("https://arxiv.org/abs/2401.00001", "https://arxiv.org/pdf/2401.00001")
+
+    def test_the_card_title_and_source_open_the_page(self, app, client, project):
+        with client.session_transaction() as sess:
+            sess["logged_in"] = True
+        paper = Paper(arxiv_id="web:t-link", title="QPM and deep learning for AMR", source="web",
+                      pdf_url="https://www.frontiersin.org/journals/microbiology/articles/10.3389/fmicb.2023.1154620/pdf")
+        db.session.add(paper)
+        db.session.flush()
+        db.session.add(ProjectPaper(project_id=project.id, paper_id=paper.id, origin="manual", manual_tag="related"))
+        db.session.commit()
+        page = client.get(f"/projects/{project.slug}").get_data(as_text=True)
+        card = page[page.index("QPM and deep learning for AMR") - 1500:]
+        assert 'href="https://doi.org/10.3389/fmicb.2023.1154620" target="_blank"' in card
+        assert ">Source ↗</a>" in card and ">PDF</a>" in card
+        ProjectPaper.query.filter_by(paper_id=paper.id).delete()
+        db.session.delete(paper)
+        db.session.commit()

@@ -262,7 +262,7 @@ def add_to_collection(slug):
             db.session.commit()
             return redirect(url_for("projects.detail", slug=slug))
 
-        paper = Paper(arxiv_id=synthetic_id, title="Fetching…", pdf_url=url, source="web", authors="[]")
+        paper = Paper(arxiv_id=synthetic_id, title="Fetching…", pdf_url=url, page_url=url, source="web", authors="[]")
         db.session.add(paper)
         db.session.flush()
         pp = ProjectPaper(project_id=project.id, paper_id=paper.id, origin="manual",

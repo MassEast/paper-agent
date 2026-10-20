@@ -377,13 +377,14 @@ class TestPresentation:
         from app.crawl import notify_crawl_complete
 
         top = SimpleNamespace(title="Cell shape", arxiv_id="web:biorxiv-0123456789ab", is_arxiv=False,
-                              pdf_url="https://www.biorxiv.org/content/10.64898/x", year=2026, authors_list=[],
+                              pdf_url="https://www.biorxiv.org/content/10.64898/xv1.full.pdf",
+                              landing_url=Paper(arxiv_id="web:biorxiv-0123456789ab", doi="10.64898/x").landing_url, year=2026, authors_list=[],
                               authors=None, institutions_list=[], institutions=None, citation_count=0,
                               summary=None, figure_url=None, figure_caption=None, main_contributions=None)
         with patch("app.crawl.send_notification", return_value=True) as send:
             notify_crawl_complete("P", "p", 5, 1, [top])
         body = send.call_args.kwargs["content_html"]
-        assert "https://www.biorxiv.org/content/10.64898/x" in body
+        assert 'href="https://www.biorxiv.org/content/10.64898/x"' in body  # its page, not the PDF
         assert "arxiv.org/abs/web:" not in body
 
 
