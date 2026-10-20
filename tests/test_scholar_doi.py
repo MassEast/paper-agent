@@ -227,3 +227,24 @@ class TestStored:
             client.return_value.results.return_value = [result]
             papers, *_ = crawl._fetch_arxiv_window(["k"], D_FROM, D_TO, 100)
         assert papers[0]["doi"] == "10.1/journal"
+
+
+def test_the_monthly_citation_refresh_covers_hand_added_arxiv_papers_and_doi_papers(app, proj):
+    """It used to pick arXiv papers by source "arxiv", which left out the ones added by hand (source
+    "manual"); papers that are not on arXiv are refreshed by DOI or Semantic Scholar id."""
+    from scripts import nightly_crawl
+    with app.app_context():
+        old = datetime(2026, 6, 1)
+        manual = _link(proj, "2401.77777", "Added by link", source="manual", citation_count=1, citation_fetched_at=old)
+        doi = _link(proj, "web:t-6", "Journal paper", source="web", doi="10.3389/x", citation_count=1, citation_fetched_at=old)
+        blog = _link(proj, "web:t-7", "A blog post", source="web", citation_count=0, citation_fetched_at=old)
+        with patch.object(nightly_crawl, "get_citation_count", return_value=5) as by_arxiv, \
+                patch.object(nightly_crawl, "get_citation_count_by_scholar_id", return_value=9) as by_ref, \
+                patch.object(nightly_crawl.time, "sleep"):
+            nightly_crawl._refresh_collection_citations()
+        by_arxiv.assert_called_once_with("2401.77777")
+        by_ref.assert_called_once_with("DOI:10.3389/x")
+        assert (manual.paper.citation_count, doi.paper.citation_count, blog.paper.citation_count) == (5, 9, 0)
+        ProjectPaper.query.filter_by(project_id=proj).delete()
+        db.session.delete(Paper.query.filter_by(arxiv_id="2401.77777").one())
+        db.session.commit()

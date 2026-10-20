@@ -119,7 +119,7 @@
                         oninput="checkDirty()">{{ project.research_interest or "" }}</textarea>
                     <div class="flex justify-between items-center mt-3">
                         <p class="text-xs" style="color: var(--ink-4); min-height: 1lh;">This helps the AI find relevant
-                            papers on arXiv</p>
+                            papers</p>
                         <button class="focus-ring" type="submit" id="save-btn"
                             style="height: var(--button-height); padding: 0 24px; min-width: 90px; white-space: nowrap; background-color: var(--paper-3); color: var(--ink-4); border-radius: var(--radius-md); border: 1px solid var(--border-default); display: inline-flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.55; cursor: not-allowed;"
                             disabled aria-disabled="true">
@@ -315,8 +315,10 @@
                                     <code>citation_abstract</code> only — not site taglines), and the stripped page body
                                     are extracted. LLM generates a summary from the full page text. No figure, no
                                     citation count. The PDF (for page count and institutions) is only downloaded from
-                                    open-access hosts (arXiv, ACL Anthology, PMLR, OpenReview, NeurIPS, CVF, AAAI,
-                                    IJCAI, JMLR).</li>
+                                    open-access hosts (arXiv, bioRxiv, ACL Anthology, PMLR, OpenReview, NeurIPS, CVF,
+                                    AAAI, IJCAI, JMLR). Its DOI (or, without one, a Semantic Scholar title match) makes
+                                    it a seed for the Semantic Scholar recommendations and citations, like an arXiv
+                                    paper.</li>
                             </ol>
                         </li>
                     </ol>
@@ -593,8 +595,8 @@
                     style="margin-bottom: 12px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
                     <p style="font-weight: 600; color: var(--ink-1); margin-bottom: 6px;">How keywords work</p>
                     <p>An LLM reads your <strong>research interest</strong> + <strong>titles and abstracts of all papers
-                            in My Collection</strong> (up to {{ reference_papers_limit }}, priority-ordered by tag), then outputs 3–6 short arXiv
-                        search phrases. The more papers you have tagged, the better the vocabulary.</p>
+                            in My Collection</strong> (up to {{ reference_papers_limit }}, priority-ordered by tag), then outputs 3–6 short
+                        search phrases (for the arXiv search, and the bioRxiv search if it is switched on). The more papers you have tagged, the better the vocabulary.</p>
                     <p style="margin-top: 6px; color: var(--ink-3);">Keywords are saved and reused by the nightly crawl
                         automatically. Regenerate only when your research focus changes significantly.</p>
                     <button type="button" onclick="document.getElementById('prompt-kw').classList.toggle('hidden')"
@@ -729,7 +731,9 @@
                         </li>
                         <li>
                             <strong>Deep relevance check</strong> (only papers that pass the quick filter, so full
-                            texts are only fetched for those): same prompt plus the full paper content. For a relevant
+                            texts are only fetched for those): same prompt plus the full paper content (arXiv and bioRxiv: the HTML version, else the PDF;
+                            a journal paper: its PDF if it is openly available from a site on the open-access list, else
+                            the abstract again, and its card says "⚠ from abstract only"). For a relevant
                             paper it also says <em>why</em> it matters for your research interest; that is shown on
                             the card as "Why it's relevant".
                             <button type="button"
@@ -756,10 +760,11 @@
                                 prompt</button>
                             <pre id="prompt-summary" class="hidden"
                                 style="margin-top: 6px; white-space: pre-wrap; font-size: 0.68rem; background-color: var(--paper-2); border-radius: 4px; padding: 8px; color: var(--ink-3); font-family: monospace; line-height: 1.4;">{{ prompt_summary }}</pre></li>
-                        <li><strong>Institutions:</strong> A single batch call to the Semantic Scholar graph API
-                            fetches author affiliations for all newly added papers. Falls back to LLM extraction from
+                        <li><strong>Institutions:</strong> For arXiv papers, a single batch call to the Semantic
+                            Scholar graph API fetches author affiliations for all newly added papers. Falls back to LLM extraction from
                             page 1 of the PDF (which contains author/affiliation headers and footnotes) if Semantic
-                            Scholar returns nothing.</li>
+                            Scholar returns nothing. A bioRxiv paper gets its corresponding author's institution from
+                            bioRxiv; a journal paper gets none.</li>
                         <li><strong>Featured paper:</strong> LLM picks the single most relevant paper from all newly
                             added ones — considering your research interest, and preferring papers with a figure —
                             to highlight in the crawl-complete email.</li>
@@ -775,7 +780,8 @@
                             {{ reference_papers_limit }}, Important first, then Discuss, then To Read) are used as reference
                             context in the relevance check prompts. The more you curate, the more precisely the LLM
                             understands your research scope. They also seed the Semantic Scholar recommendations
-                            — more tagged papers means better discovery of related work.</p>
+                            and citations (by arXiv id, or by DOI for a paper that is not on arXiv) — more tagged papers
+                            means better discovery of related work.</p>
                     </div>
                 </div>
 

@@ -65,7 +65,8 @@ def _refresh_collection_citations():
     papers = Paper.query.filter(
         Paper.id.in_(collection_paper_ids),
         db.or_(
-            Paper.source == "arxiv",
+            ~Paper.arxiv_id.like("web:%"),  # every arXiv paper; source "arxiv" left out the ones added by hand ("manual")
+            Paper.doi.isnot(None),
             Paper.semantic_scholar_id.isnot(None),
         ),
         db.or_(
@@ -78,8 +79,10 @@ def _refresh_collection_citations():
     updated = 0
     for paper in papers:
         try:
-            if paper.source == "arxiv" and paper.arxiv_id:
+            if paper.is_arxiv:
                 count = get_citation_count(paper.arxiv_id)
+            elif paper.doi:
+                count = get_citation_count_by_scholar_id(f"DOI:{paper.doi}")
             elif paper.semantic_scholar_id:
                 count = get_citation_count_by_scholar_id(paper.semantic_scholar_id)
             else:
