@@ -15,6 +15,14 @@ from app import biorxiv, db
 from app.models import Paper, PaperSummary, Project, ProjectPaper
 
 
+@pytest.fixture(autouse=True)
+def _no_cached_pages():
+    from app import utils
+    utils._biorxiv_pages.clear()
+    yield
+    utils._biorxiv_pages.clear()
+
+
 def _item(doi, title="A morphology study", abstract="Antimicrobial resistance changes cell shape.",
           version="1", **extra):
     return {"doi": doi, "title": title, "abstract": abstract, "version": version, "date": "2026-10-10",
@@ -126,6 +134,9 @@ class TestCrawl:
                 patch("app.crawl.search_biorxiv", return_value=[self._candidate()]), \
                 patch("app.crawl.get_paper_content", return_value="Full bioRxiv text. " * 100) as content, \
                 patch("app.crawl.get_paper_figure") as figure, \
+                patch("app.crawl.fetch_biorxiv_figure", return_value=("https://www.biorxiv.org/x/F1.large.jpg",
+                                                                      "Figure 1: Cells.")) as bio_figure, \
+                patch("app.crawl._fetch_figure_html", return_value=""), \
                 patch("app.crawl.get_citation_count") as arxiv_citations, \
                 patch("app.crawl._fetch_citations", return_value=7) as citations:
             log = run_crawl(project.id, date(2026, 10, 8), date(2026, 10, 12), keywords_override=["cell shape"],
@@ -133,7 +144,8 @@ class TestCrawl:
 
         cand = self._candidate()
         content.assert_called_once_with(cand["arxiv_id"], cand["pdf_url"])  # its bioRxiv PDF
-        figure.assert_not_called()
+        figure.assert_not_called()           # not the arXiv figure ...
+        bio_figure.assert_called_once_with(cand["pdf_url"])  # ... but figure 1 from the bioRxiv HTML
         arxiv_citations.assert_not_called()
         citations.assert_called_once_with(f"DOI:{self.DOI}")  # Semantic Scholar knows it by DOI
         assert log.status == "success" and log.papers_added == 1
@@ -143,6 +155,7 @@ class TestCrawl:
         paper = Paper.query.filter_by(arxiv_id=biorxiv.biorxiv_paper_id(self.DOI)).one()
         assert paper.source == "biorxiv" and not paper.is_arxiv
         assert paper.citation_count == 7
+        assert (paper.figure_url, paper.figure_caption) == ("https://www.biorxiv.org/x/F1.large.jpg", "Figure 1: Cells.")
         assert json.loads(paper.institutions) == ["HTW Berlin"]
         assert PaperSummary.query.filter_by(paper_id=paper.id).one().content_source == "full_text"
         link = ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper.id).one()
@@ -232,6 +245,63 @@ class TestFullText:
         with patch.object(chat, "fetch_biorxiv_full_text", return_value=None), \
                 patch.object(chat, "_pdf_text", return_value="P" * 5000):
             assert chat._fetch_text(paper) == ("P" * 5000, "pdf")
+
+    def test_figure_1_comes_from_the_html_with_its_caption(self):
+        from app import utils
+        page = ('<div class="fulltext-view"><div id="F1" class="fig"><a href="https://www.biorxiv.org/content/biorxiv/'
+                'early/2026/10/16/2026.10.14.759182/F1.large.jpg?width=800&amp;height=600" data-hide-link-title="0" '
+                'title="short">x</a><div class="fig-caption"><span class="fig-label">Figure 1:</span> <p>Viability of '
+                'TRAIL-resistant cells (p &lt; 0.05).</p><div class="sb-div caption-clear"></div></div></div></div>')
+        assert utils.biorxiv_figure(page) == (
+            "https://www.biorxiv.org/content/biorxiv/early/2026/10/16/2026.10.14.759182/F1.large.jpg",
+            "Figure 1: Viability of TRAIL-resistant cells (p < 0.05).")
+        assert utils.biorxiv_figure("<div class='fulltext-view'>no figures</div>") == (None, None)
+        assert utils.biorxiv_figure(None) == (None, None)
+
+    def test_text_and_figure_share_one_download(self, monkeypatch):
+        from app import utils
+        seen = []
+        monkeypatch.setattr(utils.time, "sleep", lambda s: None)
+        real = utils._http_client
+        monkeypatch.setattr(utils, "_http_client", lambda **kw: real(transport=httpx.MockTransport(
+            lambda r: (seen.append(str(r.url)), httpx.Response(200, text=self.PAGE))[1]), **kw))
+        utils.fetch_biorxiv_full_text(self.PDF)
+        utils.fetch_biorxiv_figure(self.PDF)
+        assert len(seen) == 1
+        monkeypatch.setattr(utils, "_http_client", lambda **kw: real(transport=httpx.MockTransport(
+            lambda r: (seen.append(str(r.url)), httpx.Response(200, text="<html>PDF only so far</html>"))[1]), **kw))
+        fresh = self.PDF.replace("999001", "999002")
+        assert utils.fetch_biorxiv_full_text(fresh) is None and utils.fetch_biorxiv_figure(fresh) == (None, None)
+        assert len(seen) == 2  # "no HTML yet" is kept too
+
+    def test_the_nightly_backfill_adds_figure_1_once_the_html_is_there(self, app):
+        from app.crawl import backfill_missing_paper_metadata
+        today = date.today()
+        papers = {name: Paper(arxiv_id=f"web:biorxiv-fig{name}", title=name, source="biorxiv", pdf_url=f"{self.PDF}?{name}",
+                              published_date=today - timedelta(days=days), enrich_complete=1)
+                  for name, days in [("fresh", 2), ("ready", 7), ("old", 40)]}
+        with app.app_context():
+            db.session.add_all(papers.values())
+            db.session.commit()
+            try:
+                with patch("app.crawl._ArxivLockCtx"), patch("app.crawl.time.sleep"), \
+                        patch("app.crawl.arxiv.Client") as client, \
+                        patch("app.crawl.get_citation_count", return_value=None), \
+                        patch("app.crawl.fetch_biorxiv_figure", return_value=("https://www.biorxiv.org/f/F1.large.jpg",
+                                                                              "Figure 1: x")) as fig:
+                    client.return_value.results.return_value = []
+                    backfill_missing_paper_metadata()
+                    assert [c.args[0] for c in fig.call_args_list] == [f"{self.PDF}?ready"]  # 4 to 30 days only
+                    assert papers["ready"].figure_url == "https://www.biorxiv.org/f/F1.large.jpg"
+                    fig.return_value = (None, None)
+                    papers["ready"].figure_url = None
+                    db.session.commit()
+                    backfill_missing_paper_metadata()  # tried today already: not again until tomorrow
+                    assert fig.call_count == 1
+            finally:
+                for p in papers.values():
+                    db.session.delete(p)
+                db.session.commit()
 
     def test_biorxiv_downloads_are_one_at_a_time_7_s_apart(self, monkeypatch):
         from app import utils

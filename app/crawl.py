@@ -23,7 +23,8 @@ from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
 from app.usage import counted, counts
 from app.biorxiv import search_biorxiv, biorxiv_paper_id, PDF_URL as BIORXIV_PDF_URL
-from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id
+from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id, \
+    _is_biorxiv, _biorxiv_gap, fetch_biorxiv_figure
 
 API_KEY = os.environ.get("LLM_API_KEY")
 SCHOLAR_API_KEY = os.environ.get("SCHOLAR_API_KEY")
@@ -65,6 +66,7 @@ def _is_open_access_pdf_domain(url: str) -> bool:
 
 
 MAX_WEB_ENRICH_ATTEMPTS = 3
+BIORXIV_FIGURE_DAYS = 30  # the nightly backfill looks for a bioRxiv paper's figure 1 until this long after posting
 # Nightly full-text re-read of New Papers screened from the abstract (refresh_from_full_text)
 MAX_FULL_TEXT_ATTEMPTS = 3
 FULL_TEXT_REFRESH_PER_NIGHT = int(os.environ.get("FULL_TEXT_REFRESH_PER_NIGHT", "50"))
@@ -861,7 +863,7 @@ def get_paper_figure(arxiv_id: str) -> tuple[Optional[str], Optional[str]]:
 def _fetch_figure_html(figure_url: str, caption: Optional[str] = None) -> str:
     """Download figure URL, add white padding, return embedded HTML block. Returns '' on failure."""
     try:
-        with _ArxivLockCtx():
+        with _biorxiv_gap() if _is_biorxiv(figure_url) else _ArxivLockCtx():  # each site's own rate limit
             with _http_client(timeout=15, follow_redirects=True) as http:
                 img_resp = http.get(figure_url)
         if img_resp.status_code != 200 or len(img_resp.content) <= 1000:
@@ -2804,7 +2806,10 @@ def run_crawl(
                                 "screen_source": screen_source}
 
                     if arxiv_id.startswith("web:"):
-                        figure_url, figure_caption = None, None
+                        # bioRxiv: figure 1 from the HTML version if it is there yet (the page the deep check
+                        # read, kept for an hour); else the nightly backfill adds it later (Pass 4)
+                        figure_url, figure_caption = (fetch_biorxiv_figure(pd["pdf_url"])
+                                                      if _is_biorxiv(pd.get("pdf_url") or "") else (None, None))
                         citation_count = _fetch_citations(f"DOI:{pd['doi']}") if pd.get("doi") else None
                     else:
                         figure_url, figure_caption = get_paper_figure(arxiv_id)
@@ -3554,5 +3559,27 @@ def backfill_missing_paper_metadata() -> int:
                 "[backfill] web paper %s giving up after %d failed attempts (page_count=%s institutions=%s)",
                 paper.arxiv_id, paper.web_enrich_attempts, paper.page_count, paper.institutions,
             )
+
+    # --- Pass 4: figure 1 of bioRxiv papers, once bioRxiv has added the HTML version ---
+    # The crawl usually sees a preprint before its HTML (with the figures) exists, 4 to 6 days after posting.
+    # Tried from 4 to BIORXIV_FIGURE_DAYS days after posting, at most once a day (this runs after each of the
+    # nightly runs; web_enrich_last_attempt_at is free for bioRxiv papers, Pass 3 never takes them).
+    today = date.today()
+    needs_figure = Paper.query.filter(
+        Paper.source == "biorxiv",
+        Paper.figure_url.is_(None),
+        Paper.published_date <= today - timedelta(days=4),
+        Paper.published_date >= today - timedelta(days=BIORXIV_FIGURE_DAYS),
+        or_(Paper.web_enrich_last_attempt_at.is_(None),
+            Paper.web_enrich_last_attempt_at < datetime.utcnow() - timedelta(hours=20)),
+    ).limit(20).all()
+    if needs_figure:
+        _log.info("[backfill] %d bioRxiv paper(s) without figure 1 (capped at 20/run)", len(needs_figure))
+    for paper in needs_figure:
+        paper.web_enrich_last_attempt_at = datetime.utcnow()
+        paper.figure_url, paper.figure_caption = fetch_biorxiv_figure(paper.pdf_url or "")
+        db.session.commit()
+        updated += bool(paper.figure_url)
+        _log.info("[backfill] bioRxiv %s: %s", paper.arxiv_id, "figure 1 added" if paper.figure_url else "no HTML yet")
 
     return updated

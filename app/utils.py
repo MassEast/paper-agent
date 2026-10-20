@@ -1,3 +1,4 @@
+import html as html_lib
 import io
 import re
 import threading
@@ -203,20 +204,58 @@ def _biorxiv_html_to_text(html: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def fetch_biorxiv_full_text(pdf_url: str, max_chars: int = 80000) -> str | None:
-    """A bioRxiv paper's text from its HTML version (pdf_url without ".pdf"), or None if there is none yet:
-    bioRxiv adds it about 4 to 6 days after posting (none of 17 papers 1 to 3 days old had it, all of 12
-    papers 6 and 10 days old did, checked 2026-10-20), so a fresh paper is read from its PDF."""
+# A crawl reads a bioRxiv page for the text (deep check) and again for figure 1 (once accepted); keeping the
+# answer for an hour makes that one download. A missing HTML version is kept too, so it isn't asked twice.
+_biorxiv_pages: dict[str, tuple[float, Optional[str]]] = {}
+BIORXIV_PAGE_TTL_S = 3600
+
+
+def fetch_biorxiv_page(pdf_url: str) -> str | None:
+    """The HTML version of a bioRxiv paper (pdf_url without ".pdf"), or None if there is none yet: bioRxiv
+    adds it about 4 to 6 days after posting (none of 17 papers 1 to 3 days old had it, all of 12 papers 6 and
+    10 days old did, checked 2026-10-20)."""
     url = pdf_url.removesuffix(".pdf")
+    now = time.monotonic()
+    for k in [k for k, (t, _) in _biorxiv_pages.items() if now - t > BIORXIV_PAGE_TTL_S]:
+        del _biorxiv_pages[k]
+    if url in _biorxiv_pages:
+        return _biorxiv_pages[url][1]
     try:
         with _biorxiv_gap():
             with _http_client(timeout=30.0, follow_redirects=True) as http:
                 r = http.get(url)
     except httpx.HTTPError as e:
         print(f"HTML fetch failed for {url}: {e}")
-        return None
-    text = _biorxiv_html_to_text(r.text) if r.status_code == 200 else ""
+        return None  # not kept: a network error is tried again
+    page = r.text if r.status_code == 200 and re.search(r'<div[^>]*class="[^"]*\bfulltext-view\b', r.text) else None
+    _biorxiv_pages[url] = (now, page)
+    return page
+
+
+def fetch_biorxiv_full_text(pdf_url: str, max_chars: int = 80000) -> str | None:
+    """A bioRxiv paper's text from its HTML version, or None while there is none (then the PDF is read)."""
+    page = fetch_biorxiv_page(pdf_url)
+    text = _biorxiv_html_to_text(page) if page else ""
     return text[:max_chars] if len(text) >= MIN_TEXT_CHARS else None
+
+
+_BIORXIV_F1 = re.compile(r'<div id="F1"[^>]*>.*?<a href="(https://www\.biorxiv\.org/[^"?]+/F1\.large\.jpg)', re.S)
+
+
+def biorxiv_figure(page: str) -> tuple[Optional[str], Optional[str]]:
+    """Figure 1 of a bioRxiv HTML page: (image URL, caption with its "Figure 1:" label), or (None, None).
+    Every one of 20 pages 6 to 14 days old had it, and the image loads when linked from another site
+    (checked 2026-10-20)."""
+    m = _BIORXIV_F1.search(page or "")
+    if not m:
+        return None, None
+    cap = re.search(r'<div class="fig-caption"[^>]*>(.*?)<div class="sb-div caption-clear"', page[m.end():m.end() + 20000], re.S)
+    caption = html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", cap.group(1)))).strip() if cap else None
+    return m.group(1), caption
+
+
+def fetch_biorxiv_figure(pdf_url: str) -> tuple[Optional[str], Optional[str]]:
+    return biorxiv_figure(fetch_biorxiv_page(pdf_url))
 
 
 def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
