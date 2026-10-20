@@ -31,7 +31,7 @@ from app import db, prompts
 from app.llm import MAX_TOKENS_CEILING, MODELS, LLMUnavailableError, _llm_stream
 from app.models import ChatMessage, PaperText, ProjectPaper
 from app.usage import counted
-from app.utils import MIN_TEXT_CHARS, fetch_paper_full_text, fetch_pdf_text
+from app.utils import MIN_TEXT_CHARS, _is_biorxiv, fetch_biorxiv_full_text, fetch_paper_full_text, fetch_pdf_text
 
 _log = logging.getLogger(__name__)
 
@@ -94,6 +94,10 @@ def _fetch_text(paper) -> tuple[str | None, str | None]:
         if text and len(text) >= MIN_TEXT_CHARS:
             return text, "pdf"
     elif paper.pdf_url and _is_open_access_pdf_domain(paper.pdf_url):
+        if _is_biorxiv(paper.pdf_url):  # like arXiv: the HTML version first
+            text = fetch_biorxiv_full_text(paper.pdf_url, max_chars=MAX_PAPER_CHARS)
+            if text and len(text) >= MIN_TEXT_CHARS:
+                return text, "html"
         text = _pdf_text(paper.pdf_url, arxiv=False)
         if text and len(text) >= MIN_TEXT_CHARS:
             return text, "pdf"

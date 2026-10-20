@@ -2281,10 +2281,13 @@ def get_citation_count_by_scholar_id(scholar_id: str) -> Optional[int]:
 
 def get_paper_content(arxiv_id: str, pdf_url: Optional[str] = None) -> Optional[str]:
     """Return the paper's full text (arXiv HTML, else the PDF), or None. Every caller already has the
-    abstract and falls back to it, so there is no extra arXiv API request for it here. A non-arXiv paper
-    (a bioRxiv find) has only its PDF, read only from an open-access domain."""
-    from app.utils import fetch_paper_full_text, fetch_pdf_text
+    abstract and falls back to it, so there is no extra arXiv API request for it here. A non-arXiv paper is
+    read only from an open-access domain: a bioRxiv paper like an arXiv one (its HTML, else its PDF), any
+    other only from its PDF."""
+    from app.utils import fetch_paper_full_text, fetch_pdf_text, fetch_biorxiv_full_text, _is_biorxiv
 
+    if arxiv_id.startswith("web:") and pdf_url and _is_biorxiv(pdf_url):
+        return fetch_biorxiv_full_text(pdf_url) or fetch_pdf_text(pdf_url, arxiv=False)
     if arxiv_id.startswith("web:"):
         return fetch_pdf_text(pdf_url, arxiv=False) if pdf_url and _is_open_access_pdf_domain(pdf_url) else None
     return fetch_paper_full_text(arxiv_id) or fetch_pdf_text(f"https://arxiv.org/pdf/{arxiv_id}", arxiv=True)

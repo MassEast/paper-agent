@@ -212,6 +212,8 @@ The CronJob always pulls `:latest` at job start, so it needs no separate restart
 - **Spend fewer tokens on screening.** The pipeline was built for recall, not cost: every candidate gets an LLM relevance check. A cheap first pass (embedding similarity to My Collection, or a reranker) could drop the clear misses before the LLM sees them. To build it, first replay past crawls to measure how many papers that were accepted the pre-filter would have cut, and only use it if that number is close to zero.
 - **Negative examples for the recommendations.** Semantic Scholar's recommendation endpoint also accepts papers you *don't* want more of. The papers in Trash could go there, to steer recommendations away from what was rejected. Not done yet because Trash also holds papers that fit the topic but weren't interesting enough, so the effect is unclear; it would need a before/after comparison of what the recommendations bring in.
 
+- **Merge duplicate papers.** The same work can end up twice in a project, for example a bioRxiv preprint and its later journal version (two DOIs), or a paper pasted by hand and also found by a crawl. A "merge" action on a card would keep one paper with both papers' tags, notes and chat.
+
 ## Contributing
 
 See [`AGENTS.md`](AGENTS.md) for repo conventions, dev commands, and an architecture deep-dive — written for both human and AI-agent contributors.

@@ -175,17 +175,63 @@ class TestCrawl:
 class TestFullText:
     PDF = "https://www.biorxiv.org/content/10.64898/2026.10.10.999001v1.full.pdf"
 
-    def test_a_biorxiv_paper_is_read_from_its_pdf_and_no_other_web_paper_is(self):
+    PAGE = ("<html><nav>Home Submit ALERTS</nav><div class=\"panel-pane pane-highwire-markup fulltext-view\">"
+            "<h2>Introduction</h2><p>" + "Resistant cells grow wider. " * 200 + "</p><div id=\"F1\"><a>Download figure</a>"
+            "<a>Open in new tab</a></div><h2>References</h2><p>Smith 2020. OpenUrl CrossRef PubMed Google Scholar ↵</p>"
+            "<a>Back to top</a></div><div>Tweet Share Subject Areas Zoology (2420)</div></html>")
+
+    def test_a_biorxiv_paper_is_read_from_its_html_else_its_pdf_and_no_other_web_paper_from_either(self):
         from app.crawl import get_paper_content
-        with patch("app.utils.fetch_pdf_text", return_value="text") as pdf, \
-                patch("app.utils.fetch_paper_full_text") as arxiv_html:
-            assert get_paper_content("web:biorxiv-0123456789ab", self.PDF) == "text"
+        with patch("app.utils.fetch_biorxiv_full_text", return_value="html text") as html, \
+                patch("app.utils.fetch_pdf_text", return_value="pdf text") as pdf:
+            assert get_paper_content("web:biorxiv-0123456789ab", self.PDF) == "html text"
+            html.assert_called_once_with(self.PDF)
+            pdf.assert_not_called()
+            html.return_value = None  # a fresh preprint: no HTML version yet
+            assert get_paper_content("web:biorxiv-0123456789ab", self.PDF) == "pdf text"
             pdf.assert_called_once_with(self.PDF, arxiv=False)
+        with patch("app.utils.fetch_biorxiv_full_text") as html, \
+                patch("app.utils.fetch_pdf_text", return_value="text") as pdf, \
+                patch("app.utils.fetch_paper_full_text") as arxiv_html:
             pdf.reset_mock()
             assert get_paper_content("web:abc", "https://www.sciencedirect.com/x.pdf") is None
             assert get_paper_content("web:abc", None) is None
             pdf.assert_not_called()
         arxiv_html.assert_not_called()
+
+    def test_the_html_text_is_the_paper_only(self):
+        from app import utils
+        text = utils._biorxiv_html_to_text(self.PAGE)
+        assert text.startswith("Introduction Resistant cells grow wider.") and text.endswith("Smith 2020.")
+        for chrome in ("Home", "Download figure", "Open in new tab", "OpenUrl", "CrossRef", "Back to top", "Tweet", "Zoology"):
+            assert chrome not in text
+        assert utils._biorxiv_html_to_text("<html>A page without the full text yet</html>") == ""
+
+    def test_the_html_is_the_pdf_url_without_pdf_and_waits_its_turn(self, monkeypatch):
+        from app import utils
+        seen, held = [], []
+        monkeypatch.setattr(utils.time, "sleep", lambda s: None)
+        real = utils._http_client
+
+        def handler(request):
+            seen.append(str(request.url))
+            held.append(utils._biorxiv_lock.locked())
+            return httpx.Response(200, text=self.PAGE)
+        monkeypatch.setattr(utils, "_http_client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+        assert utils.fetch_biorxiv_full_text(self.PDF).startswith("Introduction")
+        assert seen == [self.PDF.removesuffix(".pdf")] and held == [True]
+        assert seen[0].endswith("v1.full")
+
+    def test_the_chat_reads_the_html_first(self):
+        from app import chat
+        paper = Paper(arxiv_id="web:biorxiv-0123456789ab", pdf_url=self.PDF)
+        with patch.object(chat, "fetch_biorxiv_full_text", return_value="H" * 5000), \
+                patch.object(chat, "_pdf_text") as pdf:
+            assert chat._fetch_text(paper) == ("H" * 5000, "html")
+            pdf.assert_not_called()
+        with patch.object(chat, "fetch_biorxiv_full_text", return_value=None), \
+                patch.object(chat, "_pdf_text", return_value="P" * 5000):
+            assert chat._fetch_text(paper) == ("P" * 5000, "pdf")
 
     def test_biorxiv_downloads_are_one_at_a_time_7_s_apart(self, monkeypatch):
         from app import utils

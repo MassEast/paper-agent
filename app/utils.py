@@ -2,6 +2,7 @@ import io
 import re
 import threading
 import time
+from contextlib import contextmanager
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -174,6 +175,50 @@ _biorxiv_last = [float("-inf")]  # time.monotonic() when the last bioRxiv downlo
 BIORXIV_GAP_S = 7
 
 
+def _is_biorxiv(url: str) -> bool:
+    return (urlparse(url).hostname or "").endswith("biorxiv.org")
+
+
+@contextmanager
+def _biorxiv_gap():
+    with _biorxiv_lock:
+        time.sleep(max(0.0, _biorxiv_last[0] + BIORXIV_GAP_S - time.monotonic()))
+        try:
+            yield
+        finally:
+            _biorxiv_last[0] = time.monotonic()
+
+
+def _biorxiv_html_to_text(html: str) -> str:
+    """The paper's text from a bioRxiv .full page: from its fulltext-view div to the "Back to top" link after
+    the references (the site's menus, share links and subject list are outside), without the "Download
+    figure" buttons and the reference link labels. Cleaner than the PDF's text, which has line numbers and
+    the license line of every page in it (compared on 6 papers, 2026-10-20)."""
+    m = re.search(r'<div[^>]*class="[^"]*\bfulltext-view\b', html)
+    if not m:
+        return ""
+    end = html.find("Back to top", m.start())
+    text = _html_to_text(html[m.start():end if end > 0 else len(html)])
+    text = re.sub(r"Download figure|Open in new tab|OpenUrl|CrossRef|PubMed|Google Scholar|Web of Science|↵", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def fetch_biorxiv_full_text(pdf_url: str, max_chars: int = 80000) -> str | None:
+    """A bioRxiv paper's text from its HTML version (pdf_url without ".pdf"), or None if there is none yet:
+    bioRxiv adds it about 4 to 6 days after posting (none of 17 papers 1 to 3 days old had it, all of 12
+    papers 6 and 10 days old did, checked 2026-10-20), so a fresh paper is read from its PDF."""
+    url = pdf_url.removesuffix(".pdf")
+    try:
+        with _biorxiv_gap():
+            with _http_client(timeout=30.0, follow_redirects=True) as http:
+                r = http.get(url)
+    except httpx.HTTPError as e:
+        print(f"HTML fetch failed for {url}: {e}")
+        return None
+    text = _biorxiv_html_to_text(r.text) if r.status_code == 200 else ""
+    return text[:max_chars] if len(text) >= MIN_TEXT_CHARS else None
+
+
 def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
     """Text extracted from a PDF, or None if it can't be downloaded or read. arxiv=True waits for
     the arXiv rate limit."""
@@ -189,13 +234,9 @@ def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
         if arxiv:
             with _ArxivLockCtx():
                 r = _get()
-        elif (urlparse(url).hostname or "").endswith("biorxiv.org"):
-            with _biorxiv_lock:  # bioRxiv's robots.txt asks for 7 s between requests
-                time.sleep(max(0.0, _biorxiv_last[0] + BIORXIV_GAP_S - time.monotonic()))
-                try:
-                    r = _get()
-                finally:
-                    _biorxiv_last[0] = time.monotonic()
+        elif _is_biorxiv(url):
+            with _biorxiv_gap():  # bioRxiv's robots.txt asks for 7 s between requests
+                r = _get()
         else:
             r = _get()
     except httpx.HTTPError as e:

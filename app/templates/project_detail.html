@@ -691,9 +691,10 @@
                             sets it for the nightly run and for Find Papers): bioRxiv cannot search by keyword, so
                             the whole date range is read from its public API and a paper is kept when its title or
                             abstract contains one of your keywords as a phrase, as in the arXiv search (a plural
-                            "s" and hyphens are ignored). Only first versions count. Its PDF is read from bioRxiv like an arXiv
-                            paper's (one download every 7 s, as bioRxiv asks); it has no figure, and its card links
-                            to bioRxiv.
+                            "s" and hyphens are ignored). Only first versions count. Its full text is read from bioRxiv like an
+                            arXiv paper's: the HTML version, or the PDF while there is none yet (bioRxiv adds the HTML
+                            a few days after posting); one download every 7 s, as bioRxiv asks. It has no figure, and
+                            its card links to bioRxiv.
                         </li>
                         <li>
                             <strong>Semantic Scholar recommendations</strong> (if you have papers in My
@@ -701,8 +702,8 @@
                             recommendations API, from up to 100 My Collection papers in groups of 10 (the API ranks by
                             similarity, not date, so smaller groups reach more recent papers). A My Collection paper
                             that is not on arXiv is used by its DOI (or found on Semantic Scholar by its title). The
-                            recommendations in your date range are kept: arXiv papers, bioRxiv preprints (read from
-                            their PDF) and journal papers with a DOI and an abstract (judged on the abstract, unless
+                            recommendations in your date range are kept: arXiv papers, bioRxiv preprints (full text
+                            read as for the bioRxiv search) and journal papers with a DOI and an abstract (judged on the abstract, unless
                             their PDF is openly available from a site on the open-access list).
                         </li>
                         <li>
@@ -819,7 +820,7 @@
                             <span style="min-width: 0;">arXiv keyword search</span>
                             <span style="margin-left: auto; padding-left: 8px; color: var(--ink-4);">slower</span>
                         </label>
-                        <label data-tip="Preprints on bioRxiv (biology and medicine) whose title or abstract contains one of your keywords. Their PDF is read from bioRxiv for the deep check and the summary"
+                        <label data-tip="Preprints on bioRxiv (biology and medicine) whose title or abstract contains one of your keywords. Their full text is read from bioRxiv for the deep check and the summary"
                             style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
                             <input type="checkbox" id="use-biorxiv-checkbox" {% if project.use_biorxiv %}checked{% endif %}
                                 style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
