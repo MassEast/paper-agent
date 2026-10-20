@@ -22,7 +22,7 @@ from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog, Scr
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
 from app.usage import counted, counts
-from app.biorxiv import search_biorxiv, biorxiv_paper_id, PDF_URL as BIORXIV_PDF_URL
+from app.biorxiv import search_biorxiv, biorxiv_paper_id, fetch_versions as biorxiv_versions, PDF_URL as BIORXIV_PDF_URL
 from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id, \
     _is_biorxiv, _biorxiv_gap, fetch_biorxiv_figure
 
@@ -453,6 +453,14 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
             paper.doi = info.get("doi") or doi_from_url(url) or doi_from_url(paper.pdf_url)
             db.session.commit()
             _log.info("[web-add] stored web paper: %s → %s (pdf=%s)", url, page_title, paper.pdf_url)
+
+            # A bioRxiv link: read like a bioRxiv crawl find (full text, figure 1), not as a web page
+            if _is_biorxiv(paper.pdf_url or url):
+                _set_step(paper_id, "web", "Reading the paper on bioRxiv")
+                if upgrade_biorxiv_paper(paper):
+                    paper.enrich_complete = 1
+                    db.session.commit()
+                    return
 
             # Step 3b: download the actual PDF (if we found a direct link) for institutions +
             _set_step(paper_id, "web", "Reading the PDF")
@@ -2386,6 +2394,81 @@ def summary_source(paper_content: str | None, abstract: str) -> str:
     return "full_text" if paper_content and len(paper_content) > len(abstract or "") else "abstract"
 
 
+_BIORXIV_POST_RE = re.compile(r"(?<!\d)(\d{4}\.\d{2}\.\d{2}\.\d{5,})")
+
+
+def upgrade_biorxiv_paper(paper) -> bool:
+    """Make a paper added by hand from a bioRxiv link a full bioRxiv paper, as if the crawl had found it: DOI,
+    posting date and corresponding author's institution from the bioRxiv API, the crawl's id
+    (biorxiv_paper_id, so a crawl that finds it again sees it is already there; kept if another paper has
+    it), its latest PDF as pdf_url, a summary from the full text (HTML, else PDF), figure 1, and citations by
+    DOI. Before 2026-10-20 bioRxiv was not on the open-access list, so such papers got a summary of the web
+    page and their PDF never read. False, paper unchanged, if bioRxiv doesn't know it. Caller commits."""
+    post = _BIORXIV_POST_RE.search(f"{paper.doi or ''} {paper.pdf_url or ''}")
+    dois = [paper.doi] if (paper.doi or "").startswith(("10.1101/", "10.64898/")) else []
+    dois += [f"{prefix}/{post.group(1)}" for prefix in ("10.1101", "10.64898") if post]  # prefix changed in 2026
+    versions = next((v for v in (biorxiv_versions(d) for d in dict.fromkeys(dois)) if v), [])
+    if not versions:
+        _log.warning("[bioRxiv] %s (%s): bioRxiv does not know it", paper.arxiv_id, paper.pdf_url)
+        return False
+    first, last = versions[0], versions[-1]
+    doi = last["doi"]
+    new_id = biorxiv_paper_id(doi)
+    if new_id != paper.arxiv_id and Paper.query.filter_by(arxiv_id=new_id).first():
+        _log.warning("[bioRxiv] %s: a crawl already stored %s as %s, both kept", paper.arxiv_id, doi, new_id)
+    else:
+        paper.arxiv_id = new_id
+    paper.doi, paper.source = doi, "biorxiv"
+    paper.pdf_url = BIORXIV_PDF_URL.format(doi=doi, version=last.get("version") or 1)
+    paper.published_date = datetime.strptime(first["date"], "%Y-%m-%d").date()
+    paper.year = paper.published_date.year
+    paper.abstract = paper.abstract or " ".join((last.get("abstract") or "").split())
+    if not paper.institutions_list and (last.get("author_corresponding_institution") or "").strip():
+        paper.institutions = json.dumps([last["author_corresponding_institution"].strip()])
+    paper.web_enrich_attempts = 0  # the card's "PDF metadata failed": Pass 3 is for papers from other sites
+    content = get_paper_content(paper.arxiv_id, paper.pdf_url)
+    if content:
+        write_summary(paper, content)
+    if not paper.figure_url:
+        paper.figure_url, paper.figure_caption = fetch_biorxiv_figure(paper.pdf_url)
+    count = _fetch_citations(f"DOI:{doi}")
+    if count is not None:
+        paper.citation_count, paper.citation_fetched_at = count, datetime.utcnow()
+    _log.info("[bioRxiv] %s upgraded: %s, %s, figure %s", paper.arxiv_id, doi,
+              "summary from the full text" if content else "no full text", "yes" if paper.figure_url else "not yet")
+    return True
+
+
+def write_summary(paper, content: str) -> None:
+    """Write (or rewrite) a paper's shared summary, badges and main contributions from content (the full text,
+    or the abstract if there is none). Used by Regenerate and the bioRxiv upgrade. Caller commits."""
+    abstract = paper.abstract or ""
+    summary_data, model, elapsed, tokens = generate_summary_with_full_content(
+        title=paper.title, abstract=abstract, paper_content=content)
+    contributions, _, contrib_elapsed, contrib_tokens = extract_main_contributions(
+        title=paper.title, paper_content=content, abstract=abstract)
+    summary_data = summary_data if isinstance(summary_data, dict) else {}
+    fields = dict(
+        content_source=summary_source(content, abstract),
+        summary_text=summary_data.get("summary", ""),
+        model_used=model,
+        introduces_dataset=summary_data.get("introduces_dataset", False),
+        introduces_architecture=summary_data.get("introduces_architecture", False),
+        introduces_method=summary_data.get("introduces_method", False),
+        is_survey=summary_data.get("is_survey", False),
+        is_benchmark=summary_data.get("is_benchmark", False),
+        elapsed_ms=elapsed + contrib_elapsed,
+        tokens_used=tokens + contrib_tokens,
+    )
+    if paper.summary:
+        for k, v in fields.items():
+            setattr(paper.summary, k, v)
+        if contributions:
+            paper.summary.main_contributions = contributions
+    else:
+        db.session.add(PaperSummary(paper_id=paper.id, main_contributions=contributions, **fields))
+
+
 def extract_main_contributions(
     title: str, paper_content: str, abstract: str
 ) -> tuple[str, str, int, int]:
@@ -3525,6 +3608,20 @@ def backfill_missing_paper_metadata() -> int:
             paper.citation_fetched_at = datetime.utcnow()
             db.session.commit()
             updated += 1
+
+    # --- Pass 2b: papers added by hand from a bioRxiv link become full bioRxiv papers (upgrade_biorxiv_paper) ---
+    # One try a day each (web_enrich_last_attempt_at): one that bioRxiv doesn't know is logged and kept as it is
+    hand_added_biorxiv = Paper.query.filter(
+        Paper.arxiv_id.like("web:%"),
+        or_(Paper.source.is_(None), Paper.source == "web"),
+        Paper.pdf_url.like("%biorxiv.org/%"),
+        or_(Paper.web_enrich_last_attempt_at.is_(None),
+            Paper.web_enrich_last_attempt_at < datetime.utcnow() - timedelta(hours=20)),
+    ).limit(20).all()
+    for paper in hand_added_biorxiv:
+        paper.web_enrich_last_attempt_at = datetime.utcnow()
+        updated += upgrade_biorxiv_paper(paper)
+        db.session.commit()
 
     # --- Pass 3: web-paper PDF metadata (direct PDF link, page count, institutions) ---
     # Targets papers whose pdf_url is still just the landing page — either added before

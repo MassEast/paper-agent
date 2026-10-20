@@ -46,6 +46,13 @@ def matched_keywords(text: str, keywords: list[str]) -> list[str]:
     return [k for k in keywords if _words(k) and " " + " ".join(_words(k)) + " " in text_words]
 
 
+def fetch_versions(doi: str) -> list[dict]:
+    """Every version bioRxiv has of one paper, oldest first ([] if it doesn't know the DOI)."""
+    with _http_client(timeout=30.0, follow_redirects=True) as http:
+        r = http.get(f"https://api.biorxiv.org/details/biorxiv/{doi}/na/json")
+    return (r.json().get("collection") or []) if r.status_code == 200 else []
+
+
 def _get_page(http, start: date, end: date, cursor: int) -> Optional[dict]:
     """One page of the interval listing, with a few retries; None if it kept failing."""
     url = API_URL.format(start=start.isoformat(), end=end.isoformat(), cursor=cursor)

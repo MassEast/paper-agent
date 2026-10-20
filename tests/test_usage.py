@@ -157,8 +157,8 @@ def test_regenerate_replaces_the_cards_tokens_instead_of_adding(app, proj, logge
     with patch("app.routes.papers.get_paper_figure", return_value=(None, None)), \
          patch("app.routes.papers.get_citation_count", return_value=None), \
          patch("app.routes.papers.get_paper_content", return_value="full text"), \
-         patch("app.routes.papers.generate_summary_with_full_content", side_effect=summary), \
-         patch("app.routes.papers.extract_main_contributions", side_effect=contributions), \
+         patch("app.crawl.generate_summary_with_full_content", side_effect=summary), \
+         patch("app.crawl.extract_main_contributions", side_effect=contributions), \
          patch("app.routes.papers.generate_relevance_reason", return_value="why"):
         resp = logged_in.post("/paper/2601.07002/regenerate", data={"project_id": proj})
     assert resp.status_code in (200, 204)

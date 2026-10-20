@@ -446,3 +446,120 @@ def test_live_one_day_of_biorxiv_has_the_fields_the_crawl_relies_on():
     words = max(len(c["abstract"].split()) for c in candidates)
     found = biorxiv.search_biorxiv([candidates[0]["title"].split()[-1]], day, day)
     assert any(f["doi"] == candidates[0]["doi"] for f in found) and words > 50
+
+
+class TestUpgradeHandAdded:
+    """A paper added by hand from a bioRxiv link (before bioRxiv was on the open-access list it got a summary of
+    the web page, no full text, no figure, and "PDF metadata failed") becomes a full bioRxiv paper."""
+    URL = "https://www.biorxiv.org/content/biorxiv/early/2025/05/01/2025.04.28.651001.full.pdf"
+    DOI = "10.1101/2025.04.28.651001"
+    VERSIONS = [{"doi": DOI, "version": "1", "date": "2025-05-01", "abstract": "Cellpose meets SAM.",
+                 "author_corresponding_institution": "HHMI Janelia Research Campus"},
+                {"doi": DOI, "version": "2", "date": "2025-06-10", "abstract": "Cellpose meets SAM.",
+                 "author_corresponding_institution": "HHMI Janelia Research Campus"}]
+
+    @pytest.fixture(autouse=True)
+    def _cleanup(self, app):
+        yield
+        with app.app_context():
+            db.session.rollback()
+            for paper in Paper.query.filter(Paper.title.in_(["Cellpose-SAM", "Fetching…"])).all():
+                PaperSummary.query.filter_by(paper_id=paper.id).delete()
+                ProjectPaper.query.filter_by(paper_id=paper.id).delete()
+                db.session.delete(paper)
+            db.session.commit()
+
+    def _hand_added(self, project, arxiv_id="web:65f871343860"):
+        paper = Paper(arxiv_id=arxiv_id, title="Cellpose-SAM", source="web", pdf_url=self.URL, abstract="",
+                      web_enrich_attempts=3, enrich_complete=1)
+        db.session.add(paper)
+        db.session.flush()
+        db.session.add(PaperSummary(paper_id=paper.id, content_source="web_page", summary_text="from the page"))
+        db.session.add(ProjectPaper(project_id=project.id, paper_id=paper.id, origin="manual", manual_tag="related"))
+        db.session.commit()
+        return paper
+
+    def _upgrade(self, paper, versions=None):
+        from app import crawl
+        asked = []
+        with patch("app.crawl.biorxiv_versions", side_effect=lambda d: (asked.append(d),
+                                                                         (versions or self.VERSIONS) if d == self.DOI else [])[1]), \
+                patch("app.crawl.get_paper_content", return_value="Full text. " * 400) as content, \
+                patch("app.crawl.generate_summary_with_full_content", return_value=({"summary": "from the paper"}, "m", 1, 10)), \
+                patch("app.crawl.extract_main_contributions", return_value=("1. Cellpose-SAM", "", 1, 5)), \
+                patch("app.crawl.fetch_biorxiv_figure", return_value=("https://www.biorxiv.org/f/F1.large.jpg", "Figure 1: x")), \
+                patch("app.crawl._fetch_citations", return_value=321):
+            ok = crawl.upgrade_biorxiv_paper(paper)
+            db.session.commit()
+        return ok, asked, content
+
+    def test_it_becomes_the_paper_a_crawl_would_store(self, app, project):
+        paper = self._hand_added(project)
+        ok, asked, content = self._upgrade(paper)
+        assert ok and asked == [self.DOI]  # the old prefix first; the post id comes from the link
+        db.session.expire_all()
+        p = db.session.get(Paper, paper.id)
+        assert p.arxiv_id == biorxiv.biorxiv_paper_id(self.DOI)  # a crawl that finds it sees it is there
+        assert (p.doi, p.source, p.pdf_url) == (self.DOI, "biorxiv",
+                                                "https://www.biorxiv.org/content/10.1101/2025.04.28.651001v2.full.pdf")
+        assert (p.published_date, p.year, p.abstract) == (date(2025, 5, 1), 2025, "Cellpose meets SAM.")
+        assert json.loads(p.institutions) == ["HHMI Janelia Research Campus"]
+        assert p.web_enrich_attempts == 0  # no "PDF metadata failed" on the card
+        assert (p.summary.content_source, p.summary.summary_text, p.summary.main_contributions) == (
+            "full_text", "from the paper", "1. Cellpose-SAM")
+        assert (p.figure_url, p.citation_count) == ("https://www.biorxiv.org/f/F1.large.jpg", 321)
+        content.assert_called_once_with(p.arxiv_id, p.pdf_url)
+
+    def test_the_id_stays_if_a_crawl_already_stored_the_paper(self, app, project):
+        crawled = Paper(arxiv_id=biorxiv.biorxiv_paper_id(self.DOI), title="Cellpose-SAM", source="biorxiv")
+        db.session.add(crawled)
+        db.session.commit()
+        paper = self._hand_added(project)
+        assert self._upgrade(paper)[0]
+        assert db.session.get(Paper, paper.id).arxiv_id == "web:65f871343860"
+
+    def test_a_paper_bioRxiv_does_not_know_stays_as_it_is(self, app, project):
+        paper = self._hand_added(project)
+        paper.pdf_url = "https://www.biorxiv.org/content/biorxiv/early/2025/05/01/2025.04.28.999999.full.pdf"
+        db.session.commit()
+        ok, asked, _ = self._upgrade(paper)
+        assert not ok and asked == ["10.1101/2025.04.28.999999", "10.64898/2025.04.28.999999"]
+        assert (paper.source, paper.arxiv_id, paper.summary.content_source) == ("web", "web:65f871343860", "web_page")
+
+    def test_the_nightly_backfill_upgrades_them_once_a_day(self, app, project):
+        from app.crawl import backfill_missing_paper_metadata
+        paper = self._hand_added(project)
+        with patch("app.crawl._ArxivLockCtx"), patch("app.crawl.time.sleep"), \
+                patch("app.crawl.arxiv.Client") as client, \
+                patch("app.crawl.get_citation_count", return_value=None), \
+                patch("app.crawl.extract_paper_info_from_url") as pass3, \
+                patch("app.crawl.upgrade_biorxiv_paper", return_value=False) as upgrade:
+            client.return_value.results.return_value = []
+            backfill_missing_paper_metadata()
+            backfill_missing_paper_metadata()
+        assert [c.args[0].id for c in upgrade.call_args_list] == [paper.id]
+        pass3.assert_not_called()  # its 3 attempts are used up; Pass 3 doesn't try it again
+
+    def test_a_pasted_biorxiv_link_is_upgraded_right_away(self, app, project):
+        from app.crawl import start_web_paper_add_async
+        from tests.test_collection_add import _SyncThread
+        paper = Paper(arxiv_id="web:pasted12345", title="Fetching…", pdf_url=self.URL, source="web", authors="[]")
+        db.session.add(paper)
+        db.session.flush()
+        db.session.add(ProjectPaper(project_id=project.id, paper_id=paper.id, origin="manual", manual_tag="related"))
+        db.session.commit()
+        info = {"title": "Cellpose-SAM", "abstract": "Cellpose meets SAM.", "authors": ["M. Pachitariu"],
+                "page_arxiv_links": [], "doi": None, "pdf_url": self.URL, "page_count": None, "full_text": "page"}
+        with patch("app.crawl.threading.Thread", _SyncThread), \
+                patch("app.crawl.extract_paper_info_from_url", return_value=info), \
+                patch("app.crawl._ArxivLockCtx"), patch("app.crawl.arxiv.Client") as client, \
+                patch("app.crawl.upgrade_biorxiv_paper", return_value=True) as upgrade, \
+                patch("app.crawl.generate_summary_with_full_content") as page_summary, \
+                patch("app.crawl._enrich_web_paper_pdf_metadata") as pdf_metadata:
+            client.return_value.results.return_value = []
+            start_web_paper_add_async(project.id, self.URL, paper.id, app)
+        upgrade.assert_called_once()
+        page_summary.assert_not_called()  # not summarized as a web page
+        pdf_metadata.assert_not_called()
+        db.session.expire_all()
+        assert db.session.get(Paper, paper.id).enrich_complete == 1

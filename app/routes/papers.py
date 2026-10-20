@@ -17,7 +17,6 @@ from app import paper_lists
 from app.routes import papers_bp
 from app.utils import base_arxiv_id
 from app.crawl import (
-    generate_summary_with_full_content,
     get_paper_figure,
     get_citation_count,
     get_citation_count_by_scholar_id,
@@ -26,8 +25,7 @@ from app.crawl import (
     start_relevance_reason_async,
     generate_relevance_reason,
     get_paper_content,
-    extract_main_contributions,
-    summary_source,
+    write_summary,
 )
 from app.llm import LLMUnavailableError
 
@@ -381,45 +379,7 @@ def regenerate_paper(arxiv_id):
         # Summary + main contributions, from the full text like a crawl (abstract if there is none)
         content = (get_paper_content(arxiv_id) if paper.is_arxiv else None) or paper.abstract or ""
         try:
-            summary_data, model, elapsed, tokens = generate_summary_with_full_content(
-                title=paper.title,
-                abstract=paper.abstract or "",
-                paper_content=content,
-            )
-            contributions, _, contrib_elapsed, contrib_tokens = extract_main_contributions(
-                title=paper.title, paper_content=content, abstract=paper.abstract or "",
-            )
-            elapsed, tokens = elapsed + contrib_elapsed, tokens + contrib_tokens
-            source = summary_source(content, paper.abstract or "")
-            from app.models import PaperSummary
-            if paper.summary:
-                paper.summary.content_source = source
-                if contributions:
-                    paper.summary.main_contributions = contributions
-                paper.summary.summary_text = summary_data.get("summary", "")
-                paper.summary.model_used = model
-                paper.summary.introduces_dataset = summary_data.get("introduces_dataset", False)
-                paper.summary.introduces_architecture = summary_data.get("introduces_architecture", False)
-                paper.summary.introduces_method = summary_data.get("introduces_method", False)
-                paper.summary.is_survey = summary_data.get("is_survey", False)
-                paper.summary.is_benchmark = summary_data.get("is_benchmark", False)
-                paper.summary.elapsed_ms = elapsed
-                paper.summary.tokens_used = tokens
-            else:
-                db.session.add(PaperSummary(
-                    paper_id=paper.id,
-                    content_source=source,
-                    summary_text=summary_data.get("summary", ""),
-                    main_contributions=contributions,
-                    model_used=model,
-                    introduces_dataset=summary_data.get("introduces_dataset", False),
-                    introduces_architecture=summary_data.get("introduces_architecture", False),
-                    introduces_method=summary_data.get("introduces_method", False),
-                    is_survey=summary_data.get("is_survey", False),
-                    is_benchmark=summary_data.get("is_benchmark", False),
-                    elapsed_ms=elapsed,
-                    tokens_used=tokens,
-                ))
+            write_summary(paper, content)
         except LLMUnavailableError as e:
             _log.warning("[regenerate] LLM unavailable for %s: %s", arxiv_id, e)
 

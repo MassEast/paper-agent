@@ -301,6 +301,9 @@
                         style="list-style: decimal; padding-left: 16px; display: flex; flex-direction: column; gap: 6px;">
                         <li><strong>arXiv URL</strong> — fetched directly from arXiv. Full enrichment: figure, citation
                             count, page count, LLM summary &amp; contributions, author institutions.</li>
+                        <li><strong>bioRxiv URL</strong> — becomes the same paper a bioRxiv crawl would store: DOI, institution
+                            and posting date from bioRxiv, full text (HTML version, else PDF) for the summary, figure 1
+                            (added later by the nightly run if bioRxiv has no HTML version yet), citation count.</li>
                         <li><strong>Any other URL (PDF, ACL, NeurIPS, blog…)</strong>
                             <ol
                                 style="list-style: lower-alpha; padding-left: 14px; margin-top: 4px; display: flex; flex-direction: column; gap: 4px;">
