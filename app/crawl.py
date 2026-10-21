@@ -633,7 +633,8 @@ def extract_paper_info_from_url(url: str) -> dict:
     try:
         with _http_client(public_only=True, timeout=15.0, follow_redirects=True) as http:
             resp = http.get(fetch_url)
-        content = resp.text[:100000]
+        # A 403/404 body is a block or error page (ScienceDirect: Cloudflare), not the paper.
+        content = "" if resp.status_code >= 400 else resp.text[:100000]
 
         # <title> fallback
         title_match = re.search(r"<title[^>]*>([^<]+)</title>", content, re.IGNORECASE)
@@ -710,7 +711,62 @@ def extract_paper_info_from_url(url: str) -> dict:
     except Exception:
         pass
 
+    if not result["abstract"]:
+        _fill_from_doi_apis(result, url)
+
     return result
+
+
+_DOI_IN_URL = re.compile(r"(10\.\d{4,9}/[^\s?#]+)", re.IGNORECASE)
+_SCIENCEDIRECT_PII = re.compile(r"sciencedirect\.com/science/article/(?:abs/)?pii/([A-Z0-9]+)", re.IGNORECASE)
+
+
+def _fill_from_doi_apis(result: dict, url: str) -> None:
+    """Fill title/abstract/authors/doi from OpenAlex and Crossref when the landing page gave none
+    (ScienceDirect and other publishers block server-side fetches). Metadata APIs only; no
+    publisher page or PDF is touched. Never raises; fields it can't fill stay as they were."""
+    try:
+        with _http_client(public_only=True, timeout=15.0, follow_redirects=True) as http:
+            doi = result.get("doi")
+            if not doi:
+                m = _DOI_IN_URL.search(url)
+                doi = m.group(1) if m else None
+            if not doi:
+                pii = _SCIENCEDIRECT_PII.search(url)
+                if pii:
+                    r = http.get("https://api.crossref.org/works", params={
+                        "filter": f"alternative-id:{pii.group(1)}", "select": "DOI", "rows": 1})
+                    items = r.json()["message"]["items"] if r.status_code == 200 else []
+                    doi = items[0]["DOI"] if items else None
+            if not doi:
+                return
+            result["doi"] = doi
+
+            r = http.get(f"https://api.openalex.org/works/doi:{doi}",
+                         params={"select": "title,abstract_inverted_index,authorships"})
+            if r.status_code == 200:
+                work = r.json()
+                result["title"] = work.get("title") or result["title"]
+                index = work.get("abstract_inverted_index") or {}
+                if index:
+                    words = sorted((pos, w) for w, positions in index.items() for pos in positions)
+                    result["abstract"] = " ".join(w for _, w in words)
+                names = [a["author"]["display_name"] for a in work.get("authorships") or []
+                         if (a.get("author") or {}).get("display_name")]
+                if names:
+                    result["authors"] = names
+            if not result["title"] or not result["authors"]:
+                r = http.get(f"https://api.crossref.org/works/{doi}")
+                if r.status_code == 200:
+                    msg = r.json()["message"]
+                    if not result["title"] and msg.get("title"):
+                        result["title"] = msg["title"][0]
+                    names = [f"{a.get('given', '')} {a.get('family', '')}".strip()
+                             for a in msg.get("author") or []]
+                    if not result["authors"] and names:
+                        result["authors"] = names
+    except Exception as e:
+        _log.warning("[extract-url] DOI API fallback failed for %s: %s", url, e)
 
 
 def generate_research_interest_from_collection(
