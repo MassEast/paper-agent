@@ -32,6 +32,24 @@ if not API_KEY:
 
 MAX_TOKENS_CEILING = 16384
 
+# Requests in flight at once from this process (LLM_MAX_CONCURRENCY, unset = no limit). An endpoint with a
+# concurrency quota turns away the requests above it; the web app and the nightly job share one key, so
+# their two limits together must stay within the quota.
+_MAX_CONCURRENCY = int(os.environ.get("LLM_MAX_CONCURRENCY") or 0)
+_slots = threading.BoundedSemaphore(_MAX_CONCURRENCY) if _MAX_CONCURRENCY > 0 else None
+
+
+class _slot:
+    """Holds one of the LLM_MAX_CONCURRENCY request slots (nothing to hold without a limit)."""
+
+    def __enter__(self):
+        if _slots:
+            _slots.acquire()
+
+    def __exit__(self, *_):
+        if _slots:
+            _slots.release()
+
 
 class LLMUnavailableError(Exception):
     pass
@@ -99,7 +117,8 @@ def _llm(
 
     Tries each model in MODELS in order; for each, retries up to 5 times with exponential
     backoff on connection errors, timeouts, HTTP errors, or an empty/think-only completion.
-    Falls through to the next model only after exhausting retries on the current one.
+    Falls through to the next model only after exhausting retries on the current one, or at once on a 400
+    (prompt too long for it) or 404 (no such model). Every failed attempt is logged.
 
     A completion cut off by max_tokens is retried at once with double the budget (up to
     MAX_TOKENS_CEILING): a reasoning model sometimes reasons past the cap, and a same-budget retry at low
@@ -115,7 +134,7 @@ def _llm(
         budget = max_tokens
         for attempt in range(5):
             try:
-                with httpx.Client(timeout=httpx.Timeout(300.0, connect=30.0)) as http:
+                with _slot(), httpx.Client(timeout=httpx.Timeout(300.0, connect=30.0)) as http:
                     r = http.post(
                         f"{API_BASE}/chat/completions",
                         headers={
@@ -167,6 +186,9 @@ def _llm(
                 httpx.HTTPStatusError,
             ) as e:
                 last_err = e
+                _log.warning("[LLM] %s attempt %d failed: %s", model, attempt + 1, str(e)[:300])
+                if isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (400, 404):
+                    break  # too long for this model, or no such model: retrying it can't help
                 if attempt < 4:
                     wait = (2**attempt) + random.uniform(0, 2)
                     time.sleep(wait)
@@ -278,7 +300,7 @@ def _llm_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int 
                 yield ("retry", model, attempt + 1)
             got_chunk, raw, counted = False, "", False
             try:
-                with httpx.Client(timeout=httpx.Timeout(300.0, connect=30.0)) as http:
+                with _slot(), httpx.Client(timeout=httpx.Timeout(300.0, connect=30.0)) as http:
                     with http.stream(
                         "POST", f"{API_BASE}/chat/completions",
                         headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},

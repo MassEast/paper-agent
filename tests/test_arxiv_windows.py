@@ -145,10 +145,10 @@ def test_citation_fetch_strips_arxiv_version():
     crawl._citation_cache.clear()
     resp = MagicMock(status_code=200)
     resp.json.return_value = {"citationCount": 7}
-    with patch("app.crawl.httpx.Client") as client:
-        client.return_value.__enter__.return_value.get.return_value = resp
+    with patch("app.crawl._http_client") as client, patch("app.crawl._ScholarLockCtx"):
+        client.return_value.__enter__.return_value.request.return_value = resp
         assert crawl._fetch_citations("arXiv:2510.01706v2") == 7
-        url = client.return_value.__enter__.return_value.get.call_args.args[0]
+        url = client.return_value.__enter__.return_value.request.call_args.args[1]
     assert url.endswith("/paper/arXiv:2510.01706?fields=citationCount")
 
 

@@ -41,6 +41,9 @@ spec:
           value: "https://api.openai.com/v1"
         - name: LLM_MODELS
           value: "gpt-4o,gpt-4o-mini"
+        # LLM requests in flight at once; web app + nightly job together within the key's concurrency quota
+        - name: LLM_MAX_CONCURRENCY
+          value: "3"
         - name: SCHOLAR_API_KEY
           valueFrom:
             secretKeyRef:

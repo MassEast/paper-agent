@@ -144,6 +144,25 @@ def _scholar_headers() -> dict:
         headers["x-api-key"] = SCHOLAR_API_KEY
     return headers
 
+
+# Semantic Scholar refuses many requests with 429 (or a 5xx) when it is busy, at random and no matter how far
+# apart our requests are: waiting longer between tries doesn't raise the odds, so retry after a few seconds.
+SCHOLAR_ATTEMPTS = 6
+SCHOLAR_RETRY_WAIT_S = 2.0
+
+
+def _scholar_call(method: str, url: str, timeout: float = 30.0, **kwargs) -> httpx.Response:
+    """One Semantic Scholar request through _ScholarLockCtx, tried up to SCHOLAR_ATTEMPTS times while it answers
+    429 or 5xx. Returns the last response, so the caller sees a 429 that never went through."""
+    for attempt in range(SCHOLAR_ATTEMPTS):
+        with _ScholarLockCtx():
+            with _http_client(timeout=httpx.Timeout(timeout)) as http:
+                r = http.request(method, url, headers=_scholar_headers(), **kwargs)
+        if (r.status_code != 429 and r.status_code < 500) or attempt == SCHOLAR_ATTEMPTS - 1:
+            return r
+        time.sleep(SCHOLAR_RETRY_WAIT_S + SCHOLAR_RETRY_WAIT_S * (attempt % 2))
+    return r
+
 # Papers whose details are being fetched in the background right now (start_collection_add_async,
 # start_web_paper_add_async): paper id -> {"by": which task, "step": what it is doing}. The paper's card
 # shows the step and redraws itself as it changes (/project-paper/<id>/card), so a freshly added paper
@@ -371,13 +390,8 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
                     _log.info("[web-add] DOI %s → arXiv %s (direct)", doi, matched_arxiv_id)
                 else:
                     try:
-                        with _ScholarLockCtx():
-                            with httpx.Client(timeout=httpx.Timeout(10.0)) as _http:
-                                r = _http.get(
-                                    f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}",
-                                    params={"fields": "externalIds"},
-                                    headers=_scholar_headers(),
-                                )
+                        r = _scholar_call("GET", f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}",
+                                          timeout=10.0, params={"fields": "externalIds"})
                         if r.status_code == 200:
                             ext = r.json().get("externalIds") or {}
                             arxiv_via_doi = ext.get("ArXiv")
@@ -1703,14 +1717,8 @@ def enrich_institutions_from_scholar(papers: list) -> None:
 
     ids = [f"ArXiv:{base_arxiv_id(p.arxiv_id)}" for p in to_enrich]
     try:
-        with _ScholarLockCtx():
-            with httpx.Client(timeout=httpx.Timeout(30.0)) as http:
-                r = http.post(
-                    "https://api.semanticscholar.org/graph/v1/paper/batch",
-                    params={"fields": "authors.affiliations"},
-                    json={"ids": ids},
-                    headers=_scholar_headers(),
-                )
+        r = _scholar_call("POST", "https://api.semanticscholar.org/graph/v1/paper/batch",
+                          params={"fields": "authors.affiliations"}, json={"ids": ids})
         if r.status_code == 200:
             id_map = {base_arxiv_id(p.arxiv_id): p for p in to_enrich}
             for item in r.json():
@@ -1965,20 +1973,9 @@ def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = RECO
     papers: dict[str, dict] = {}
     for g, group in enumerate(groups, 1):
         try:
-            for attempt in range(4):
-                with _ScholarLockCtx():
-                    with httpx.Client(timeout=httpx.Timeout(60.0)) as http:
-                        r = http.post(
-                            "https://api.semanticscholar.org/recommendations/v1/papers/",
-                            json={"positivePaperIds": group},
-                            params={"fields": SCHOLAR_PAPER_FIELDS, "limit": limit},
-                            headers=_scholar_headers(),
-                        )
-                if r.status_code != 429 or attempt == 3:
-                    break
-                wait = 15 * 3 ** attempt  # 15s, 45s, 135s
-                _log.warning("[Scholar] Recommendations rate limited, retrying in %ds (attempt %d/4)", wait, attempt + 1)
-                time.sleep(wait)
+            r = _scholar_call("POST", "https://api.semanticscholar.org/recommendations/v1/papers/", timeout=60.0,
+                              json={"positivePaperIds": group},
+                              params={"fields": SCHOLAR_PAPER_FIELDS, "limit": limit})
             if r.status_code != 200:
                 _log.warning("[Scholar] Recommendations API returned %d for group %d/%d: %s",
                              r.status_code, g, len(groups), r.text[:200])
@@ -2024,19 +2021,8 @@ def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: da
     for i, (seed_id, seed_title) in enumerate(seeds, 1):
         offset = 0
         while True:
-            for attempt in range(4):
-                with _ScholarLockCtx():
-                    with _http_client(timeout=httpx.Timeout(30.0)) as http:
-                        r = http.get(
-                            f"https://api.semanticscholar.org/graph/v1/paper/{_scholar_ref(seed_id)}/citations",
-                            params={"fields": SCHOLAR_PAPER_FIELDS, "limit": 100, "offset": offset},
-                            headers=_scholar_headers(),
-                        )
-                if r.status_code != 429 or attempt == 3:
-                    break
-                wait = 15 * 3 ** attempt  # 15s, 45s, 135s
-                _log.warning("[citations] rate limited, retrying in %ds (attempt %d/4)", wait, attempt + 1)
-                time.sleep(wait)
+            r = _scholar_call("GET", f"https://api.semanticscholar.org/graph/v1/paper/{_scholar_ref(seed_id)}/citations",
+                              params={"fields": SCHOLAR_PAPER_FIELDS, "limit": 100, "offset": offset})
             if r.status_code != 429 and checked is not None and seed_id not in checked:
                 checked.append(seed_id)
             if r.status_code != 200:  # 404: Semantic Scholar doesn't know the seed
@@ -2114,11 +2100,8 @@ def resolve_scholar_ids(collection: list) -> None:
             paper.doi = doi
             continue
         try:
-            with _ScholarLockCtx():
-                with _http_client(timeout=httpx.Timeout(30.0)) as http:
-                    r = http.get("https://api.semanticscholar.org/graph/v1/paper/search/match",
-                                 params={"query": paper.title, "fields": "title,externalIds"},
-                                 headers=_scholar_headers())
+            r = _scholar_call("GET", "https://api.semanticscholar.org/graph/v1/paper/search/match",
+                              params={"query": paper.title, "fields": "title,externalIds"})
         except httpx.HTTPError as e:
             _log.warning("[Scholar] title lookup failed for %s: %s", paper.arxiv_id, e)
             continue
@@ -2232,35 +2215,49 @@ def _fetch_citations(paper_ref: str) -> Optional[int]:
     global _citation_429_streak, _citation_paused_until
     if time.time() < _citation_paused_until:
         return None  # Scholar has been refusing us for many papers in a row; stop hammering it for a while
-    for attempt in range(3):
-        try:
-            with _ScholarLockCtx():
-                with httpx.Client(timeout=httpx.Timeout(30.0)) as http:
-                    r = http.get(url, headers=_scholar_headers())
-            if r.status_code == 200:
-                count = r.json().get("citationCount", 0)
-                _citation_cache[paper_ref] = count
-                _citation_429_streak = 0
-                return count
-            if r.status_code == 429:
-                if attempt == 2:
-                    _citation_429_streak += 1
-                    if _citation_429_streak >= _CITATION_429_GIVE_UP:
-                        _citation_429_streak = 0
-                        _citation_paused_until = time.time() + _CITATION_PAUSE_S
-                        _log.warning("[Scholar] %d papers in a row rate limited — pausing citation fetches for %ds", _CITATION_429_GIVE_UP, _CITATION_PAUSE_S)
-                    break
-                wait = 10 * 3 ** attempt  # 10s, 30s
-                _log.warning("[Scholar] Rate limited fetching citations for %s, retrying in %ds", paper_ref, wait)
-                time.sleep(wait)
-                continue
-            _log.warning("[Scholar] Error %d fetching citations for %s", r.status_code, paper_ref)
-            break
-        except Exception as e:
-            _log.warning("[Scholar] Exception fetching citations for %s: %s", paper_ref, e)
-            break
-
+    try:
+        r = _scholar_call("GET", url)
+    except httpx.HTTPError as e:
+        _log.warning("[Scholar] Exception fetching citations for %s: %s", paper_ref, e)
+        return None
+    if r.status_code == 200:
+        count = r.json().get("citationCount", 0)
+        _citation_cache[paper_ref] = count
+        _citation_429_streak = 0
+        return count
+    if r.status_code == 429:
+        _citation_429_streak += 1
+        if _citation_429_streak >= _CITATION_429_GIVE_UP:
+            _citation_429_streak = 0
+            _citation_paused_until = time.time() + _CITATION_PAUSE_S
+            _log.warning("[Scholar] %d papers in a row rate limited — pausing citation fetches for %ds", _CITATION_429_GIVE_UP, _CITATION_PAUSE_S)
+    _log.warning("[Scholar] Error %d fetching citations for %s", r.status_code, paper_ref)
     return None
+
+
+SCHOLAR_BATCH_SIZE = 500  # the most ids /paper/batch takes in one request
+
+
+def get_citation_counts(refs: list[str]) -> dict[str, int]:
+    """Citation counts for many papers ("arXiv:<id>", "DOI:<doi>" or Semantic Scholar ids) in one /paper/batch
+    request per SCHOLAR_BATCH_SIZE. Papers Semantic Scholar doesn't know, and every paper of a batch it kept
+    refusing, are left out."""
+    counts: dict[str, int] = {}
+    for i in range(0, len(refs), SCHOLAR_BATCH_SIZE):
+        chunk = refs[i:i + SCHOLAR_BATCH_SIZE]
+        try:
+            r = _scholar_call("POST", "https://api.semanticscholar.org/graph/v1/paper/batch", timeout=60.0,
+                              params={"fields": "citationCount"}, json={"ids": chunk})
+        except httpx.HTTPError as e:
+            _log.warning("[Scholar] citation batch failed: %s", e)
+            continue
+        if r.status_code != 200:
+            _log.warning("[Scholar] citation batch of %d returned %d", len(chunk), r.status_code)
+            continue
+        for ref, item in zip(chunk, r.json()):  # one entry per id, in order; None for an unknown paper
+            if item is not None:
+                counts[ref] = item.get("citationCount") or 0
+    return counts
 
 
 def get_citation_count(arxiv_id: str) -> Optional[int]:
@@ -3569,27 +3566,23 @@ def backfill_missing_paper_metadata() -> int:
         ~Paper.arxiv_id.like("web:%"),
         or_(Paper.citation_fetched_at.is_(None), Paper.citation_count == 0),
         or_(Paper.citation_attempted_at.is_(None), Paper.citation_attempted_at < cooldown_cutoff),
-    ).order_by(Paper.citation_attempted_at.asc()).limit(100).all()  # SQLite sorts NULL first
+    ).order_by(Paper.citation_attempted_at.asc()).limit(SCHOLAR_BATCH_SIZE).all()  # SQLite sorts NULL first
 
     if needs_citation:
-        _log.info("[backfill] %d paper(s) need citation refresh (capped at 100/run)", len(needs_citation))
-
-    for i, paper in enumerate(needs_citation):
-        if time.time() < _citation_paused_until:
-            _log.warning("[backfill] Scholar citation fetches paused — skipping the remaining %d paper(s)",
-                         len(needs_citation) - i)
-            break
-        time.sleep(2.0)  # conservative throttle on top of the 1.1s in _ScholarLockCtx; avoids post-crawl burst exhaustion
-        count = get_citation_count(paper.arxiv_id)
-        paper.citation_attempted_at = datetime.utcnow()
-        db.session.commit()
-        if count is not None:
+        counts = get_citation_counts([f"arXiv:{base_arxiv_id(p.arxiv_id)}" for p in needs_citation])
+        now = datetime.utcnow()
+        for paper in needs_citation if counts else []:  # no answer at all: try them all again next run
+            paper.citation_attempted_at = now
+            count = counts.get(f"arXiv:{base_arxiv_id(paper.arxiv_id)}")
+            if count is None:
+                continue
             if not paper.citation_manual or count >= paper.citation_count:
                 paper.citation_count = count
                 paper.citation_manual = False
-            paper.citation_fetched_at = datetime.utcnow()
-            db.session.commit()
+            paper.citation_fetched_at = now
             updated += 1
+        db.session.commit()
+        _log.info("[backfill] citation refresh: %d/%d paper(s) answered", len(counts), len(needs_citation))
 
     # --- Pass 2b: papers added by hand from a bioRxiv link become full bioRxiv papers (upgrade_biorxiv_paper) ---
     # One try a day each (web_enrich_last_attempt_at): one that bioRxiv doesn't know is logged and kept as it is
