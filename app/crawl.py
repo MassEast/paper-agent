@@ -84,7 +84,17 @@ def _enrich_one_web_paper(paper) -> None:
     paper.web_enrich_attempts = (paper.web_enrich_attempts or 0) + 1
     paper.web_enrich_last_attempt_at = datetime.utcnow()
 
-    info = extract_paper_info_from_url(paper.pdf_url)
+    info = extract_paper_info_from_url(paper.page_url or paper.pdf_url)
+    if not paper.abstract and info.get("abstract"):
+        # Added while the page couldn't be read (a publisher's block page became the title, no abstract):
+        # take what the metadata services know now, and rewrite the summary made from the block page
+        paper.title = info.get("title") or paper.title
+        paper.abstract = info["abstract"]
+        if info.get("authors"):
+            paper.authors = json.dumps(info["authors"])
+        paper.doi = paper.doi or info.get("doi")
+        _log.info("[web-enrich] %s: filled in title and abstract (%s)", paper.arxiv_id, paper.title[:60])
+        write_summary(paper, paper.abstract)
     if info.get("pdf_url"):
         paper.pdf_url = info["pdf_url"]
     if info.get("page_count") and not paper.page_count:
@@ -731,8 +741,16 @@ def extract_paper_info_from_url(url: str) -> dict:
     return result
 
 
-_DOI_IN_URL = re.compile(r"(10\.\d{4,9}/[^\s?#]+)", re.IGNORECASE)
-_SCIENCEDIRECT_PII = re.compile(r"sciencedirect\.com/science/article/(?:abs/)?pii/([A-Z0-9]+)", re.IGNORECASE)
+# An Elsevier article id (PII) in a link: ScienceDirect ".../pii/S0263224125022432", Cell ".../fulltext/
+# S2589-0042(25)01350-1", Lancet ".../article/PIIS0140-6736(24)00001-2/fulltext". Crossref knows it without the
+# punctuation; 17 characters: S, the journal's ISSN, year, article number, check digit.
+_ELSEVIER_PII = re.compile(r"(?:/pii/|/fulltext/|/article/PII)(S[0-9X()\-]{16,24})", re.IGNORECASE)
+
+
+def _elsevier_pii(url: str) -> Optional[str]:
+    m = _ELSEVIER_PII.search(url)
+    pii = re.sub(r"[^0-9X]", "", m.group(1)[1:].upper()) if m else ""
+    return "S" + pii if len(pii) == 16 else None
 
 
 def _fill_from_doi_apis(result: dict, url: str) -> None:
@@ -743,13 +761,12 @@ def _fill_from_doi_apis(result: dict, url: str) -> None:
         with _http_client(public_only=True, timeout=15.0, follow_redirects=True) as http:
             doi = result.get("doi")
             if not doi:
-                m = _DOI_IN_URL.search(url)
-                doi = m.group(1) if m else None
+                doi = doi_from_url(url)
             if not doi:
-                pii = _SCIENCEDIRECT_PII.search(url)
+                pii = _elsevier_pii(url)
                 if pii:
                     r = http.get("https://api.crossref.org/works", params={
-                        "filter": f"alternative-id:{pii.group(1)}", "select": "DOI", "rows": 1})
+                        "filter": f"alternative-id:{pii}", "select": "DOI", "rows": 1})
                     items = r.json()["message"]["items"] if r.status_code == 200 else []
                     doi = items[0]["DOI"] if items else None
             if not doi:

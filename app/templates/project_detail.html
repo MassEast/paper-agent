@@ -322,6 +322,11 @@
                                     AAAI, IJCAI, JMLR). Its DOI (or, without one, a Semantic Scholar title match) makes
                                     it a seed for the Semantic Scholar recommendations and citations, like an arXiv
                                     paper.</li>
+                                <li>If the publisher blocks the page (ScienceDirect, Cell, Wiley and others answer
+                                    automated requests with an error page) or it has no abstract → title, abstract and
+                                    authors come from OpenAlex and Crossref via the paper's DOI (for Elsevier links, the
+                                    DOI is found from the article id in the link). No publisher page or PDF is fetched
+                                    for this; the summary is then made from the abstract.</li>
                             </ol>
                         </li>
                     </ol>
