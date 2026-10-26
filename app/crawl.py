@@ -24,7 +24,7 @@ import app.prompts as prompts
 from app.usage import counted, counts
 from app.biorxiv import search_biorxiv, biorxiv_paper_id, fetch_versions as biorxiv_versions, PDF_URL as BIORXIV_PDF_URL
 from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id, \
-    _is_biorxiv, _biorxiv_gap, fetch_biorxiv_figure, doi_from_url
+    _is_biorxiv, _biorxiv_gap, fetch_biorxiv_figure, doi_from_url, nightly_running
 
 API_KEY = os.environ.get("LLM_API_KEY")
 SCHOLAR_API_KEY = os.environ.get("SCHOLAR_API_KEY")
@@ -113,6 +113,7 @@ _crawl_lock = threading.Lock()
 # Global Semantic Scholar rate-limit enforcement: 1 req/s with API key.
 # Same pattern as _arxiv_lock — all Scholar HTTP calls must go through _ScholarLockCtx.
 _scholar_lock = threading.Lock()
+SCHOLAR_GAP_DURING_NIGHTLY_S = 12.0
 _scholar_waiters = 0
 
 
@@ -143,7 +144,10 @@ class _ScholarLockCtx:
 
     def __exit__(self, *_):
         if self.acquired:
-            time.sleep(1.1)  # enforce ≥1 s gap between Semantic Scholar requests
+            # ≥1 s between Semantic Scholar requests (1 per second with a key). While the nightly job, a separate
+            # process with its own lock, uses the key at that rate, the web app keeps SCHOLAR_GAP_DURING_NIGHTLY_S
+            # so that both together stay below 1 per second.
+            time.sleep(SCHOLAR_GAP_DURING_NIGHTLY_S if nightly_running() else 1.1)
             _scholar_lock.release()
 
 

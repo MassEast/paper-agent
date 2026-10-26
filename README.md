@@ -160,6 +160,7 @@ All configuration is via environment variables — see [`.env.example`](.env.exa
 | `SCHOLAR_API_KEY`                  | no       | Semantic Scholar API key — without it, Scholar calls are unauthenticated (rate-limit risk) |
 | `RESEND_API_KEY` / `NOTIFIER_TYPE` | no       | Email notifications — see `.env.example` for the SMTP fallback option                      |
 | `LLM_MAX_CONCURRENCY`              | no       | At most this many LLM requests at once from one process, for an endpoint with a concurrency quota (unset = no limit) |
+| `LLM_MAX_CONCURRENCY_DURING_NIGHTLY` | no     | The web app's limit while the nightly job runs, so both together stay within the quota (unset = no change) |
 | `CHAT_CONTEXT_TOKENS`              | no       | Context window of the first model in `LLM_MODELS`, for the paper chat's usage meter (default 196000) |
 
 ## Deployment

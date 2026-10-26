@@ -33,22 +33,39 @@ if not API_KEY:
 MAX_TOKENS_CEILING = 16384
 
 # Requests in flight at once from this process (LLM_MAX_CONCURRENCY, unset = no limit). An endpoint with a
-# concurrency quota turns away the requests above it; the web app and the nightly job share one key, so
-# their two limits together must stay within the quota.
+# concurrency quota turns away the requests above it. The web app and the nightly job share one key: the web
+# app drops to LLM_MAX_CONCURRENCY_DURING_NIGHTLY while the nightly job runs (utils.nightly_running), so the
+# nightly job's LLM_MAX_CONCURRENCY plus that stays within the quota.
 _MAX_CONCURRENCY = int(os.environ.get("LLM_MAX_CONCURRENCY") or 0)
-_slots = threading.BoundedSemaphore(_MAX_CONCURRENCY) if _MAX_CONCURRENCY > 0 else None
+_MAX_DURING_NIGHTLY = int(os.environ.get("LLM_MAX_CONCURRENCY_DURING_NIGHTLY") or 0)
+_in_flight = 0
+_free = threading.Condition()
+
+
+def _limit() -> int:
+    """How many requests this process may have in flight right now (0 = no limit)."""
+    if _MAX_DURING_NIGHTLY:
+        from app.utils import nightly_running
+        if nightly_running():
+            return _MAX_DURING_NIGHTLY
+    return _MAX_CONCURRENCY
 
 
 class _slot:
-    """Holds one of the LLM_MAX_CONCURRENCY request slots (nothing to hold without a limit)."""
+    """Holds one request slot while the request runs; waits while _limit() are in flight."""
 
     def __enter__(self):
-        if _slots:
-            _slots.acquire()
+        global _in_flight
+        with _free:
+            while (limit := _limit()) and _in_flight >= limit:
+                _free.wait(timeout=5)  # also notices the limit changing when the nightly job starts or ends
+            _in_flight += 1
 
     def __exit__(self, *_):
-        if _slots:
-            _slots.release()
+        global _in_flight
+        with _free:
+            _in_flight -= 1
+            _free.notify()
 
 
 class LLMUnavailableError(Exception):

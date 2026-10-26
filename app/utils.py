@@ -1,5 +1,6 @@
 import html as html_lib
 import io
+import os
 import re
 import threading
 import time
@@ -43,6 +44,42 @@ def _refuse_internal(request: httpx.Request) -> None:
     # Request hook: httpx runs it for the first request and again for every redirect hop.
     if not _is_safe_external_url(str(request.url)):
         raise UnsafeURLError(f"refused non-public URL: {request.url}")
+
+
+# The nightly job (scripts/nightly_crawl.py) keeps this file while it runs. The logs folder is on the volume the
+# web app shares with it, so the web app can see the nightly run and leave it most of the shared LLM quota
+# (llm._limit) and Semantic Scholar rate (_ScholarLockCtx). Older than NIGHTLY_MARKER_MAX_AGE_S: left behind by
+# a run that was killed, ignored.
+NIGHTLY_MARKER = os.path.join(
+    os.environ.get("LOGS_DIR") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs"),
+    "nightly.running")
+NIGHTLY_MARKER_MAX_AGE_S = 12 * 3600
+_holding_marker = False  # True in the nightly job's own process
+
+
+def nightly_running() -> bool:
+    """Whether the nightly job is running in another process (for the web app)."""
+    if _holding_marker:
+        return False
+    try:
+        return time.time() - os.path.getmtime(NIGHTLY_MARKER) < NIGHTLY_MARKER_MAX_AGE_S
+    except OSError:
+        return False
+
+
+@contextmanager
+def nightly_marker():
+    """Held by the nightly job for its whole run (see NIGHTLY_MARKER)."""
+    global _holding_marker
+    os.makedirs(os.path.dirname(NIGHTLY_MARKER), exist_ok=True)
+    with open(NIGHTLY_MARKER, "w") as f:
+        f.write(f"{os.getpid()}\n")
+    _holding_marker = True
+    try:
+        yield
+    finally:
+        _holding_marker = False
+        os.remove(NIGHTLY_MARKER)
 
 
 def _http_client(public_only: bool = False, **kwargs) -> httpx.Client:

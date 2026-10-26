@@ -64,11 +64,30 @@ def test_requests_keep_to_the_concurrency_limit():
         return _ok()
     client = MagicMock()
     client.__enter__.return_value.post.side_effect = post
-    with patch.object(llm, "_slots", threading.BoundedSemaphore(2)), \
-            patch("app.llm.httpx.Client", return_value=client):
-        threads = [threading.Thread(target=llm._llm, args=([{"role": "user", "content": "x"}],)) for _ in range(6)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-    assert peak[0] == 2
+    for nightly, expected in ((False, 3), (True, 1)):
+        peak[0] = 0
+        with patch.object(llm, "_MAX_CONCURRENCY", 3), patch.object(llm, "_MAX_DURING_NIGHTLY", 1), \
+                patch("app.utils.nightly_running", return_value=nightly), \
+                patch("app.llm.httpx.Client", return_value=client):
+            threads = [threading.Thread(target=llm._llm, args=([{"role": "user", "content": "x"}],))
+                       for _ in range(6)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        assert peak[0] == expected  # the web app keeps to 1 while the nightly job runs
+
+
+def test_nightly_marker_is_seen_by_other_processes_only(tmp_path, monkeypatch):
+    from app import utils
+    monkeypatch.setattr(utils, "NIGHTLY_MARKER", str(tmp_path / "nightly.running"))
+    assert not utils.nightly_running()
+    with utils.nightly_marker():
+        assert not utils.nightly_running()  # the nightly job itself isn't slowed down
+        monkeypatch.setattr(utils, "_holding_marker", False)  # as the web app sees the file
+        assert utils.nightly_running()
+        old = real_time.time() - utils.NIGHTLY_MARKER_MAX_AGE_S - 1
+        import os
+        os.utime(utils.NIGHTLY_MARKER, (old, old))
+        assert not utils.nightly_running()  # left behind by a killed run: ignored
+    assert not (tmp_path / "nightly.running").exists()

@@ -100,3 +100,12 @@ def test_recommendations_are_asked_for_in_groups_of_ten_seeds():
         crawl.get_semantic_scholar_recommendations([f"2501.{i:05d}" for i in range(174)])
     assert client.request.call_count == 10
     assert client.request.call_args_list[0].kwargs["json"]["positivePaperIds"][0] == "ArXiv:2501.00000"  # best first
+
+
+def test_web_app_keeps_a_long_gap_while_the_nightly_job_uses_the_key():
+    for nightly, gap in ((False, 1.1), (True, crawl.SCHOLAR_GAP_DURING_NIGHTLY_S)):
+        with patch.object(crawl, "nightly_running", return_value=nightly), patch.object(crawl.time, "sleep") as sleep:
+            with crawl._ScholarLockCtx():
+                pass
+        assert sleep.call_args.args[0] == gap
+    assert 1 / 1.1 + 1 / crawl.SCHOLAR_GAP_DURING_NIGHTLY_S < 1  # both processes together: under 1 per second

@@ -25,6 +25,7 @@ except ImportError:
 
 from app import create_app, db
 from app.models import CrawlLog, Project, Paper, ProjectPaper
+from app.utils import nightly_marker
 from app.crawl import run_crawl, refresh_from_full_text, send_carry_notification, _search_warning, backfill_missing_paper_metadata, get_citation_count, get_citation_count_by_scholar_id, send_notification
 
 _log = logging.getLogger(__name__)
@@ -183,6 +184,11 @@ def _projects_for_run(all_projects, scheduled: datetime) -> tuple[list, list]:
 
 
 def nightly_crawl():
+    with nightly_marker():  # the web app leaves this run most of the LLM quota and Semantic Scholar rate meanwhile
+        _nightly_crawl()
+
+
+def _nightly_crawl():
     _setup_crawl_log()
     app = create_app()
     scheduled = _scheduled_time()
