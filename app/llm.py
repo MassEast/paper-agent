@@ -127,6 +127,18 @@ def _count(usage: dict) -> None:
     m.add(usage)
 
 
+def _clean_text(text: str) -> str:
+    """Text without lone surrogates, which can't be encoded as UTF-8 (the request body would fail to
+    encode). pypdf emits math letters such as U+1D400 as split surrogate pairs (2026-10-27 log: '\\ud835'
+    in a first page sent for institution extraction); a complete pair is rejoined, a lone half becomes U+FFFD."""
+    return text.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+
+
+def _clean_messages(messages: list[dict]) -> list[dict]:
+    return [{**m, "content": _clean_text(m["content"])} if isinstance(m.get("content"), str) else m
+            for m in messages]
+
+
 def _llm(
     messages: list[dict], temperature: float = 0.9, max_tokens: int = 4096
 ) -> tuple[str, str, int, dict]:
@@ -146,6 +158,7 @@ def _llm(
     """
     t0 = time.monotonic()
     last_err = None
+    messages = _clean_messages(messages)
 
     for model in MODELS:
         budget = max_tokens
@@ -311,6 +324,7 @@ def _llm_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int 
     after that raises, since the user has already seen part of the answer. A request the model rejects
     as too long (400) is not retried on the same model."""
     last_err = None
+    messages = _clean_messages(messages)
     for model in MODELS:
         for attempt in range(3):
             if last_err is not None:

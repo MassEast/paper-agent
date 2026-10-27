@@ -161,7 +161,7 @@ def _scholar_headers() -> dict:
 
 # Semantic Scholar refuses many requests with 429 (or a 5xx) when it is busy, at random and no matter how far
 # apart our requests are: waiting longer between tries doesn't raise the odds, so retry after a few seconds.
-SCHOLAR_ATTEMPTS = 6
+SCHOLAR_ATTEMPTS = 8
 SCHOLAR_RETRY_WAIT_S = 2.0
 
 

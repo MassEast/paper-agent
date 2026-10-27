@@ -91,3 +91,18 @@ def test_nightly_marker_is_seen_by_other_processes_only(tmp_path, monkeypatch):
         os.utime(utils.NIGHTLY_MARKER, (old, old))
         assert not utils.nightly_running()  # left behind by a killed run: ignored
     assert not (tmp_path / "nightly.running").exists()
+
+
+def test_lone_surrogates_in_pdf_text_still_encode():
+    # pypdf text from 2601.05248 (2026-10-27) held a lone '\ud835', and the request body failed to encode
+    sent = []
+
+    def post(url, **kw):
+        sent.append(kw["json"]["messages"][0]["content"])
+        httpx.Request("POST", url, json=kw["json"])  # encodes the body as httpx does; raised before the fix
+        return _ok()
+    client = MagicMock()
+    client.__enter__.return_value.post.side_effect = post
+    with patch.object(llm, "MODELS", ["first"]), patch("app.llm.httpx.Client", return_value=client):
+        llm._llm([{"role": "user", "content": "Univ\ud835 of 𝐀"}])
+    assert sent == ["Univ� of \U0001d400"]
