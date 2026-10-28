@@ -138,3 +138,29 @@ def test_retry_finding_nothing_new_still_announces_first_pass(app):
     _, notify, _ = _run(app, [_carry_log(), _log("success")])
     notify.carry_notify.assert_called_once()
     assert notify.carry_notify.call_args.args[-1] is None
+
+
+def _outcomes(caplog):
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("[arxiv-outcome]")]
+
+
+def test_each_project_night_logs_one_arxiv_outcome(app, caplog):
+    caplog.set_level("INFO", logger=nightly.__name__)
+    _run(app, [_log("success", added=1)])
+    assert len(_outcomes(caplog)) == 1 and "answered=yes tries=1 " in _outcomes(caplog)[0]
+    assert _outcomes(caplog)[0].endswith("name=Nightly Retry")
+
+    caplog.clear()
+    fail = lambda: _log("error", ["a", "b"], "all failed")
+    _run(app, [fail(), _log("success")])
+    assert len(_outcomes(caplog)) == 1 and "answered=yes tries=2 " in _outcomes(caplog)[0]
+
+    caplog.clear()
+    _run(app, [fail(), fail(), fail()])
+    assert len(_outcomes(caplog)) == 1 and "answered=no tries=3 " in _outcomes(caplog)[0]
+
+
+def test_non_arxiv_failure_logs_no_arxiv_outcome(app, caplog):
+    caplog.set_level("INFO", logger=nightly.__name__)
+    _run(app, [_log("error", msg="LLM down")])
+    assert _outcomes(caplog) == []

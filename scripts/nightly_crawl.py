@@ -151,6 +151,13 @@ def _notify_search_failed(project, tries):
     )
 
 
+def _log_arxiv_outcome(project, answered: bool, tries: int):
+    """One machine-readable line per project and night: did arXiv's search answer, after how many tries.
+    scripts/arxiv_misses.py counts these to decide whether the search API is still good enough."""
+    _log.info("[arxiv-outcome] answered=%s tries=%d project_id=%d name=%s",
+              "yes" if answered else "no", tries, project.id, project.name)
+
+
 def _scheduled_time() -> datetime:
     """UTC time this run was scheduled for, not the time it happens to start at.
 
@@ -263,6 +270,7 @@ def _nightly_crawl():
             elif crawl_log and crawl_log.status == "error":
                 _notify_failure(project, crawl_log.error_message)
             else:
+                _log_arxiv_outcome(project, True, 1)
                 _log.info("[nightly] ✓ done: %s", project.name)
 
         # arXiv throttled/unavailable: retry the failed search up to NIGHTLY_RETRY_ROUNDS times, each after
@@ -290,6 +298,7 @@ def _nightly_crawl():
                     _log.error("[nightly] ⚠ retry %d/%d still failing: %s — %s", rnd, rounds, project.name, retry_log.error_message)
                     still_failing.append((project, failed, d_from, d_to, getattr(retry_log, "notify_carry", None) or carry))
                 elif failed:
+                    _log_arxiv_outcome(project, False, rounds + 1)
                     _log.error("[nightly] ✗ retry still failing: %s — %s", project.name, retry_log.error_message)
                     if getattr(retry_log, "notified", False):
                         pass  # the crawl-complete email already carries the arXiv warning
@@ -299,10 +308,13 @@ def _nightly_crawl():
                     else:
                         _notify_search_failed(project, rounds + 1)
                 else:
+                    _log_arxiv_outcome(project, True, rnd + 1)
                     _log.info("[nightly] ✓ retry done: %s (%d added)", project.name, retry_log.papers_added or 0)
                     if not getattr(retry_log, "notified", False) and carry and carry["papers_added"]:
                         send_carry_notification(project.id, carry, d_from, d_to, None)  # retry found nothing new
             retry_queue = still_failing
+        for project, *_ in retry_queue:  # only with NIGHTLY_RETRY_ROUNDS=0: no retry ran
+            _log_arxiv_outcome(project, False, 1)
 
         # New Papers screened without the full text (none could be fetched then): read it now. Rejects go to
         # Trash quietly, no email
