@@ -88,7 +88,8 @@ def test_recommendations_are_asked_for_in_groups_of_ten_seeds():
                  _resp(200, {"recommendedPapers": [rec("2610.00002v2"), rec("2610.00003"), {"externalIds": {}}]})]
     client = _client_returning(responses)
     seeds = [f"2501.{i:05d}" for i in range(25)]
-    with _patched(client), patch.object(crawl, "_ScholarLockCtx", MagicMock()):
+    with _patched(client), patch.object(crawl, "_ScholarLockCtx", MagicMock()), \
+            patch.object(crawl, "split_scholar_records", return_value={}):
         papers = crawl.get_semantic_scholar_recommendations(seeds)
     calls = client.request.call_args_list
     assert [len(c.kwargs["json"]["positivePaperIds"]) for c in calls] == [10, 10, 5]
@@ -96,7 +97,8 @@ def test_recommendations_are_asked_for_in_groups_of_ten_seeds():
     assert [p["arxiv_id"] for p in papers] == ["2610.00001", "2610.00002", "2610.00003"]
 
     client = _client_returning([_resp(200, {"recommendedPapers": []})] * 20)
-    with _patched(client), patch.object(crawl, "_ScholarLockCtx", MagicMock()):
+    with _patched(client), patch.object(crawl, "_ScholarLockCtx", MagicMock()), \
+            patch.object(crawl, "split_scholar_records", return_value={}):
         crawl.get_semantic_scholar_recommendations([f"2501.{i:05d}" for i in range(174)])
     assert client.request.call_count == 10
     assert client.request.call_args_list[0].kwargs["json"]["positivePaperIds"][0] == "ArXiv:2501.00000"  # best first
@@ -109,3 +111,24 @@ def test_web_app_keeps_a_long_gap_while_the_nightly_job_uses_the_key():
                 pass
         assert sleep.call_args.args[0] == gap
     assert 1 / 1.1 + 1 / crawl.SCHOLAR_GAP_DURING_NIGHTLY_S < 1  # both processes together: under 1 per second
+
+
+def test_split_records_are_the_seeds_whose_arxiv_doi_finds_another_paper():
+    """One batch: every arXiv seed by arXiv id, then by arXiv DOI. A seed counts as split when both are found
+    and differ (2510.04871 on 2026-10-29); DOI and Semantic Scholar id seeds aren't asked."""
+    client = _client_returning([_resp(200, [{"paperId": "a1"}, {"paperId": "b1"}, None,
+                                            {"paperId": "a1"}, {"paperId": "b2"}, {"paperId": "c2"}])])
+    with _patched(client), patch.object(crawl, "_ScholarLockCtx", MagicMock()):
+        split = crawl.split_scholar_records(["2401.00001", "2510.04871", "DOI:10.1/x", "2402.00003", "f" * 40])
+    assert client.request.call_args.kwargs["json"]["ids"] == [
+        "ArXiv:2401.00001", "ArXiv:2510.04871", "ArXiv:2402.00003",
+        "DOI:10.48550/arXiv.2401.00001", "DOI:10.48550/arXiv.2510.04871", "DOI:10.48550/arXiv.2402.00003"]
+    assert split == {"2510.04871": "b2"}  # 2402.00003: no arXiv-id record, nothing to add to
+
+
+def test_recommendations_also_get_the_second_record_of_a_split_seed():
+    client = _client_returning([_resp(200, {"recommendedPapers": []})])
+    with _patched(client), patch.object(crawl, "_ScholarLockCtx", MagicMock()), \
+            patch.object(crawl, "split_scholar_records", return_value={"2510.04871": "7c8515ad"}):
+        crawl.get_semantic_scholar_recommendations(["2401.00001", "2510.04871"])
+    assert client.request.call_args.kwargs["json"]["positivePaperIds"] == ["ArXiv:2401.00001", "ArXiv:2510.04871", "7c8515ad"]

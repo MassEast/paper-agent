@@ -87,7 +87,8 @@ class TestSeeds:
 
         real = httpx.Client
         with patch.object(crawl.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw)), \
-                patch.object(crawl, "_ScholarLockCtx", contextlib.nullcontext):
+                patch.object(crawl, "_ScholarLockCtx", contextlib.nullcontext), \
+                patch.object(crawl, "split_scholar_records", return_value={}):
             recs = crawl.get_semantic_scholar_recommendations(["2401.00001", "DOI:10.1/seed", "f" * 40])
         assert sent == [["ArXiv:2401.00001", "DOI:10.1/seed", "f" * 40]]
         assert [p["title"] for p in recs] == ["Journal rec", "bioRxiv rec"]

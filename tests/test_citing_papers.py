@@ -26,12 +26,26 @@ def _citing(aid, day, title=None, arxiv=True):
 
 
 @pytest.fixture
-def scholar(monkeypatch):
-    """pages[seed arXiv id] = list of response bodies, one per offset page. Records every request."""
+def scholar_splits():
+    """{seed arXiv id: id of a second Semantic Scholar record found by the arXiv DOI} (split_scholar_records)."""
+    return {}
+
+
+@pytest.fixture
+def scholar(monkeypatch, scholar_splits):
+    """pages[seed arXiv id, or a second record's id] = list of response bodies, one per offset page. Records
+    every citations request."""
     pages, seen = {}, []
 
+    def batch_record(ref):
+        aid = ref.split("ArXiv:")[-1].split("arXiv.")[-1]
+        return {"paperId": scholar_splits[aid] if ref.startswith("DOI:") and aid in scholar_splits else f"rec-{aid}"}
+
     def handler(request):
-        seed = request.url.path.split("ArXiv:")[1].split("/")[0]
+        if request.url.path.endswith("/paper/batch"):
+            return httpx.Response(200, json=[batch_record(r) for r in json.loads(request.content)["ids"]])
+        ref = request.url.path.split("/paper/")[1].split("/")[0]
+        seed = ref.split("ArXiv:")[-1]
         seen.append((seed, int(request.url.params["offset"])))
         if seed not in pages:
             return httpx.Response(404, json={"error": "Paper not found"})
@@ -61,6 +75,21 @@ def test_citing_papers_in_the_window_come_back_once_with_every_cited_seed(schola
     ]
     assert found[0]["source"] == "semantic_scholar" and found[0]["published_date"] == date(2026, 10, 12)
     assert ("2401.00404", 0) in seen  # a seed Scholar doesn't know is skipped, not an error
+
+
+def test_a_seed_kept_as_two_records_gets_the_citing_papers_of_both(scholar, scholar_splits):
+    """Semantic Scholar kept 2510.04871 as two records, the citations on the one found by the arXiv DOI
+    (2026-10-29): both are asked, and the citing papers are credited to the seed."""
+    pages, seen = scholar
+    scholar_splits["2510.04871"] = "7c8515ad"
+    pages["2510.04871"] = [{"data": [_citing("2610.00001", "2026-10-11")]}]
+    pages["7c8515ad"] = [{"data": [_citing("2610.00002", "2026-10-12"), _citing("2610.00001", "2026-10-11")]}]
+    checked = []
+    found = crawl.get_citing_papers([("2510.04871", "Less is More")], D_FROM, D_TO, checked=checked)
+    assert seen == [("2510.04871", 0), ("7c8515ad", 0)]
+    assert sorted(p["arxiv_id"] for p in found) == ["2610.00001", "2610.00002"]
+    assert all(p["found_via"] == [{"via": "cites", "arxiv_id": "2510.04871", "title": "Less is More"}] for p in found)
+    assert checked == ["2510.04871"]
 
 
 def test_pages_on_only_while_the_page_still_reaches_into_the_window(scholar):

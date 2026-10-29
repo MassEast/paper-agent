@@ -2048,8 +2048,10 @@ def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = RECO
     each (why: see the comment above).
     A paper recommended for several groups comes back once. Returns a list of paper dicts compatible with the
     arXiv search result format."""
-    seeds = [_scholar_ref(s) for s in arxiv_ids[:RECOMMENDATION_MAX_SEEDS]]
-    groups = [seeds[i:i + RECOMMENDATION_GROUP_SIZE] for i in range(0, len(seeds), RECOMMENDATION_GROUP_SIZE)]
+    seeds = arxiv_ids[:RECOMMENDATION_MAX_SEEDS]
+    split = split_scholar_records(seeds)
+    groups = [[ref for s in seeds[i:i + RECOMMENDATION_GROUP_SIZE] for ref in [_scholar_ref(s)] + ([split[s]] if s in split else [])]
+              for i in range(0, len(seeds), RECOMMENDATION_GROUP_SIZE)]
     papers: dict[str, dict] = {}
     for g, group in enumerate(groups, 1):
         try:
@@ -2087,7 +2089,8 @@ CITATION_MAX_SEEDS = 50
 def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: date,
                       progress=None, checked: Optional[list[str]] = None) -> list[dict]:
     """Papers (_scholar_paper) published in [date_from, date_to] that cite any of the seeds ((seed, title)
-    pairs, from citation_seeds; only the first CITATION_MAX_SEEDS are used). One Semantic Scholar call per seed: it
+    pairs, from citation_seeds; only the first CITATION_MAX_SEEDS are used). One Semantic Scholar call per seed (two
+    for a seed Semantic Scholar keeps as two records, split_scholar_records): it
     lists citing papers newest first, so a page usually covers the whole window; it pages on while the page
     still reaches into the window. A paper citing several seeds comes back once, with one found_via entry per
     seed. Same dict shape as get_semantic_scholar_recommendations. progress(i, n) is called after each seed.
@@ -2098,38 +2101,40 @@ def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: da
         seeds = seeds[:CITATION_MAX_SEEDS]
     found: dict[str, dict] = {}
     started = time.time()
+    split = split_scholar_records([s for s, _ in seeds])
     for i, (seed_id, seed_title) in enumerate(seeds, 1):
-        offset = 0
-        while True:
-            r = _scholar_call("GET", f"https://api.semanticscholar.org/graph/v1/paper/{_scholar_ref(seed_id)}/citations",
-                              params={"fields": SCHOLAR_PAPER_FIELDS, "limit": 100, "offset": offset})
-            if r.status_code != 429 and checked is not None and seed_id not in checked:
-                checked.append(seed_id)
-            if r.status_code != 200:  # 404: Semantic Scholar doesn't know the seed
-                _log.info("[citations] %s: Semantic Scholar answered %d", seed_id, r.status_code)
-                break
-            body = r.json()
-            oldest = None
-            for c in body.get("data") or []:
-                item = c.get("citingPaper") or {}
-                try:
-                    pub_date = date.fromisoformat(item.get("publicationDate") or "")
-                except ValueError:
-                    continue
-                oldest = pub_date if oldest is None else min(oldest, pub_date)
-                if not (date_from <= pub_date <= date_to):
-                    continue
-                cand = _scholar_paper(item, pub_date)
-                if not cand:
-                    continue
-                via = ({"via": "cites", "seed": seed_id, "title": seed_title} if _scholar_ref(seed_id) == seed_id
-                       else {"via": "cites", "arxiv_id": base_arxiv_id(seed_id), "title": seed_title})
-                paper = found.setdefault(cand["arxiv_id"], {**cand, "found_via": []})
-                if via not in paper["found_via"]:
-                    paper["found_via"].append(via)
-            if body.get("next") is None or oldest is None or oldest < date_from:
-                break
-            offset = body["next"]
+        for ref in [_scholar_ref(seed_id)] + ([split[seed_id]] if seed_id in split else []):
+            offset = 0
+            while True:
+                r = _scholar_call("GET", f"https://api.semanticscholar.org/graph/v1/paper/{ref}/citations",
+                                  params={"fields": SCHOLAR_PAPER_FIELDS, "limit": 100, "offset": offset})
+                if r.status_code != 429 and checked is not None and seed_id not in checked:
+                    checked.append(seed_id)
+                if r.status_code != 200:  # 404: Semantic Scholar doesn't know the seed
+                    _log.info("[citations] %s: Semantic Scholar answered %d", ref, r.status_code)
+                    break
+                body = r.json()
+                oldest = None
+                for c in body.get("data") or []:
+                    item = c.get("citingPaper") or {}
+                    try:
+                        pub_date = date.fromisoformat(item.get("publicationDate") or "")
+                    except ValueError:
+                        continue
+                    oldest = pub_date if oldest is None else min(oldest, pub_date)
+                    if not (date_from <= pub_date <= date_to):
+                        continue
+                    cand = _scholar_paper(item, pub_date)
+                    if not cand:
+                        continue
+                    via = ({"via": "cites", "seed": seed_id, "title": seed_title} if _scholar_ref(seed_id) == seed_id
+                           else {"via": "cites", "arxiv_id": base_arxiv_id(seed_id), "title": seed_title})
+                    paper = found.setdefault(cand["arxiv_id"], {**cand, "found_via": []})
+                    if via not in paper["found_via"]:
+                        paper["found_via"].append(via)
+                if body.get("next") is None or oldest is None or oldest < date_from:
+                    break
+                offset = body["next"]
         if progress:
             progress(i, len(seeds))
         if i % 10 == 0 or i == len(seeds):
@@ -2165,6 +2170,38 @@ def _scholar_ref(seed: str) -> str:
     if seed.startswith("DOI:") or re.fullmatch(r"[0-9a-f]{40}", seed):
         return seed
     return f"ArXiv:{base_arxiv_id(seed)}"
+
+
+def _arxiv_doi_ref(arxiv_id: str) -> str:
+    """The DOI arXiv gives every paper, as a Semantic Scholar paper id."""
+    return f"DOI:10.48550/arXiv.{base_arxiv_id(arxiv_id)}"
+
+
+def split_scholar_records(seeds: list[str]) -> dict[str, str]:
+    """{arXiv seed: Semantic Scholar id of its second record} for the seeds Semantic Scholar keeps as two
+    records: one found by the arXiv id, another by the arXiv DOI. Their citations can sit on either: for
+    2510.04871 the arXiv-id record had none, the DOI record 172 (checked 2026-10-29, 9 of 390 My Collection
+    papers split). One /paper/batch request; {} if it doesn't answer."""
+    aids = [s for s in seeds if _scholar_ref(s).startswith("ArXiv:")]
+    if not aids:
+        return {}
+    refs = [_scholar_ref(a) for a in aids] + [_arxiv_doi_ref(a) for a in aids]
+    try:
+        r = _scholar_call("POST", "https://api.semanticscholar.org/graph/v1/paper/batch", timeout=60.0,
+                          params={"fields": "paperId"}, json={"ids": refs})
+    except httpx.HTTPError as e:
+        _log.warning("[Scholar] split-record check failed: %s", e)
+        return {}
+    if r.status_code != 200:
+        _log.warning("[Scholar] split-record check returned %d", r.status_code)
+        return {}
+    items = r.json()
+    by_arxiv, by_doi = items[:len(aids)], items[len(aids):]
+    split = {a: d["paperId"] for a, x, d in zip(aids, by_arxiv, by_doi)
+             if x and d and x["paperId"] != d["paperId"]}
+    if split:
+        _log.info("[Scholar] %d seed(s) with a second record under the arXiv DOI: %s", len(split), sorted(split))
+    return split
 
 
 def resolve_scholar_ids(collection: list) -> None:
@@ -3650,12 +3687,18 @@ def backfill_missing_paper_metadata() -> int:
 
     if needs_citation:
         counts = get_citation_counts([f"arXiv:{base_arxiv_id(p.arxiv_id)}" for p in needs_citation])
+        # 0 or unknown: Semantic Scholar may keep the citations on a second record under the arXiv DOI
+        # (split_scholar_records), so ask that one too and keep the larger count
+        doi_counts = get_citation_counts([_arxiv_doi_ref(p.arxiv_id) for p in needs_citation
+                                          if p.is_arxiv and not counts.get(f"arXiv:{base_arxiv_id(p.arxiv_id)}")])
         now = datetime.utcnow()
-        for paper in needs_citation if counts else []:  # no answer at all: try them all again next run
+        for paper in needs_citation if counts or doi_counts else []:  # no answer at all: try them all again next run
             paper.citation_attempted_at = now
-            count = counts.get(f"arXiv:{base_arxiv_id(paper.arxiv_id)}")
-            if count is None:
+            found = [c for c in (counts.get(f"arXiv:{base_arxiv_id(paper.arxiv_id)}"),
+                                 doi_counts.get(_arxiv_doi_ref(paper.arxiv_id))) if c is not None]
+            if not found:
                 continue
+            count = max(found)
             if not paper.citation_manual or count >= paper.citation_count:
                 paper.citation_count = count
                 paper.citation_manual = False
