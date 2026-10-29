@@ -62,6 +62,17 @@ def test_timeout_warns():
     assert len(warnings) == 1 and "timed out" in warnings[0]
 
 
+def test_timeout_with_no_results_is_a_failed_search():
+    """A slow first page after a 429 wait hits the time cap before any result: nothing came back, so the
+    keywords go to `failed` (the nightly retries them) instead of a "may be incomplete" warning (2026-10-29)."""
+    warnings, failed = [], []
+    with patch("app.crawl._fetch_arxiv_window", return_value=([], False, True, False)):
+        papers = _collect_arxiv(["kw1", "kw2"], date(2026, 9, 1), date(2026, 9, 3), 200, warnings, failed)
+    assert papers == []
+    assert failed == ["kw1", "kw2"]
+    assert len(warnings) == 1 and "failed" in warnings[0]
+
+
 def test_all_keywords_go_into_one_or_query():
     """One arXiv request per window for all keywords (fewer requests, fewer 429s), multi-word ones as phrases."""
     captured = []

@@ -1710,6 +1710,9 @@ def _collect_arxiv(
             if p["arxiv_id"] not in seen:
                 seen.add(p["arxiv_id"])
                 papers.append(p)
+        # A timeout before the first result (a slow page after a 429 wait) returned nothing: that is a
+        # failed search, so the nightly retries it, not a partial one.
+        errored = errored or (timed_out and not batch)
         if errored:
             msg = f"'{keyword}': arXiv search failed for {d_from}..{cur_to} — no results"
             _log.warning("[arXiv] %s", msg)
