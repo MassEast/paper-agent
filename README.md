@@ -115,7 +115,7 @@ Return JSON only: {"relevant": true} or {"relevant": false}
 
 | Diagram step                                                   | Prompt                                                                                                 |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Research interest from Collection / refine existing text      | [`RESEARCH_INTEREST_FROM_COLLECTION`](app/prompts.py#L105-L120) / [`RESEARCH_INTEREST_IMPROVE`](app/prompts.py#L147-L163) |
+| Research interest from Collection / refine existing text      | [`RESEARCH_INTEREST_FROM_COLLECTION`](app/prompts.py#L105-L120) / [`RESEARCH_INTEREST_IMPROVE`](app/prompts.py#L147-L164) |
 | Extract keywords                                               | [`KEYWORD_EXTRACTION`](app/prompts.py#L6-L18)                                                          |
 | Quick relevance check                                          | [`RELEVANCE_QUICK`](app/prompts.py#L20-L32)                                                            |
 | Deep relevance check + why it's relevant                       | [`RELEVANCE_DEEP`](app/prompts.py#L34-L54)                                                             |
@@ -123,7 +123,7 @@ Return JSON only: {"relevant": true} or {"relevant": false}
 | Why it's relevant, for copied/moved papers + the one-off refill | [`RELEVANCE_REASON`](app/prompts.py#L77-L90)                                                        |
 | Institutions (LLM fallback, batched after all papers screened) | [`INSTITUTION_EXTRACTION`](app/prompts.py#L136-L145)                                                   |
 | Pick featured paper                                            | [`FEATURED_PAPER_SELECTION`](app/prompts.py#L122-L134)                                                 |
-| Ask about a paper (chat on a card)                             | [`PAPER_CHAT_SYSTEM`](app/prompts.py#L167-L184)                                                        |
+| Ask about a paper (chat on a card)                             | [`PAPER_CHAT_SYSTEM`](app/prompts.py#L168-L185)                                                        |
 
 ## Quick start
 
@@ -213,6 +213,8 @@ The CronJob always pulls `:latest` at job start, so it needs no separate restart
 
 - **Spend fewer tokens on screening.** The pipeline was built for recall, not cost: every candidate gets an LLM relevance check. A cheap first pass (embedding similarity to My Collection, or a reranker) could drop the clear misses before the LLM sees them. To build it, first replay past crawls to measure how many papers that were accepted the pre-filter would have cut, and only use it if that number is close to zero.
 - **Negative examples for the recommendations.** Semantic Scholar's recommendation endpoint also accepts papers you *don't* want more of. The papers in Trash could go there, to steer recommendations away from what was rejected. Not done yet because Trash also holds papers that fit the topic but weren't interesting enough, so the effect is unclear; it would need a before/after comparison of what the recommendations bring in.
+
+- **Warn about keywords that bring in too much.** All keywords go into one arXiv query, so arXiv doesn't say which one fills the results. A very broad keyword ("generator") can bring in a thousand papers in five days, and each of them gets screened. Counting per keyword how many results contain its phrase (we have every title and abstract already) would show which one it is, as a warning in the email and in the count step of Find Papers, e.g. "'generator' matches 1,100 papers, consider a more specific phrase". arXiv matches words with stemming, so the count is an approximation; good enough for a warning.
 
 - **Merge duplicate papers.** The same work can end up twice in a project, for example a bioRxiv preprint and its later journal version (two DOIs), or a paper pasted by hand and also found by a crawl. A "merge" action on a card would keep one paper with both papers' tags, notes and chat.
 

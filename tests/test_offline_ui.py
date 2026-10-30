@@ -209,3 +209,34 @@ def test_crlf_research_interest_is_not_reported_unsaved(app, page, seeded):
         db.session.commit()
     page.reload()
     assert not page.evaluate("unsavedChecks.some(f => f())")
+
+
+@pytest.mark.slow
+def test_research_interest_over_the_limit_cannot_be_saved(app, page, seeded):
+    from app.models import RESEARCH_INTEREST_MAX_CHARS as MAX
+    count = page.locator("#ri-count")
+    assert count.inner_text().startswith(f"{len('original interest')} / {MAX:,} characters")
+    page.fill("#research-interest-field", "x" * (MAX + 1))
+    assert count.inner_text().startswith(f"Too long: {MAX + 1:,} / {MAX:,}")
+    assert page.locator("#save-btn").is_disabled()
+    assert page.evaluate("unsavedChecks.some(f => f())")  # the long text is still in the field, unsaved
+    page.fill("#research-interest-field", "x" * MAX)
+    assert page.locator("#save-btn").is_enabled()
+
+
+@pytest.mark.slow
+def test_generated_research_interest_over_the_limit_is_shown_not_saved(app, page, seeded):
+    """Generate asks for at most 300 words; if the model writes more anyway, the save is refused and the
+    text stays in the field with the counter in red, ready for another Generate."""
+    from app.models import RESEARCH_INTEREST_MAX_CHARS as MAX
+    long = "word " * 1000
+    page.route("**/generate-research-interest", lambda route: route.fulfill(json={"research_interest": long}))
+    page.click("#generate-btn")
+    page.locator(".rw-toast").wait_for()
+    assert "too long" in page.locator(".rw-toast").inner_text()
+    assert page.locator("#research-interest-field").input_value() == long
+    assert page.locator("#ri-count").inner_text().startswith("Too long")
+    assert page.locator("#save-btn").is_disabled()
+    assert page.locator("#generate-btn").is_enabled()
+    with app.app_context():
+        assert db.session.get(Project, seeded).research_interest == "original interest"

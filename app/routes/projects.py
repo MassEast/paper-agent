@@ -32,7 +32,7 @@ from app.crawl import (
     REFERENCE_PAPERS_LIMIT,
 )
 from app.llm import LLMUnavailableError, MODELS as LLM_MODELS
-from app.models import slugify, compute_screening_hash
+from app.models import slugify, compute_screening_hash, RESEARCH_INTEREST_MAX_CHARS
 from app.utils import base_arxiv_id
 
 # In-memory store for async arXiv count tasks (dev only — single process)
@@ -160,6 +160,7 @@ def detail(slug):
         prompt_relevance_deep=_prompts.RELEVANCE_DEEP,
         prompt_summary=_prompts.SUMMARY_WITH_FULL_CONTENT,
         reference_papers_limit=REFERENCE_PAPERS_LIMIT,
+        research_interest_max=RESEARCH_INTEREST_MAX_CHARS,
         rescreen=rescreen_state(project.id),
         usage=project_usage(project.id),
         usage_kinds=USAGE_KINDS,
@@ -176,7 +177,12 @@ def detail(slug):
 @login_required
 def update_research_interest(slug):
     project = Project.query.filter_by(slug=slug).first_or_404()
-    project.research_interest = request.form.get("research_interest", "").strip()
+    # Form posts send newlines as \r\n; store \n so the length matches what the field shows
+    text = request.form.get("research_interest", "").replace("\r\n", "\n").strip()
+    if len(text) > RESEARCH_INTEREST_MAX_CHARS:
+        return (f"Research interest is too long ({len(text):,} / {RESEARCH_INTEREST_MAX_CHARS:,} characters): "
+                f"shorten it, or press Generate to condense it.", 400)
+    project.research_interest = text
     db.session.commit()
     if request.headers.get("X-Requested-With") == "fetch":
         return ("", 204)

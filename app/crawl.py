@@ -18,10 +18,11 @@ import arxiv
 import httpx
 
 from app import db
-from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog, ScreenedPaper, compute_screening_hash
+from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog, ScreenedPaper, compute_screening_hash, \
+    estimated_cost_eur
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
-from app.usage import counted, counts
+from app.usage import counted, counts, current_tokens
 from app.biorxiv import search_biorxiv, biorxiv_paper_id, fetch_versions as biorxiv_versions, PDF_URL as BIORXIV_PDF_URL
 from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id, \
     _is_biorxiv, _biorxiv_gap, fetch_biorxiv_figure, doi_from_url, nightly_running
@@ -1261,6 +1262,17 @@ def notify_important_paper(
     return send_notification(subject, "", content_html=content_html, figure_url=None, project_emails=project_emails, project_settings_url=dashboard_url)
 
 
+def _email_usage_text(tokens: int) -> str:
+    """The AI-usage line at the bottom of the crawl email, so the people who get it see what a crawl costs."""
+    if not tokens:
+        return ""
+    shown = f"{tokens / 1_000_000:.1f}M" if tokens >= 1_000_000 else f"{max(1, round(tokens / 1000))}k"
+    model = os.environ.get("LLM_COST_COMPARISON_MODEL", "Claude Sonnet 4.6")
+    return (f"AI usage for this crawl: {shown} tokens, roughly €{estimated_cost_eur(tokens):.2f} at {model} prices "
+            f"(we run our own model, so this is for comparison). Every paper found is checked against your research "
+            f"interest, so a long research interest or a very broad keyword makes this add up.")
+
+
 def notify_crawl_complete(
     project_name: str,
     project_slug: str,
@@ -1276,8 +1288,10 @@ def notify_crawl_complete(
     date_to=None,
     keywords_auto_generated: bool = False,
     warning: Optional[str] = None,
+    tokens_used: int = 0,
 ):
     """Build and send the crawl-complete summary email (stats table + featured paper card).
+    tokens_used: what the crawl cost, all passes together (shown with a cost estimate, so people see it).
 
     Returns the bool from send_notification (True = sent).
     """
@@ -1474,6 +1488,12 @@ def notify_crawl_complete(
         if warning else ""
     )
 
+    usage_text = _email_usage_text(tokens_used)
+    usage_html = (
+        f'<p style="margin: 20px 0 0 0; font-size: 12px; color: #9ca3af;">{html.escape(usage_text)}</p>'
+        if usage_text else ""
+    )
+
     content_html = (
         f'<p style="margin: 0 0 4px 0; font-size: 15px; color: #374151;">'
         f'Crawl finished for <strong>{html.escape(project_name)}</strong></p>'
@@ -1484,6 +1504,7 @@ def notify_crawl_complete(
         + figure_html
         + auto_kw_html
         + view_link
+        + usage_html
     )
 
     # Plain-text fallback
@@ -1501,6 +1522,7 @@ def notify_crawl_complete(
         f'Added: {papers_added} · Skipped: {screened - papers_added}\n\n'
         f'View and tag papers: {dashboard_url}'
         + (f'\n\nIncomplete search: {warning}' if warning else '')
+        + (f'\n\n{usage_text}' if usage_text else '')
     )
 
     project_emails = None
@@ -2675,7 +2697,7 @@ def _make_carry(crawl_log, papers_added, papers_checked, papers, source_counts) 
     return {
         "papers_found": crawl_log.papers_found, "papers_added": papers_added, "papers_checked": papers_checked,
         "papers": list(papers), "keywords": list(crawl_log.keywords_list or []),
-        "sources": source_counts,
+        "sources": source_counts, "tokens": current_tokens(),
     }
 
 
@@ -2683,7 +2705,7 @@ def _merge_carry(earlier: Optional[dict], later: dict) -> dict:
     """Add up two deferred passes (first pass + a retry round that failed again and deferred too)."""
     if not earlier:
         return later
-    merged = {k: earlier.get(k, 0) + later.get(k, 0) for k in ("papers_found", "papers_added", "papers_checked")}
+    merged = {k: earlier.get(k, 0) + later.get(k, 0) for k in ("papers_found", "papers_added", "papers_checked", "tokens")}
     merged["sources"] = _merge_sources(earlier.get("sources"), later.get("sources"))
     merged["papers"] = list(earlier.get("papers", [])) + list(later.get("papers", []))
     merged["keywords"] = list(dict.fromkeys(list(earlier.get("keywords", [])) + list(later.get("keywords", []))))
@@ -2709,6 +2731,7 @@ def send_carry_notification(project_id: int, carry: dict, date_from, date_to, wa
         [featured] if featured else [], project_id=project_id, keywords_used=carry["keywords"],
         papers_screened=carry["papers_checked"], source_counts=carry.get("sources"),
         date_from=date_from, date_to=date_to, warning=warning,
+        tokens_used=carry.get("tokens", 0) + current_tokens(),
     )
 
 
@@ -3205,6 +3228,7 @@ def run_crawl(
                     keywords_auto_generated=keywords_auto_generated,
                     warning=_search_warning(failed_keywords)
                     if failed_keywords else None,
+                    tokens_used=carry.get("tokens", 0) + current_tokens(),
                 )
 
         _log.info("[crawl] ✓ success: %d added, %d skipped, %d screened in %.1fs",

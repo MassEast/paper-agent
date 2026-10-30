@@ -12,6 +12,11 @@ from app.models import LlmUsage
 
 _log = logging.getLogger(__name__)
 
+# One action (a crawl pass, a chat answer, ...) over this many tokens gets a warning in the log. A crawl
+# takes 20k-300k on a usual night, the busiest since 2026-10-16 1.3M; one with a pasted 48k-char research
+# interest took 5-7M.
+TOKEN_ALARM = 2_000_000
+
 # kind -> label shown in the usage panel, in display order
 KINDS = {
     "crawl": "Crawls",
@@ -51,6 +56,15 @@ class counted:
         db.session.commit()
         _log.info("[usage] project %s %s: %d tokens in %d calls", self.project_id, self.kind,
                   self.meter.tokens, self.meter.calls)
+        if self.meter.tokens > TOKEN_ALARM:
+            _log.warning("[usage] ALARM project %s %s used %d tokens in one go (over %d): check its research "
+                         "interest and keywords", self.project_id, self.kind, self.meter.tokens, TOKEN_ALARM)
+
+
+def current_tokens() -> int:
+    """Tokens counted so far by the action running in this thread (0 outside any)."""
+    m = llm._meter.get()
+    return m.tokens if m else 0
 
 
 def project_usage(project_id) -> dict:

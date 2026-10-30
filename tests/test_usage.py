@@ -165,3 +165,33 @@ def test_regenerate_replaces_the_cards_tokens_instead_of_adding(app, proj, logge
     with app.app_context():
         assert Paper.query.filter_by(arxiv_id="2601.07002").one().summary.tokens_used == 150
         assert _rows(proj) == [("regenerate", 150, 2)]
+
+
+def test_an_action_over_the_alarm_threshold_is_logged_as_a_warning(app, proj, caplog):
+    from app.usage import TOKEN_ALARM
+    with app.app_context():
+        with counted(proj, "crawl"):
+            llm._count({"total_tokens": TOKEN_ALARM // 2})
+        assert not [r for r in caplog.records if "ALARM" in r.getMessage()]
+        with counted(proj, "crawl"):
+            llm._count({"total_tokens": TOKEN_ALARM + 1})
+    alarms = [r for r in caplog.records if "ALARM" in r.getMessage()]
+    assert len(alarms) == 1 and alarms[0].levelname == "WARNING"
+
+
+def test_the_crawl_email_shows_tokens_and_a_cost_estimate_in_euros(monkeypatch):
+    monkeypatch.setenv("LLM_COST_COMPARISON_EUR_PER_USD", "1.0")
+    # 1M tokens = 700k in at $3/M + 300k out at $15/M = $6.60
+    assert "1.0M tokens, roughly €6.60 at" in crawl._email_usage_text(1_000_000)
+    assert "285k tokens" in crawl._email_usage_text(285_400)
+    assert crawl._email_usage_text(0) == ""
+    with patch("app.crawl.send_notification", return_value=True) as send:
+        crawl.notify_crawl_complete("P", "p", 5, 1, [], tokens_used=285_400)
+    assert "285k tokens" in send.call_args.kwargs["content_html"]
+    assert "285k tokens" in send.call_args.args[1]
+
+
+def test_the_tokens_of_a_deferred_pass_are_added_to_the_combined_email():
+    first = {"papers_found": 3, "papers_added": 1, "papers_checked": 2, "papers": [], "keywords": [], "tokens": 1000}
+    retry = {"papers_found": 1, "papers_added": 0, "papers_checked": 1, "papers": [], "keywords": [], "tokens": 500}
+    assert crawl._merge_carry(first, retry)["tokens"] == 1500

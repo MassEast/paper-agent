@@ -6,6 +6,11 @@ from datetime import datetime
 
 from app import db
 
+# The research interest goes into every screening prompt, so its length is paid once per paper screened.
+# A pasted 48k-char design doc made one project cost 5-7M tokens a night (2026-10). Generate/Improve aim
+# for at most 300 words (~2,000 chars), so their output fits with room to spare.
+RESEARCH_INTEREST_MAX_CHARS = 4000
+
 
 class Project(db.Model):
     __tablename__ = "projects"
@@ -357,6 +362,12 @@ def estimated_cost(tokens) -> float:
     input_tokens = int(tokens * ratio)
     output_tokens = int(tokens * (1 - ratio))
     return (input_tokens / 1_000_000 * input_cost_per_1m) + (output_tokens / 1_000_000 * output_cost_per_1m)
+
+
+def estimated_cost_eur(tokens) -> float:
+    """estimated_cost in euros (the rates are in dollars), for the nightly email.
+    LLM_COST_COMPARISON_EUR_PER_USD, default 0.86 (the rate in mid-2026, close enough for an estimate)."""
+    return estimated_cost(tokens) * float(os.environ.get("LLM_COST_COMPARISON_EUR_PER_USD", "0.86"))
 
 
 class LlmUsage(db.Model):

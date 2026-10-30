@@ -109,7 +109,7 @@ that captures the common themes, methodologies, and research directions.
 Papers (title + abstract excerpt):
 {papers_text}
 
-Generate a tight 2-3 paragraph description of the research interests they represent.
+Generate a tight 2-3 paragraph description of the research interests they represent, at most 300 words.
 Cover: what problems are being solved, what methods/architectures are used,
 what domains are being studied, and what the key trends are.
 Only state methods, techniques, or architectures that are actually present in the papers above —
@@ -145,7 +145,8 @@ Title: {title}
 Return JSON array only."""
 
 RESEARCH_INTEREST_IMPROVE = """\
-Refine the researcher's existing description of their research interests into a tight 2-3 paragraph version.
+Refine the researcher's existing description of their research interests into a tight 2-3 paragraph version of at most 300 words.
+If the existing description is longer, condense it: keep what the research is about and drop design details, formatting and repetition.
 Use the provided papers as background context to better understand the research scope — but do NOT mention specific papers, authors, or titles in the output.
 The result should read as a first-person description of research goals, problems being solved, methods and approaches of interest, and open questions — not as a literature review.
 
