@@ -1483,13 +1483,13 @@
                     <tr style="border-top: 1px solid var(--border-subtle);">
                         <td style="padding: 5px 0; color: var(--ink-2);">{{ usage_kinds[kind] }}</td>
                         <td style="padding: 5px 0 5px 8px; text-align: right; color: var(--ink-3); white-space: nowrap;">{{ tokens | tokens_short }}</td>
-                        <td style="padding: 5px 0 5px 8px; text-align: right; color: var(--ink-4); white-space: nowrap;">~${{ tokens | est_cost }}</td>
+                        <td style="padding: 5px 0 5px 8px; text-align: right; color: var(--ink-4); white-space: nowrap;">~€{{ tokens | est_cost }}</td>
                     </tr>
                     {% endfor %}
                     <tr style="border-top: 1px solid var(--border-default); font-weight: 600;">
                         <td style="padding: 5px 0; color: var(--ink-1);">Total</td>
                         <td style="padding: 5px 0 5px 8px; text-align: right; color: var(--ink-1); white-space: nowrap;">{{ _usage_total_panel | tokens_short }}</td>
-                        <td style="padding: 5px 0 5px 8px; text-align: right; color: var(--ink-2); white-space: nowrap;">~${{ _usage_total_panel | est_cost }}</td>
+                        <td style="padding: 5px 0 5px 8px; text-align: right; color: var(--ink-2); white-space: nowrap;">~€{{ _usage_total_panel | est_cost }}</td>
                     </tr>
                 </table>
                 <p style="font-size: 0.72rem; color: var(--ink-4); margin-top: 8px; line-height: 1.45;">Everything is counted since Oct 15, 2026. Before that only crawls were counted, so chat, adding papers, Regenerate and the rest are missing for earlier days.</p>
@@ -1513,7 +1513,7 @@
             ~{{ _usage_total | tokens_short }} tokens
         </span>
         <span style="font-size: 0.75rem; color: var(--ink-3);">
-            ~${{ _usage_total | est_cost }}
+            ~€{{ _usage_total | est_cost }}
         </span>
         <span style="font-size: 0.7rem; color: var(--ink-4);">({{ cost_comparison_model }} pricing, for comparison)</span>
         <span style="font-size: 0.7rem; color: var(--ink-4);">·</span>

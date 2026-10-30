@@ -345,7 +345,7 @@ class CrawlLog(db.Model):
     
     @property
     def estimated_cost(self):
-        return estimated_cost(self.total_tokens)
+        return estimated_cost_eur(self.total_tokens)
 
 
 def estimated_cost(tokens) -> float:
@@ -365,7 +365,7 @@ def estimated_cost(tokens) -> float:
 
 
 def estimated_cost_eur(tokens) -> float:
-    """estimated_cost in euros (the rates are in dollars), for the nightly email.
+    """estimated_cost in euros (the rates are in dollars); every cost the UI and the emails show.
     LLM_COST_COMPARISON_EUR_PER_USD, default 0.86 (the rate in mid-2026, close enough for an estimate)."""
     return estimated_cost(tokens) * float(os.environ.get("LLM_COST_COMPARISON_EUR_PER_USD", "0.86"))
 

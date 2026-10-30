@@ -159,7 +159,7 @@
                             {% if _tokens > 0 %}
                             <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" data-tip="All LLM tokens this project used: crawls, paper chat, adding papers, Regenerate, Re-screen and the rest (cost estimated at {{ cost_comparison_model }} pricing, for comparison). The breakdown is under the project's crawl calendar">
                                 <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">LLM usage</div>
-                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">~${{ _tokens|est_cost }} <span style="font-weight: 400; font-size: 0.75rem; color: var(--ink-4);">{{ _tokens|tokens_short }} tok</span></div>
+                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">~€{{ _tokens|est_cost }} <span style="font-weight: 400; font-size: 0.75rem; color: var(--ink-4);">{{ _tokens|tokens_short }} tok</span></div>
                             </div>
                             {% endif %}
                         </div>

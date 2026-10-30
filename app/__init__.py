@@ -218,8 +218,8 @@ def create_app():
 
     @app.template_filter("est_cost")
     def est_cost_filter(n):
-        from app.models import estimated_cost
-        return f"{estimated_cost(n):.2f}"
+        from app.models import estimated_cost_eur
+        return f"{estimated_cost_eur(n):.2f}"
 
     @app.route("/")
     def index():

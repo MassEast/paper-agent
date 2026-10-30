@@ -135,7 +135,7 @@
             {% if crawl.total_tokens >= 1000000 %}{{ (crawl.total_tokens / 1000000)|round(2) }}M{% else %}{{ (crawl.total_tokens / 1000)|round(1) }}k{% endif %} tokens
         </span>
         <span style="display: inline-flex; align-items: center; gap: 6px;">
-            ${{ "%.2f"|format(crawl.estimated_cost) }}
+            €{{ "%.2f"|format(crawl.estimated_cost) }}
         </span>
         {% endif %}
     </div>
