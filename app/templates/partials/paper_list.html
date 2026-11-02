@@ -25,6 +25,7 @@ if (!window._paperStateHooked) {
         p.new_by = s.new.by; p.new_dir = s.new.dir;
         p.col_by = s.col.by; p.col_dir = s.col.dir; p.col_group = s.col.grouped ? '1' : '';
         p.col_tags = (window._paperFilter || []).join(',');
+        if (window._paperFocus) p.paper = window._paperFocus;  // keeps the paper from the email first in its list
         var search = document.querySelector('input[name="search"]');
         if (search && p.search === undefined) p.search = search.value;
     });

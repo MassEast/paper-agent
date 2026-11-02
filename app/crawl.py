@@ -1242,6 +1242,10 @@ def notify_important_paper(
 
     figure_html = _fetch_figure_html(figure_url, caption=figure_caption) if figure_url else ""
 
+    featured_id = getattr(_first_paper(top_papers), "id", None)
+    others = [p for p in (added_papers or []) if getattr(p, "id", None) != featured_id]
+    others_html = _email_others_html(others, dashboard_url)
+
     view_link = (
         f'<p style="text-align:center;margin:20px 0;">'
         f'<a href="{dashboard_url}" style="color:#7c3aed;font-size:13px;font-weight:600;'
@@ -1273,6 +1277,53 @@ def _email_usage_text(tokens: int) -> str:
             f"interest, so a long research interest or a very broad keyword makes this add up.")
 
 
+EMAIL_OTHERS_MAX = 25  # rows in the email's "Also added" table; the rest are on the project page
+
+
+def _first_paper(top_papers):
+    if not top_papers:
+        return None
+    return top_papers[0][0] if isinstance(top_papers[0], tuple) else top_papers[0]
+
+
+def _email_card_url(dashboard_url: str, paper) -> str:
+    """The project page with this paper shown first in whichever section it is in now."""
+    return f"{dashboard_url}?paper={paper.id}"
+
+
+def _email_others_html(papers: list, dashboard_url: str) -> str:
+    """The papers added besides the featured one: title (links to its card), institutions, date, citations."""
+    if not papers:
+        return ""
+    rows = ""
+    for p in papers[:EMAIL_OTHERS_MAX]:
+        insts = p.institutions_list[:2]
+        inst_html = (f'<div style="font-size: 12px; color: #6b7280; margin-top: 2px;">{html.escape(", ".join(insts))}'
+                     f'{" et al." if len(p.institutions_list) > 2 else ""}</div>' if insts else "")
+        date_str = p.published_date.strftime("%b %d, %Y") if p.published_date else (str(p.year) if p.year else "")
+        cites = f"{p.citation_count:,} citation{'s' if p.citation_count != 1 else ''}" if p.citation_count else ""
+        rows += (
+            '<tr style="border-top: 1px solid #f3f4f6;">'
+            '<td style="padding: 9px 12px 9px 0; vertical-align: top;">'
+            f'<a href="{html.escape(_email_card_url(dashboard_url, p))}" style="color: #111827; font-size: 14px;'
+            f' font-weight: 600; text-decoration: none; line-height: 1.35;">{html.escape(p.title or "Untitled")}</a>'
+            f'{inst_html}</td>'
+            '<td style="padding: 9px 0; vertical-align: top; text-align: right; white-space: nowrap; font-size: 12px;'
+            f' color: #6b7280;">{date_str}<div>{cites}</div></td>'
+            '</tr>'
+        )
+    more = len(papers) - EMAIL_OTHERS_MAX
+    more_html = (f'<p style="margin: 6px 0 0 0; font-size: 12px; color: #6b7280;">and {more} more on the'
+                 f' <a href="{dashboard_url}" style="color: #7c3aed;">project page</a>.</p>' if more > 0 else "")
+    return (
+        '<div style="margin: 20px 0 8px 0;">'
+        '<p style="margin: 0 0 4px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;'
+        f' color: #7c3aed; font-weight: 700;">Also added ({len(papers)})</p>'
+        '<table cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse;"><tbody>'
+        + rows + '</tbody></table>' + more_html + '</div>'
+    )
+
+
 def notify_crawl_complete(
     project_name: str,
     project_slug: str,
@@ -1289,9 +1340,12 @@ def notify_crawl_complete(
     keywords_auto_generated: bool = False,
     warning: Optional[str] = None,
     tokens_used: int = 0,
+    added_papers: Optional[list] = None,
 ):
     """Build and send the crawl-complete summary email (stats table + featured paper card).
     tokens_used: what the crawl cost, all passes together (shown with a cost estimate, so people see it).
+    added_papers: every Paper this crawl added; the ones besides the featured paper are listed in a table.
+    Paper titles link to the paper's card in the project (?paper=<Paper.id>, see paper_lists.focus_status).
 
     Returns the bool from send_notification (True = sent).
     """
@@ -1364,6 +1418,9 @@ def notify_crawl_complete(
             figure_caption = raw_cap.strip()
 
         title = html.escape(getattr(top, "title", "Unknown Title"))
+        if getattr(top, "id", None):
+            title = (f'<a href="{html.escape(_email_card_url(dashboard_url, top))}"'
+                     f' style="color: #111827; text-decoration: none;">{title}</a>')
         year = getattr(top, "year", None)
         year_span = f' <span style="font-weight: 400; color: #6b7280; font-size: 15px;">({year})</span>' if year else ""
         citation_count = getattr(top, "citation_count", None) or 0
@@ -1452,6 +1509,10 @@ def notify_crawl_complete(
 
     figure_html = _fetch_figure_html(figure_url, caption=figure_caption) if figure_url else ""
 
+    featured_id = getattr(_first_paper(top_papers), "id", None)
+    others = [p for p in (added_papers or []) if getattr(p, "id", None) != featured_id]
+    others_html = _email_others_html(others, dashboard_url)
+
     view_link = (
         f'<div style="margin-top: 20px; text-align: center;">'
         f'<a href="{dashboard_url}" style="color: #7c3aed; font-size: 14px; font-weight: 600;'
@@ -1502,6 +1563,7 @@ def notify_crawl_complete(
         + stats_html
         + featured_html
         + figure_html
+        + others_html
         + auto_kw_html
         + view_link
         + usage_html
@@ -1520,7 +1582,9 @@ def notify_crawl_complete(
                   for via, label in _email_source_rows(source_counts) if source_counts)
         + f'\nTotal found: {papers_found}\n'
         f'Added: {papers_added} · Skipped: {screened - papers_added}\n\n'
-        f'View and tag papers: {dashboard_url}'
+        + (f'Also added:\n' + ''.join(f'- {p.title}: {_email_card_url(dashboard_url, p)}\n'
+                                          for p in others[:EMAIL_OTHERS_MAX]) + '\n' if others else '')
+        + f'View and tag papers: {dashboard_url}'
         + (f'\n\nIncomplete search: {warning}' if warning else '')
         + (f'\n\n{usage_text}' if usage_text else '')
     )
@@ -2731,7 +2795,7 @@ def send_carry_notification(project_id: int, carry: dict, date_from, date_to, wa
         [featured] if featured else [], project_id=project_id, keywords_used=carry["keywords"],
         papers_screened=carry["papers_checked"], source_counts=carry.get("sources"),
         date_from=date_from, date_to=date_to, warning=warning,
-        tokens_used=carry.get("tokens", 0) + current_tokens(),
+        tokens_used=carry.get("tokens", 0) + current_tokens(), added_papers=carry["papers"],
     )
 
 
@@ -3229,6 +3293,7 @@ def run_crawl(
                     warning=_search_warning(failed_keywords)
                     if failed_keywords else None,
                     tokens_used=carry.get("tokens", 0) + current_tokens(),
+                    added_papers=all_added,
                 )
 
         _log.info("[crawl] ✓ success: %d added, %d skipped, %d screened in %.1fs",

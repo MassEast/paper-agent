@@ -404,6 +404,36 @@
                 {% with state=rescreen if rescreen and rescreen.status == 'running' else None %}
                 {% include "partials/rescreen_status.html" %}
                 {% endwith %}
+                {% if focus_where %}
+                {# Opened from the crawl email (?paper=<Paper.id>): say where that paper is now; it is shown first there #}
+                <div id="paper-focus-note" role="status"
+                    style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border-radius: var(--radius-md); font-size: 0.85rem; color: var(--ink-2); background-color: color-mix(in oklch, var(--accent) 12%, var(--paper-2)); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);">
+                    <span style="flex: 1;">
+                        {% if focus_where == 'gone' %}
+                        The paper from the email is no longer in this project.
+                        {% else %}
+                        <strong>{{ focus_pp.paper.title }}</strong>:
+                        {% if focus_where == 'new' %}still in New Papers, shown first below.
+                        {% elif focus_where == 'col' %}already in My Collection{% if focus_pp.collected_at %} (since {{ focus_pp.collected_at | berlin_time('%b %d') }}){% endif %}, shown first there.
+                        {% else %}moved to Trash on {{ focus_pp.trashed_at | berlin_time('%b %d') }}{% if focus_pp.trashed_reason %} ({{ focus_pp.trashed_reason }}){% endif %}. It is shown first in Trash, where you can restore it.
+                        {% endif %}
+                        {% endif %}
+                    </span>
+                    <button type="button" class="focus-ring" aria-label="Dismiss" onclick="this.parentElement.remove()"
+                        style="color: var(--ink-3); font-size: 1rem; line-height: 1;">&times;</button>
+                </div>
+                <script>
+                window._paperFocus = {{ state.focus }};
+                document.addEventListener('DOMContentLoaded', function () {
+                    var el = document.querySelector('[data-pp-card="{{ focus_pp.id if focus_pp else '' }}"], [data-pp-row="{{ focus_pp.id if focus_pp else '' }}"]');
+                    if (!el) return;
+                    var trash = el.closest('[id^="trash-list-"]');
+                    if (trash) trash.classList.remove('hidden');
+                    el.classList.add('paper-focused');
+                    el.scrollIntoView({ block: 'center' });
+                });
+                </script>
+                {% endif %}
                 <div id="paper-list">
                     {% include "partials/paper_list.html" %}
                 </div>

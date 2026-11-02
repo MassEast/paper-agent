@@ -34,6 +34,8 @@ def list_state(values) -> dict:
         "col_group": values.get("col_group") == "1",
         "col_tags": [t for t in (values.get("col_tags") or "").split(",") if t in TAGS],
         "search": (values.get("search") or "").strip(),
+        # A paper opened from the email (?paper=<Paper.id>): shown first in whichever section it is in
+        "focus": int(values["paper"]) if (values.get("paper") or "").isdigit() else None,
     }
 
 
@@ -80,10 +82,22 @@ def sections(project, state) -> dict:
     if state["col_group"]:
         col = sorted(col, key=_tag_group)  # stable: date order kept inside each group
     trash.sort(key=lambda pp: pp.trashed_at, reverse=True)
+    new = _date_sort(new, state["new_by"], state["new_dir"])
+    if state.get("focus"):
+        for lst in (new, col, trash):  # first in its list on every page request, so pages neither skip nor repeat it
+            lst.sort(key=lambda pp: pp.paper_id != state["focus"])
     return {
-        "new": _date_sort(new, state["new_by"], state["new_dir"]),
+        "new": new,
         "col": col,
         "trash": trash,
         "col_total": col_total,
         "tag_counts": tag_counts,
     }
+
+
+def focus_status(project, paper_id):
+    """(ProjectPaper or None, where it is now) for the paper opened from the email."""
+    pp = ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper_id).first()
+    if pp is None:
+        return None, "gone"
+    return pp, "trash" if pp.trashed_at else "new" if pp.manual_tag is None else "col"

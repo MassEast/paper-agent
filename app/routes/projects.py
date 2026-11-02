@@ -103,6 +103,7 @@ def detail(slug):
     state = paper_lists.list_state(request.args)
     sections = paper_lists.sections(project, state)
     papers = ProjectPaper.query.filter_by(project_id=project.id).all()  # every paper: calendar dots
+    focus_pp, focus_where = paper_lists.focus_status(project, state["focus"]) if state["focus"] else (None, None)
 
     recent_crawl = (
         CrawlLog.query.filter_by(project_id=project.id).order_by(CrawlLog.started_at.desc()).first()
@@ -152,6 +153,8 @@ def detail(slug):
         s=sections,
         state=state,
         page_size=paper_lists.PAGE_SIZE,
+        focus_pp=focus_pp,
+        focus_where=focus_where,
         recent_crawl=recent_crawl,
         search_query=state["search"],
         context_epochs=context_epochs,
