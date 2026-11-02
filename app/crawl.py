@@ -1132,11 +1132,13 @@ def send_notification(
 def notify_important_paper(
     paper, project_name: str, project_slug: str, figure_url: Optional[str] = None,
     figure_caption: Optional[str] = None,
-    project_emails: Optional[str] = None, notes: Optional[str] = None
+    project_emails: Optional[str] = None, notes: Optional[str] = None, project=None, flagged_by: Optional[str] = None
 ):
-    """Build and send the "paper flagged as important" email (single-paper card + notes).
+    """Build and send the "paper flagged as important" email (single-paper card + notes). The title and the
+    "Open in project" link go to the paper's card (?paper=<Paper.id>); in a per-person project everyone gets
+    their own copy (_send_project_email) and the email says who flagged it.
 
-    Returns the bool from send_notification (True = sent).
+    Returns True if every copy was sent.
     """
     from zoneinfo import ZoneInfo
     berlin = ZoneInfo("Europe/Berlin")
@@ -1144,6 +1146,7 @@ def notify_important_paper(
 
     server_url = os.environ.get("SERVER_URL", "http://localhost:5001")
     dashboard_url = f"{server_url}/projects/{project_slug}"
+    card_url = _email_card_url(dashboard_url, paper)
 
     authors_list = paper.authors_list
     authors_str = html.escape(
@@ -1227,7 +1230,8 @@ def notify_important_paper(
         '<p style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#7c3aed;'
         'margin:0 0 12px 0;font-weight:700;">📄 Flagged Paper</p>'
         f'<h2 style="margin:0 0 6px 0;font-size:17px;font-weight:700;color:#111827;line-height:1.35;">'
-        f'{html.escape(paper.title)}{year_span}</h2>'
+        f'<a href="{html.escape(card_url)}" style="color:#111827;text-decoration:none;">{html.escape(paper.title)}</a>'
+        f'{year_span}</h2>'
         f'<p style="margin:0;font-size:13px;color:#4b5563;">{authors_str}</p>'
         + citations_html + institutions_html + badges_html
         + (
@@ -1242,28 +1246,25 @@ def notify_important_paper(
 
     figure_html = _fetch_figure_html(figure_url, caption=figure_caption) if figure_url else ""
 
-    featured_id = getattr(_first_paper(top_papers), "id", None)
-    others = [p for p in (added_papers or []) if getattr(p, "id", None) != featured_id]
-    others_html = _email_others_html(others, dashboard_url)
-
     view_link = (
         f'<p style="text-align:center;margin:20px 0;">'
-        f'<a href="{dashboard_url}" style="color:#7c3aed;font-size:13px;font-weight:600;'
-        f'text-decoration:none;">View in project →</a></p>'
+        f'<a href="{html.escape(card_url)}" style="color:#7c3aed;font-size:13px;font-weight:600;'
+        f'text-decoration:none;">Open in project →</a></p>'
     )
 
     project_link = (
         f'<a href="{dashboard_url}" style="color:#7c3aed;text-decoration:none;font-weight:700;">'
         f'{html.escape(project_name)}</a>'
     )
+    by = f" by {html.escape(flagged_by)}" if flagged_by else ""
     content_html = (
         f'<p style="font-size:13px;color:#6b7280;margin:0 0 16px 0;">'
-        f'Flagged at {now_str} · in project {project_link}</p>'
+        f'Flagged{by} at {now_str} · in project {project_link}</p>'
         + paper_card + figure_html + view_link
     )
 
     subject = f"📄 Paper flagged: {paper.title[:60]}{'…' if len(paper.title) > 60 else ''}"
-    return send_notification(subject, "", content_html=content_html, figure_url=None, project_emails=project_emails, project_settings_url=dashboard_url)
+    return _send_project_email(project, subject, "", content_html, dashboard_url, dashboard_url, project_emails)
 
 
 def _email_usage_text(tokens: int) -> str:
@@ -1596,27 +1597,25 @@ def notify_crawl_complete(
         if project and project.notification_emails:
             project_emails = project.notification_emails
 
+    return _send_project_email(project, subject, message, content_html, dashboard_url, project_settings_url,
+                               project_emails)
+
+
+def _send_project_email(project, subject, message, content_html, dashboard_url, settings_url, project_emails):
+    """Send to the project's addresses. Several people (project.per_person): everyone gets their own copy, whose
+    links say who they are (?as=<member id>), so the page opens as them without asking (app/members.py)."""
     if project is not None and project.per_person and project_emails:
-        # Several people: everyone gets their own copy, whose links say who they are (?as=<member id>),
-        # so the page opens as them without asking (app/members.py)
         from app import members
         sent = True
         for email in [e.strip() for e in project_emails.split(",") if e.strip()]:
             m = members.by_email(project, email)
             mark = (lambda text: _personal_links(text, dashboard_url, m.id)) if m else (lambda text: text)
             sent &= bool(send_notification(subject, mark(message), figure_url=None, project_emails=email,
-                                           project_settings_url=mark(project_settings_url),
+                                           project_settings_url=mark(settings_url),
                                            content_html=mark(content_html)))
         return sent
-
-    return send_notification(
-        subject,
-        message,
-        figure_url=None,
-        project_emails=project_emails,
-        project_settings_url=project_settings_url,
-        content_html=content_html,
-    )
+    return send_notification(subject, message, figure_url=None, project_emails=project_emails,
+                             project_settings_url=settings_url, content_html=content_html)
 
 
 def _personal_links(text: str, dashboard_url: str, member_id: int) -> str:

@@ -116,3 +116,39 @@ def test_a_paper_not_in_the_project_and_a_page_without_one(c, focus_project):
     _, slug, _ = focus_project
     assert "no longer in this project" in c.get(f"/projects/{slug}?paper=999999").get_data(as_text=True)
     assert "paper-focus-note" not in c.get(f"/projects/{slug}").get_data(as_text=True)
+
+
+def _flag(project=None, flagged_by=None, emails="a@example.org"):
+    paper = SimpleNamespace(id=7, title="Flagged One", authors_list=[], year=2026, citation_count=0, page_count=0,
+                            institutions_list=[], summary=None, landing_url="https://arxiv.org/abs/2611.00007")
+    with patch("app.crawl.send_notification", return_value=True) as send:
+        assert crawl.notify_important_paper(paper, "P", "proj", project_emails=emails, project=project,
+                                            flagged_by=flagged_by)
+    return send
+
+
+def test_the_flagged_paper_email_links_to_the_card():
+    html = _flag().call_args.kwargs["content_html"]
+    assert html.count("/projects/proj?paper=7") == 2  # the title and "Open in project"
+    assert "arxiv.org/abs/2611.00007" in html  # the arXiv link stays
+    assert "Flagged at" in html
+
+
+def test_a_flagged_paper_in_a_per_person_project_goes_to_everyone_with_their_own_links(app):
+    with app.app_context():
+        from app import members
+        from app.models import ProjectMember
+        project = Project(name="Flag Team", slug="flag-team", per_person=True,
+                          notification_emails="a@example.org,b@example.org")
+        db.session.add(project)
+        db.session.flush()
+        ProjectMember.query.filter_by(project_id=project.id).delete()
+        members.sync_from_emails(project)
+        ids = {m.email: m.id for m in members.members(project)}
+        send = _flag(project, "A", project.notification_emails)
+        db.session.rollback()
+    sent = {c.kwargs["project_emails"]: c.kwargs["content_html"] for c in send.call_args_list}
+    assert set(sent) == {"a@example.org", "b@example.org"}
+    for email, html in sent.items():
+        assert f"/projects/proj?as={ids[email]}&paper=7" in html
+    assert "Flagged by A at" in sent["b@example.org"]

@@ -526,6 +526,8 @@ def notify_paper(arxiv_id):
                     figure_caption=paper.figure_caption,
                     project_emails=project.notification_emails,
                     notes=pp.notes if pp else None,
+                    project=project,
+                    flagged_by=getattr(members.current(project), "name", None),
                 )
                 if sent:
                     emails_used = project.notification_emails

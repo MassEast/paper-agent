@@ -69,9 +69,10 @@ k8s/cronjob.yaml
 k8s/ingress.yaml
 k8s/backup-cronjob.yaml
 
-# Local session docs (progress log, prompt log) — personal notes, not repo artifacts
+# Local session docs (progress log, plans, prompt log) — personal notes, not repo artifacts
 docs/PROGRESS.md
 docs/PROMPTS.log
+docs/PLAN*.md
 
 # Local-only operating instructions — not part of the public repo
 CLAUDE.md
