@@ -1590,10 +1590,24 @@ def notify_crawl_complete(
     )
 
     project_emails = None
+    project = None
     if project_id:
         project = Project.query.get(project_id)
         if project and project.notification_emails:
             project_emails = project.notification_emails
+
+    if project is not None and project.per_person and project_emails:
+        # Several people: everyone gets their own copy, whose links say who they are (?as=<member id>),
+        # so the page opens as them without asking (app/members.py)
+        from app import members
+        sent = True
+        for email in [e.strip() for e in project_emails.split(",") if e.strip()]:
+            m = members.by_email(project, email)
+            mark = (lambda text: _personal_links(text, dashboard_url, m.id)) if m else (lambda text: text)
+            sent &= bool(send_notification(subject, mark(message), figure_url=None, project_emails=email,
+                                           project_settings_url=mark(project_settings_url),
+                                           content_html=mark(content_html)))
+        return sent
 
     return send_notification(
         subject,
@@ -1605,11 +1619,17 @@ def notify_crawl_complete(
     )
 
 
+def _personal_links(text: str, dashboard_url: str, member_id: int) -> str:
+    """Every link to the project page in an email, with as=<member id> added."""
+    return re.sub(re.escape(dashboard_url) + r'(\?|#|"|$|\s)',
+                  lambda mt: f"{dashboard_url}?as={member_id}" + ("&" if mt.group(1) == "?" else mt.group(1)), text)
+
+
 _COLLECTION_TAG_PRIORITY = {"important": 0, "to_discuss": 1, "to_read": 2, "related": 3}
 
 
 def _collection_tag_tier(pp) -> int:
-    tags = pp.tags_list
+    tags = pp.any_tags  # per_person projects: a tag counts if anyone set it
     for tag in ("important", "to_discuss", "to_read"):
         if tag in tags:
             return _COLLECTION_TAG_PRIORITY[tag]
@@ -3474,6 +3494,7 @@ def run_rescreen(project_id: int) -> dict:
                 untouched = pp is not None and pp.manual_tag is None and not pp.trashed_at
                 if untouched and reason == "not-relevant":
                     pp.trashed_at = datetime.utcnow()
+                    pp.moved_by_id = None  # an automatic move, nobody's: not shown in anyone's New Papers
                     pp.trashed_reason = "Re-screen: not relevant" + (" (from the abstract)" if source == "abstract" else "")
                     if source:
                         pp.screen_source = source
@@ -3600,6 +3621,7 @@ def refresh_from_full_text(project_id: int, limit: int = FULL_TEXT_REFRESH_PER_N
                     _log.warning("[full-text] giving up on %s after %d tries", item["arxiv_id"], paper.full_text_attempts)
             elif reason == "not-relevant":
                 pp.trashed_at = datetime.utcnow()
+                pp.moved_by_id = None  # an automatic move, nobody's: not shown in anyone's New Papers
                 pp.trashed_reason = "Not relevant after reading the full text"
                 pp.screen_source = "full_text"
                 stats["trashed"] += 1

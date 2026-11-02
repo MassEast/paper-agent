@@ -23,12 +23,16 @@ class Project(db.Model):
     saved_keywords = db.Column(db.Text)  # JSON array; persisted per project for nightly crawl
     crawl_hour = db.Column(db.Integer)   # hour (1-4 UTC) when the nightly CronJob crawls this project
     use_biorxiv = db.Column(db.Boolean, default=False)  # nightly crawl also searches bioRxiv; Find Papers starts from it
+    # Several people in one project (app/members.py): each has their own New Papers, tags, votes and chat;
+    # My Collection and Trash stay shared. Off: one shared view, as before.
+    per_person = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     trashed_at = db.Column(db.DateTime, nullable=True)
 
     papers = db.relationship("ProjectPaper", back_populates="project", cascade="all, delete-orphan")
     crawl_logs = db.relationship("CrawlLog", back_populates="project", cascade="all, delete-orphan",
                                 order_by="CrawlLog.started_at.desc()")
+    people = db.relationship("ProjectMember", cascade="all, delete-orphan", order_by="ProjectMember.id")
 
     @property
     def saved_keywords_list(self):
@@ -184,8 +188,39 @@ class ChatMessage(db.Model):
     # shown as context usage on the chat
     context_tokens = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    member_id = db.Column(db.Integer)  # per_person projects: whose chat this is (None: shared, from before)
 
     project_paper = db.relationship("ProjectPaper", back_populates="chat_messages")
+
+
+class ProjectMember(db.Model):
+    """A person working in a project, one per notification address (members.sync_from_emails). Not a login: the site has one shared password, and the browser
+    remembers who you are per project (cookie)."""
+    __tablename__ = "project_members"
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id"), nullable=False, index=True)
+    name = db.Column(db.Text, nullable=False)
+    email = db.Column(db.Text)
+    color = db.Column(db.Text, nullable=False)  # CSS color, from members.COLORS
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class PaperMemberState(db.Model):
+    """One person's own view of one paper in a per_person project."""
+    __tablename__ = "paper_member_states"
+    __table_args__ = (db.UniqueConstraint("project_paper_id", "member_id"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_paper_id = db.Column(db.Integer, db.ForeignKey("project_papers.id"), nullable=False, index=True)
+    member_id = db.Column(db.Integer, db.ForeignKey("project_members.id"), nullable=False)
+    tags = db.Column(db.Text)  # JSON list; None: not set yet, the paper's shared tags from before apply
+    vote = db.Column(db.Integer)  # 1-5
+    # When this person last acted on the paper; a move by someone else after this puts it back in their New Papers
+    seen_at = db.Column(db.DateTime)
+
+    project_paper = db.relationship("ProjectPaper", back_populates="member_states")
+    member = db.relationship("ProjectMember")
 
 
 class ProjectPaper(db.Model):
@@ -228,8 +263,21 @@ class ProjectPaper(db.Model):
         db.UniqueConstraint("project_id", "paper_id"),
     )
 
+    # per_person projects: who last moved the paper between sections (collected, trashed, restored) and when;
+    # it then shows up in everyone else's New Papers until they acknowledge it (members.section_for)
+    moved_by_id = db.Column(db.Integer, db.ForeignKey("project_members.id"), nullable=True)
+    moved_at = db.Column(db.DateTime, nullable=True)
+    # per_person projects: JSON list of [member_id or null, text] runs (who wrote what); joined, they are the
+    # note text, which `notes` keeps too
+    notes_runs = db.Column(db.Text)
+    # The shared tags as members.set_per_person left them when per-person mode was turned off; turning it on
+    # again compares: tags changed meanwhile apply to everyone, unchanged ones give everyone their own tags back
+    tags_at_off = db.Column(db.Text)
+
     project = db.relationship("Project", back_populates="papers")
     paper = db.relationship("Paper", back_populates="project_links")
+    moved_by = db.relationship("ProjectMember", foreign_keys=[moved_by_id])
+    member_states = db.relationship("PaperMemberState", back_populates="project_paper", cascade="all, delete-orphan")
     chat_messages = db.relationship("ChatMessage", back_populates="project_paper", cascade="all, delete-orphan",
                                     order_by="ChatMessage.id")
 
@@ -301,6 +349,15 @@ class ProjectPaper(db.Model):
             except (json.JSONDecodeError, TypeError):
                 return []
         return []
+
+    @property
+    def any_tags(self) -> set[str]:
+        """Every tag anyone set (per_person projects keep tags per person); the crawl's reference papers use it."""
+        tags = set(self.tags_list)
+        for st in self.member_states:
+            if st.tags is not None:
+                tags.update(json.loads(st.tags))
+        return tags
 
 
 class CrawlLog(db.Model):

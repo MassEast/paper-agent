@@ -13,7 +13,19 @@
 </a>
 {% endblock %}
 
+{% block nav_right %}
+{% if project.per_person and me %}
+<button type="button" class="focus-ring" onclick="document.getElementById('whoami').hidden = false"
+    data-tip="You are {{ me.name }} in this project (remembered in this browser). Click to switch."
+    style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; color: {{ me.color }}; border: 1px solid color-mix(in oklch, {{ me.color }} 50%, transparent); background-color: color-mix(in oklch, {{ me.color }} 12%, transparent);">
+    <span style="width: 8px; height: 8px; border-radius: 9999px; background: {{ me.color }};"></span>
+    You: {{ me.name }}
+</button>
+{% endif %}
+{% endblock %}
+
 {% block content %}
+{% if project.per_person %}{% include "partials/_whoami.html" %}{% endif %}
 <style>
     .kw-remove { padding: 0 6px; border-radius: var(--radius-sm); color: var(--ink-4); background: none; border: none; font-size: 1rem; line-height: 1; }
     .kw-remove:hover { color: var(--error); background-color: var(--error-bg); }
@@ -414,7 +426,8 @@
                         {% else %}
                         <strong>{{ focus_pp.paper.title }}</strong>:
                         {% if focus_where == 'new' %}still in New Papers, shown first below.
-                        {% elif focus_where == 'col' %}already in My Collection{% if focus_pp.collected_at %} (since {{ focus_pp.collected_at | berlin_time('%b %d') }}){% endif %}, shown first there.
+                        {% elif focus_sec == 'new' %}{% if focus_pp.moved_by %}<span style="color: {{ focus_pp.moved_by.color }}; font-weight: 600;">{{ focus_pp.moved_by.name }}</span> {{ 'added it to My Collection' if focus_where == 'col' else 'moved it to Trash' }}; it is first in your New Papers.{% else %}first in your New Papers.{% endif %}
+                        {% elif focus_where == 'col' %}already in My Collection{% if focus_pp.moved_by %}, added by <span style="color: {{ focus_pp.moved_by.color }}; font-weight: 600;">{{ focus_pp.moved_by.name }}</span>{% endif %}{% if focus_pp.collected_at %} (since {{ focus_pp.collected_at | berlin_time('%b %d') }}){% endif %}, shown first there.
                         {% else %}moved to Trash on {{ focus_pp.trashed_at | berlin_time('%b %d') }}{% if focus_pp.trashed_reason %} ({{ focus_pp.trashed_reason }}){% endif %}. It is shown first in Trash, where you can restore it.
                         {% endif %}
                         {% endif %}
@@ -427,8 +440,7 @@
                 document.addEventListener('DOMContentLoaded', function () {
                     var el = document.querySelector('[data-pp-card="{{ focus_pp.id if focus_pp else '' }}"], [data-pp-row="{{ focus_pp.id if focus_pp else '' }}"]');
                     if (!el) return;
-                    var trash = el.closest('[id^="trash-list-"]');
-                    if (trash) trash.classList.remove('hidden');
+                    showPaperTab({{ ('"' ~ focus_sec ~ '"') if focus_sec else 'null' }} || 'new');
                     el.classList.add('paper-focused');
                     el.scrollIntoView({ block: 'center' });
                 });
@@ -448,9 +460,12 @@
                         var ro = new ResizeObserver(function() {
                             if (first) { first = false; return; }
                             var height = Math.round(textarea.getBoundingClientRect().height);
+                            // A card hidden by the carousel or a tab reports 0: not a resize. Only the height
+                            // goes out: sending the text too re-saved the text from page load and could
+                            // overwrite a note saved elsewhere meanwhile (seen 2026-11-02).
+                            if (!height) return;
                             var body = new URLSearchParams();
                             body.append('project_id', projectId);
-                            body.append('notes', textarea.value);
                             body.append('notes_height', height);
                             fetch('/paper/' + arxivId + '/notes', { method: 'POST', body: body });
                         });
@@ -472,6 +487,7 @@
         </div>
 
         <div class="sidebar-col">
+            {% include "partials/_people_settings.html" %}
             <div
                 style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
                 <h2
@@ -1573,60 +1589,69 @@
     </button>
 </div>
 <script>
-    // New Papers carousel: one card at a time; ← / → buttons, arrow keys (outside text fields) or a swipe.
-    // Cards stay server-rendered in pages of PAGE_SIZE; nearing the last loaded card fires 'loadmore' on
-    // the page sentinel. A card that leaves (collect / trash) is removed by htmx, so the next one moves
-    // into the same position; a re-rendered section (sort change, crawl) starts again at the first card.
+    // Carousels for New Papers and My Collection: one card at a time; ← / → buttons, arrow keys (outside text
+    // fields, for the tab that is showing) or a swipe. Cards stay server-rendered in pages of PAGE_SIZE; nearing
+    // the last loaded card fires 'loadmore' on the page sentinel. A card that leaves (collect / trash) is removed
+    // by htmx, so the next one moves into the same position; a re-rendered section (sort change, filter, crawl)
+    // starts again at the first card.
     (function () {
-        let idx = 0, list = null;
-        function cards() { return list ? Array.from(list.querySelectorAll(':scope > .paper-card')) : []; }
-        function show() {
-            list = document.getElementById('new-papers-list');
-            if (!list) return;
-            if (!list.dataset.carouselInit) { list.dataset.carouselInit = '1'; idx = 0; }  // a freshly rendered section
-            const cs = cards(), more = list.querySelector(':scope > .list-more');
+        const carousels = { new: { list: 'new-papers-list', sec: 'new-section', idx: 0 },
+                            col: { list: 'curated-list', sec: 'col-section', idx: 0 } };
+        function cards(list) { return list ? Array.from(list.querySelectorAll(':scope > .paper-card')) : []; }
+        function show1(c) {
+            const list = document.getElementById(c.list), sec = document.getElementById(c.sec);
+            if (!list || !sec) return;
+            if (!list.dataset.carouselInit) { list.dataset.carouselInit = '1'; c.idx = 0; }  // a freshly rendered section
+            const cs = cards(list), more = list.querySelector(':scope > .list-more');
             const total = cs.length + (more ? parseInt(more.dataset.left, 10) : 0);
-            idx = Math.max(0, Math.min(idx, cs.length - 1));
-            cs.forEach((c, i) => { c.style.display = i === idx ? '' : 'none'; });
-            const sec = document.getElementById('new-section');
+            c.idx = Math.max(0, Math.min(c.idx, cs.length - 1));
+            cs.forEach((card, i) => { card.style.display = i === c.idx ? '' : 'none'; });
             const pos = sec.querySelector('.new-carousel-pos');
-            if (pos) pos.textContent = cs.length ? (idx + 1) + ' / ' + total : '0 / 0';
-            sec.querySelector('[data-carousel="prev"]').disabled = idx <= 0;
-            sec.querySelector('[data-carousel="next"]').disabled = idx >= total - 1;
-            if (more) { more.style.display = 'none'; if (idx >= cs.length - 2) htmx.trigger(more, 'loadmore'); }
+            if (pos) pos.textContent = cs.length ? (c.idx + 1) + ' / ' + total : '0 / 0';
+            const prev = sec.querySelector('[data-carousel="prev"]'), next = sec.querySelector('[data-carousel="next"]');
+            if (prev) prev.disabled = c.idx <= 0;
+            if (next) next.disabled = c.idx >= total - 1;
+            if (more) { more.style.display = 'none'; if (c.idx >= cs.length - 2) htmx.trigger(more, 'loadmore'); }
         }
-        function step(d) {
+        function show() { show1(carousels.new); show1(carousels.col); }
+        function step(name, d) {
+            const c = carousels[name], list = document.getElementById(c.list);
             if (!list) return;
-            const before = idx;
-            idx = Math.max(0, Math.min(idx + d, cards().length - 1));
-            if (idx === before) return;
-            show();
-            const top = document.getElementById('new-section').getBoundingClientRect().top;
-            if (top < 0) document.getElementById('new-section').scrollIntoView({ block: 'start' });
+            const before = c.idx;
+            c.idx = Math.max(0, Math.min(c.idx + d, cards(list).length - 1));
+            if (c.idx === before) return;
+            show1(c);
+            const sec = document.getElementById(c.sec);
+            if (sec.getBoundingClientRect().top < 0) sec.scrollIntoView({ block: 'start' });
         }
+        function which(el) { return el.closest('#col-section') ? 'col' : el.closest('#new-section') ? 'new' : null; }
         document.addEventListener('click', function (e) {
             const b = e.target.closest('button[data-carousel]');
-            if (b && b.closest('#new-section')) step(b.dataset.carousel === 'next' ? 1 : -1);
+            const name = b && which(b);
+            if (name) step(name, b.dataset.carousel === 'next' ? 1 : -1);
         });
         document.addEventListener('keydown', function (e) {
             if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
             if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
             const t = e.target;
-            if (t.closest('input, textarea, select, [contenteditable="true"], .chat-panel')) return;
-            if (!document.getElementById('new-papers-list')) return;
+            if (t.closest('input, textarea, select, [contenteditable], .chat-panel')) return;
+            const pl = document.getElementById('paper-list');
+            const name = pl && (pl.dataset.tab === 'col' ? 'col' : pl.dataset.tab === 'new' ? 'new' : null);
+            if (!name || !document.getElementById(carousels[name].list)) return;
             e.preventDefault();
-            step(e.key === 'ArrowRight' ? 1 : -1);
+            step(name, e.key === 'ArrowRight' ? 1 : -1);
         });
-        let sx = null, sy = null;
+        let sx = null, sy = null, sname = null;
         document.addEventListener('touchstart', function (e) {
-            if (!e.target.closest('#new-papers-list') || e.touches.length !== 1) { sx = null; return; }
+            sname = e.target.closest('#new-papers-list') ? 'new' : e.target.closest('#curated-list') ? 'col' : null;
+            if (!sname || e.touches.length !== 1) { sx = null; return; }
             sx = e.touches[0].clientX; sy = e.touches[0].clientY;
         }, { passive: true });
         document.addEventListener('touchend', function (e) {
             if (sx === null) return;
             const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
             sx = null;
-            if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(dx < 0 ? 1 : -1);
+            if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(sname, dx < 0 ? 1 : -1);
         }, { passive: true });
         document.addEventListener('htmx:afterSwap', show);  // before settle, so a fresh page never flashes
         document.addEventListener('htmx:afterSettle', show);

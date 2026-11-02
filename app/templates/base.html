@@ -95,6 +95,19 @@
             input, textarea, select { font-size: 16px; }
             input::placeholder, textarea::placeholder { font-size: 0.875rem; }
         }
+        /* Paper list tabs (partials/paper_list.html): only the chosen section shows */
+        .paper-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-default); margin-bottom: 14px; overflow-x: auto; }
+        .paper-tab { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; font-size: 0.9rem; font-weight: 600; color: var(--ink-3);
+            border-bottom: 3px solid transparent; margin-bottom: -1px; border-radius: var(--radius-md) var(--radius-md) 0 0; white-space: nowrap; }
+        .paper-tab:hover { color: var(--tab-color); }
+        .paper-tab[aria-selected="true"] { color: var(--tab-color); border-bottom-color: var(--tab-color);
+            background-color: color-mix(in oklch, var(--tab-color) 10%, transparent); }
+        .paper-tab-count { font-weight: 400; opacity: 0.8; }
+        #paper-list[data-tab="new"] #col-section, #paper-list[data-tab="new"] #trash-section,
+        #paper-list[data-tab="col"] #new-section, #paper-list[data-tab="col"] #trash-section,
+        #paper-list[data-tab="trash"] #new-section, #paper-list[data-tab="trash"] #col-section { display: none; }
+        .paper-panel { border-top: 3px solid var(--tab-color) !important; }
+        .tab-empty { text-align: center; padding: 28px 0; color: var(--ink-4); font-size: 0.875rem; }
         /* The paper opened from the crawl email (project_detail.html) */
         .paper-focused { outline: 2px solid var(--accent); outline-offset: 2px; }
     </style>
@@ -111,6 +124,7 @@
                 {% block nav_project %}{% endblock %}
             </div>
             <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
+                {% block nav_right %}{% endblock %}
                 <a href="https://github.com/MassEast/paper-agent" target="_blank" rel="noopener"
                     aria-label="View source on GitHub" data-tip="View source on GitHub"
                     style="color: var(--ink-4); display: inline-flex; align-items: center; transition: color 150ms ease;"
@@ -222,6 +236,7 @@
         // exact text. Survives failed saves, #paper-list swaps and reloads (same browser only).
         // A draft is {base, text}: base is the server's note the edit started from, so a note that
         // was changed elsewhere in the meantime is detected and merged with conflict markers.
+        function noteId(t) { return t.dataset.arxivId + '-' + t.dataset.projectId; }
         function draftKey(t) { return 'notes-draft:' + t.dataset.arxivId + ':' + t.dataset.projectId; }
         function writeDraft(t) {
             localStorage.setItem(draftKey(t), JSON.stringify({ base: t._notesBase, text: t.value }));
@@ -236,7 +251,7 @@
             return '<<<<<<< this browser (not saved before)\n' + mine + '\n=======\n' + theirs + '\n>>>>>>> saved version\n';
         }
         function setNotesStatus(t, text, ok) {
-            var s = document.getElementById('notes-saved-' + t.dataset.arxivId + '-' + t.dataset.projectId);
+            var s = document.getElementById('notes-saved-' + noteId(t));
             s.textContent = text;
             s.style.color = ok ? 'var(--success)' : 'var(--error)';
             s.style.display = text ? '' : 'none';
@@ -368,5 +383,6 @@
         });
     })();
     </script>
+    <script src="/static/rich_notes.js"></script>
 </body>
 </html>

@@ -19,6 +19,7 @@ def _pp(title, tags, collected_at, trashed=False):
         trashed_at=datetime(2026, 1, 1) if trashed else None,
         manual_tag="related",
         tags_list=tags,
+        any_tags=set(tags),
         collected_at=collected_at,
     )
 
@@ -88,6 +89,7 @@ class TestSelectReferencePapers:
             trashed_at=None,
             manual_tag=None,
             tags_list=[],
+            any_tags=set(),
             collected_at=base,
         )
         kept = _pp("Kept", [], base)

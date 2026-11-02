@@ -12,6 +12,7 @@ sends it with every htmx request; list_state() reads it back. Defaults match the
 
 from datetime import datetime
 
+from app import members
 from app.models import Paper, ProjectPaper
 
 PAGE_SIZE = 10
@@ -23,7 +24,8 @@ _TAG_GROUP_ORDER = {"to_read": 0, "to_discuss": 1, "important": 2}  # "Group by 
 def list_state(values) -> dict:
     """Sort/filter state from request args/form (sent by the page with every htmx request)."""
     def _by(key):
-        return "pub" if values.get(key) == "pub" else "added"
+        v = values.get(key)
+        return v if v in ("pub", "vote") and (v != "vote" or key == "col_by") else "added"
 
     def _dir(key):
         return "asc" if values.get(key) == "asc" else "desc"
@@ -45,6 +47,11 @@ def added_key(pp):
 
 
 def _date_sort(papers, by, direction):
+    if by == "vote":  # average vote of everyone (per_person projects); unvoted last either way
+        from app.members import average_vote
+        voted = sorted((pp for pp in papers if average_vote(pp) is not None), key=average_vote,
+                       reverse=direction == "desc")
+        return voted + _date_sort([pp for pp in papers if average_vote(pp) is None], "added", "desc")
     if by == "pub":
         key = lambda pp: pp.paper.published_date.isoformat() if pp.paper.published_date else ""
     else:
@@ -52,8 +59,8 @@ def _date_sort(papers, by, direction):
     return sorted(papers, key=key, reverse=direction == "desc")
 
 
-def _tag_group(pp):
-    return min((_TAG_GROUP_ORDER[t] for t in pp.tags_list if t in _TAG_GROUP_ORDER), default=3)
+def _tag_group(tags):
+    return min((_TAG_GROUP_ORDER[t] for t in tags if t in _TAG_GROUP_ORDER), default=3)
 
 
 def sections(project, state) -> dict:
@@ -65,22 +72,20 @@ def sections(project, state) -> dict:
             Paper.title.ilike(q) | Paper.abstract.ilike(q) | Paper.authors.ilike(q)
             | Paper.institutions.ilike(q) | ProjectPaper.notes.ilike(q)
         )
-    new, col, trash = [], [], []
+    me = members.current(project)  # per_person projects: New Papers and tags are this person's own
+    lists = {"new": [], "col": [], "trash": []}
     for pp in query.all():
-        if pp.trashed_at:
-            trash.append(pp)
-        elif pp.manual_tag is None:
-            new.append(pp)
-        else:
-            col.append(pp)
+        lists[members.section_for(pp, me)].append(pp)
+    new, col, trash = lists["new"], lists["col"], lists["trash"]
 
-    tag_counts = {t: sum(t in pp.tags_list for pp in col) for t in TAGS}
+    tags = {pp.id: members.tags_for(pp, me) for pp in col}
+    tag_counts = {t: sum(t in tags[pp.id] for pp in col) for t in TAGS}
     col_total = len(col)
     if state["col_tags"]:
-        col = [pp for pp in col if any(t in pp.tags_list for t in state["col_tags"])]
+        col = [pp for pp in col if any(t in tags[pp.id] for t in state["col_tags"])]
     col = _date_sort(col, state["col_by"], state["col_dir"])
     if state["col_group"]:
-        col = sorted(col, key=_tag_group)  # stable: date order kept inside each group
+        col = sorted(col, key=lambda pp: _tag_group(tags[pp.id]))  # stable: date order kept inside each group
     trash.sort(key=lambda pp: pp.trashed_at, reverse=True)
     new = _date_sort(new, state["new_by"], state["new_dir"])
     if state.get("focus"):
@@ -100,4 +105,4 @@ def focus_status(project, paper_id):
     pp = ProjectPaper.query.filter_by(project_id=project.id, paper_id=paper_id).first()
     if pp is None:
         return None, "gone"
-    return pp, "trash" if pp.trashed_at else "new" if pp.manual_tag is None else "col"
+    return pp, members.shared_section(pp)

@@ -128,6 +128,25 @@ def paper_text(paper) -> tuple[str, str]:
 
 # ── Conversation ─────────────────────────────────────────────────────────────
 
+def _member_id(pp):
+    """Per-person projects: whose chat the page shows (None: one shared chat)."""
+    from app import members
+    m = members.current(pp.project)
+    return m.id if m else None
+
+
+def _msgs(pp, member_id) -> list:
+    """The chat one person sees: their own messages plus the shared ones from before per-person mode."""
+    q = ChatMessage.query.filter_by(project_paper_id=pp.id)
+    if member_id is not None:
+        q = q.filter((ChatMessage.member_id == member_id) | ChatMessage.member_id.is_(None))
+    return q.all()
+
+
+def has_chat(pp) -> bool:
+    return bool(_msgs(pp, _member_id(pp)))
+
+
 def ordered(msgs: list) -> list:
     """Messages in conversation order: each answer right after its question (an answer row is created
     only when its question is sent, so ids alone would put it after questions queued meanwhile)."""
@@ -147,11 +166,13 @@ def _answered_pairs(msgs: list, before_id: int) -> list[tuple]:
 def build_messages(pp, text: str, source: str, question) -> list[dict]:
     """System message with the paper, then every earlier answered turn, then the new question."""
     paper, project = pp.paper, pp.project
+    from app.members import notes_for_llm
+    _notes = notes_for_llm(pp)
     system = prompts.PAPER_CHAT_SYSTEM.format(
         research_interest=(project.research_interest or "(not set)").strip(),
         keywords_line=f"\nSearch keywords of the project: {', '.join(project.saved_keywords_list)}\n"
         if project.saved_keywords_list else "",
-        notes_line=f"\nThe researcher's notes on this paper: {pp.notes.strip()}\n" if (pp.notes or "").strip() else "",
+        notes_line=f"\nThe researcher's notes on this paper: {_notes.strip()}\n" if _notes.strip() else "",
         relevance_line=f"Why this paper was flagged for the project: {pp.relevance_reason}\n" if pp.relevance_reason else "",
         title=paper.title,
         authors=", ".join(paper.authors_list) or "unknown",
@@ -159,7 +180,7 @@ def build_messages(pp, text: str, source: str, question) -> list[dict]:
         text=text if source != "abstract" else (paper.abstract or "(no abstract)"),
     )
     messages = [{"role": "system", "content": system}]
-    msgs = ChatMessage.query.filter_by(project_paper_id=pp.id).all()
+    msgs = _msgs(pp, question.member_id)
     for q, a in _answered_pairs(msgs, question.id):
         answer = a.content if a.status == "done" else a.content + "\n\n[The user stopped this answer here.]"
         messages += [{"role": "user", "content": q.content}, {"role": "assistant", "content": answer}]
@@ -192,6 +213,9 @@ def view(pp, app=None) -> dict:
     if app is not None and pp.id not in _running and any(m.status == "queued" for m in msgs):
         _kick(app, pp.id)  # a queue left over from before a restart
         msgs = ChatMessage.query.filter_by(project_paper_id=pp.id).all()
+    mid = _member_id(pp)
+    if mid is not None:
+        msgs = [m for m in msgs if m.member_id in (mid, None)]
     used = _context_used(msgs)
     sources = [m for m in msgs if m.context_source]
     stored = PaperText.query.filter_by(paper_id=pp.paper_id).first()
@@ -236,9 +260,10 @@ def ask(pp, question: str, app) -> str | None:
     questions before it. Returns an error to show instead, if it can't be queued."""
     if len(question) > MAX_QUESTION_CHARS:
         return f"That question is too long ({len(question):,} characters, at most {MAX_QUESTION_CHARS:,})."
-    if _would_overflow(_context_used(ChatMessage.query.filter_by(project_paper_id=pp.id).all()), question):
+    mid = _member_id(pp)
+    if _would_overflow(_context_used(_msgs(pp, mid)), question):
         return CONTEXT_FULL
-    db.session.add(ChatMessage(project_paper_id=pp.id, role="user", content=question, status="queued"))
+    db.session.add(ChatMessage(project_paper_id=pp.id, role="user", content=question, status="queued", member_id=mid))
     db.session.commit()
     _kick(app, pp.id)
     return None
@@ -253,7 +278,8 @@ def _take_next(pp_id: int) -> int | None:
         _running.discard(pp_id)
         return None
     q.status = "done"
-    a = ChatMessage(project_paper_id=pp_id, role="assistant", content="", status="streaming", reply_to_id=q.id)
+    a = ChatMessage(project_paper_id=pp_id, role="assistant", content="", status="streaming", reply_to_id=q.id,
+                    member_id=q.member_id)
     db.session.add(a)
     db.session.flush()
     _live[a.id] = {"phase": "reading", "text": "", "stop": False}  # before commit: never seen as stale
@@ -314,7 +340,7 @@ def _answer(answer_id: int) -> None:
     if question is None or pp is None:  # chat cleared (or paper removed) in between
         return
     try:
-        used = _context_used(ChatMessage.query.filter_by(project_paper_id=pp.id).all())
+        used = _context_used(_msgs(pp, question.member_id))
         if _would_overflow(used, question.content):
             _finish(answer_id, status="error", content=f"*({CONTEXT_FULL})*")
             return
@@ -384,11 +410,14 @@ def remove_queued(question_id: int) -> bool:
 
 def clear(pp) -> None:
     """Delete the whole chat; an answer being written is stopped (its final write then hits no row)."""
+    mid = _member_id(pp)  # per-person projects: only this person's messages (the shared ones from before stay)
     with _lock:
         msgs = ChatMessage.query.filter_by(project_paper_id=pp.id).all()
+        if mid is not None:
+            msgs = [m for m in msgs if m.member_id == mid]
         for m in msgs:
             stop(m.id)
-        ChatMessage.query.filter_by(project_paper_id=pp.id).delete()
+        ChatMessage.query.filter(ChatMessage.id.in_([m.id for m in msgs])).delete(synchronize_session=False)
         db.session.commit()
 
 
@@ -422,4 +451,5 @@ def init_app(app) -> None:
     app.jinja_env.filters["chat_md"] = render_markdown
     app.jinja_env.globals["chat_live"] = live_state
     app.jinja_env.globals["chat_view"] = lambda pp: view(pp, app)
+    app.jinja_env.globals["chat_has"] = has_chat
     app.jinja_env.globals["chat_main_model"] = MODELS[0]

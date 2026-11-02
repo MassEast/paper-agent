@@ -1,6 +1,6 @@
 {# Contents of a card's chat slot (#chat-<pp.id>): the conversation if there is one, else the button
    that opens an empty one. #}
-{% if pp.chat_messages %}
+{% if chat_has(pp) %}
 {% include "partials/chat_panel.html" %}
 {% else %}
 <button class="focus-ring"

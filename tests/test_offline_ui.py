@@ -72,6 +72,10 @@ def page(live_server, browser_session, seeded):
 
 
 def _notes(page, pid, arxiv_id):
+    # The paper lists are tabs: open the one this card is in (My Collection for COLL_ID)
+    page.evaluate("""id => { const t = document.getElementById(id);
+        const sec = t && t.closest('#new-section, #col-section, #trash-section');
+        if (sec) showPaperTab(sec.id.split('-')[0]); }""", f"notes-{arxiv_id}-{pid}")
     return page.locator(f'[id="notes-{arxiv_id}-{pid}"]')
 
 

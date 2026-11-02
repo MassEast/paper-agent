@@ -13,7 +13,7 @@ from app.auth import login_required
 from app.usage import counted
 from app.models import ChatMessage, Paper, ProjectPaper, Project
 from app import chat
-from app import paper_lists
+from app import members, paper_lists
 from app.routes import papers_bp
 from app.utils import base_arxiv_id
 from app.crawl import (
@@ -61,43 +61,115 @@ def _card_response(pp, project):
     return resp
 
 
+def _project_paper(arxiv_id):
+    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
+    project_id = request.values.get("project_id", type=int)
+    return ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first_or_404()
+
+
+def _act(pp, change):
+    """Apply a card action and answer with what changed for this person: the card in place, or (when the
+    paper left the section it is in for them) the card removed and its new section redrawn.
+    In a per_person project a change of the shared section is recorded as this person's move (so it shows up
+    in the others' New Papers); any other action only marks the paper as seen by them."""
+    project = pp.project
+    me = members.current(project)
+    before, shared_before = members.section_for(pp, me), members.shared_section(pp)
+    change(me)
+    if me is not None:
+        if members.shared_section(pp) != shared_before:
+            members.moved(pp, me)
+        else:
+            members.seen(pp, me)
+    elif not project.per_person and members.shared_section(pp) != shared_before:
+        pp.moved_by_id = None  # moved with per-person mode off: nobody's move, everyone saw it
+    db.session.commit()
+    if not request.headers.get("HX-Request"):
+        return ("", 204)
+    after = members.section_for(pp, me)
+    if after == before:
+        return _card_response(pp, project)
+    return _moved_response(project.id, after)
+
+
+def _collect(pp):
+    if pp.manual_tag is None:
+        pp.manual_tag = "related"
+        pp.collected_at = datetime.utcnow()
+    if pp.trashed_at:  # collecting a paper someone trashed takes it out of Trash
+        pp.trashed_at = None
+        pp.trashed_reason = None
+
+
 @papers_bp.route("/paper/<arxiv_id>/tag", methods=["POST"])
 @login_required
 def tag_paper(arxiv_id):
-    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
-    project_id = request.form.get("project_id", type=int)
+    """tag: one of MULTI_TAGS (toggle; collects the paper), "related" (Move to My Collection, tagged to read)
+    or "" (Move to New Papers). Tags are per person in per_person projects."""
+    pp = _project_paper(arxiv_id)
     tag = request.form.get("tag")
 
-    if project_id:
-        pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
-        if pp:
-            if tag in MULTI_TAGS:
-                tags = pp.tags_list
-                if tag in tags:
-                    tags.remove(tag)
-                else:
-                    tags.append(tag)
-                pp.paper_tags = json.dumps(tags)
-                if pp.manual_tag is None:
-                    pp.manual_tag = "related"
-                    pp.collected_at = datetime.utcnow()
-            elif tag == "":
-                pp.manual_tag = None
-                pp.paper_tags = "[]"
-                pp.collected_at = None
-            elif tag == "related":
-                pp.manual_tag = "related"
-                pp.collected_at = datetime.utcnow()
-                tags = pp.tags_list
-                if "to_read" not in tags:
-                    tags.append("to_read")
-                    pp.paper_tags = json.dumps(tags)
-            db.session.commit()
+    def change(me):
+        tags = members.tags_for(pp, me)
+        if tag in MULTI_TAGS:
+            tags = [t for t in tags if t != tag] if tag in tags else tags + [tag]
+            _collect(pp)
+        elif tag == "related":
+            _collect(pp)
+            if "to_read" not in tags:
+                tags = tags + ["to_read"]
+        elif tag == "":
+            pp.manual_tag = None
+            pp.collected_at = None
+            tags = []
+        else:
+            return
+        if me is None:
+            pp.paper_tags = json.dumps(tags)
+        else:
+            members.set_tags(pp, me, tags)
 
-    if request.headers.get("HX-Request") and project_id:
-        if tag in MULTI_TAGS and pp is not None:
-            return _card_response(pp, Project.query.get(project_id))
-        return _moved_response(project_id, "col" if tag == "related" else "new")
+    return _act(pp, change)
+
+
+@papers_bp.route("/paper/<arxiv_id>/seen", methods=["POST"])
+@login_required
+def seen_paper(arxiv_id):
+    """Someone else moved this paper (collected or trashed it) and this person agrees: it leaves their
+    New Papers for the section it is in."""
+    return _act(_project_paper(arxiv_id), lambda me: None)
+
+
+@papers_bp.route("/paper/<arxiv_id>/vote", methods=["POST"])
+@login_required
+def vote_paper(arxiv_id):
+    """1-5; the same vote again takes it back. Everyone sees everyone's votes."""
+    pp = _project_paper(arxiv_id)
+    me = members.current(pp.project)
+    vote = request.form.get("vote", type=int)
+    if me is None or vote not in range(1, 6):
+        return ("pick who you are first", 400)
+    st = members.state(pp, me, create=True)
+    st.vote = None if st.vote == vote else vote
+    db.session.commit()
+    return _card_response(pp, pp.project)
+
+
+@papers_bp.route("/paper/<arxiv_id>/notes-runs", methods=["POST"])
+@login_required
+def update_notes_runs(arxiv_id):
+    """Per-person projects: the whole note as runs [[member id or null, text], ...] (who wrote what).
+    ProjectPaper.notes keeps the plain text (export, Copy / Move, the paper chat)."""
+    pp = _project_paper(arxiv_id)
+    ids = {m.id for m in members.members(pp.project)}
+    runs = json.loads(request.form.get("runs", "[]"))
+    if not all(isinstance(r, list) and len(r) == 2 and (r[0] is None or r[0] in ids) and isinstance(r[1], str)
+               for r in runs):
+        return ("bad runs", 400)
+    runs = members.merge_runs(runs)
+    pp.notes_runs = json.dumps(runs)
+    pp.notes = "".join(t for _, t in runs)
+    db.session.commit()
     return ("", 204)
 
 
@@ -209,13 +281,13 @@ def paper_card_refresh(pp_id):
 def update_notes(arxiv_id):
     paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
     project_id = request.form.get("project_id", type=int)
-    notes = request.form.get("notes", "")
     notes_height = request.form.get("notes_height", type=int)
 
     if project_id:
         pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
         if pp:
-            pp.notes = notes
+            if "notes" in request.form:  # a resize sends only the height
+                pp.notes = request.form["notes"]
             if notes_height:
                 pp.notes_height = notes_height
             db.session.commit()
@@ -226,38 +298,26 @@ def update_notes(arxiv_id):
 @papers_bp.route("/paper/<arxiv_id>/trash", methods=["POST"])
 @login_required
 def trash_paper(arxiv_id):
-    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
-    project_id = request.form.get("project_id", type=int)
+    pp = _project_paper(arxiv_id)
 
-    if project_id:
-        pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
-        if pp:
-            pp.trashed_at = datetime.utcnow()
-            db.session.commit()
+    def change(me):
+        pp.trashed_at = datetime.utcnow()
 
-    if request.headers.get("HX-Request") and project_id:
-        return _moved_response(project_id, "trash")
-    return ("", 204)
+    return _act(pp, change)
 
 
 @papers_bp.route("/paper/<arxiv_id>/restore", methods=["POST"])
 @login_required
 def restore_paper(arxiv_id):
-    paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
-    project_id = request.form.get("project_id", type=int)
+    pp = _project_paper(arxiv_id)
 
-    if project_id:
-        pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
-        if pp:
-            pp.trashed_at = None
-            pp.trashed_reason = None
-            pp.manual_tag = None
-            pp.collected_at = None
-            db.session.commit()
+    def change(me):
+        pp.trashed_at = None
+        pp.trashed_reason = None
+        pp.manual_tag = None
+        pp.collected_at = None
 
-    if request.headers.get("HX-Request") and project_id:
-        return _moved_response(project_id, "new")
-    return ("", 204)
+    return _act(pp, change)
 
 
 @papers_bp.route("/paper/<arxiv_id>/transfer-menu")

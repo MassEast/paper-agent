@@ -1,0 +1,29 @@
+{# Sidebar card: several people in this project (app/members.py). Expects project, people, me, person_colors. #}
+<div id="people-settings"
+    style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
+    <h2 style="font-size: 1rem; font-weight: 600; color: var(--ink-1); display: inline-flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color: var(--accent);"><use href="/static/icons.svg#icon-users"></use></svg>
+        People
+    </h2>
+    <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 0.8rem; color: var(--ink-2); cursor: pointer;">
+        <input type="checkbox" {% if project.per_person %}checked{% endif %}
+            onchange="fetch('/projects/{{ project.slug }}/per-person', {method: 'POST', body: new URLSearchParams({enabled: this.checked ? '1' : '0'})}).then(function (r) { if (r.ok) location.reload(); else alert('Could not save this setting.'); })"
+            style="width: 14px; height: 14px; margin-top: 2px; flex-shrink: 0; accent-color: var(--accent);">
+        <span>Several people work in this project<br><span style="font-size: 0.72rem; color: var(--ink-4);">Everyone gets their own New Papers, tags, votes and paper chat, and their own email.
+            My Collection and Trash stay shared, and a paper someone else collected or trashed shows up in your New Papers until you've seen it.</span></span>
+    </label>
+    {% if project.per_person %}
+    <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 6px;">
+        {% for m in people %}
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <input type="text" value="{{ m.name }}" maxlength="40" aria-label="Name"
+                onchange="fetch('/projects/{{ project.slug }}/members/{{ m.id }}', {method: 'POST', body: new URLSearchParams({name: this.value})}).then(function (r) { if (!r.ok) alert('Could not save the name.'); })"
+                style="width: 7.5rem; height: 28px; background-color: var(--paper-3); border: 1px solid var(--border-default); border-left: 3px solid {{ m.color }}; border-radius: var(--radius-md); padding: 0 8px; color: {{ m.color }}; font-weight: 600; font-size: 0.8rem; outline: none;">
+            <span style="width: 10px; height: 10px; border-radius: 9999px; background: {{ m.color }}; flex: none;" data-tip="{{ m.name }}'s color, given automatically"></span>
+            {% if m.email %}<span style="font-size: 0.65rem; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" data-tip="{{ m.email }}">✉</span>{% endif %}
+        </div>
+        {% endfor %}
+        <p style="font-size: 0.7rem; color: var(--ink-4);">Everyone on the notification list below is here, and nobody else: to add someone, add their email there. Each gets their own email, whose links know who they are.</p>
+    </div>
+    {% endif %}
+</div>

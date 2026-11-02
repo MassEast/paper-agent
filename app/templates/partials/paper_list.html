@@ -1,6 +1,22 @@
 {# The project page's three paper sections. Sorting and tag filtering happen on the server (app/paper_lists.py);
    each list shows page_size cards and loads more as you scroll. Expects: project, s, state, page_size. #}
-<div class="space-y-6" data-slug="{{ project.slug }}">
+{# Tabs: one section at a time, each in its own color. The chosen tab is #paper-list[data-tab] (set by
+   showPaperTab below), which survives the section swaps; the counts are updated by counts_oob.html. #}
+<div class="paper-tabs" role="tablist" aria-label="Paper lists">
+    <button type="button" role="tab" class="paper-tab focus-ring" data-tab="new" style="--tab-color: var(--accent);" onclick="showPaperTab('new')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-inbox"></use></svg>
+        New Papers <span id="new-count" class="paper-tab-count">({{ s.new|length }})</span>
+    </button>
+    <button type="button" role="tab" class="paper-tab focus-ring" data-tab="col" style="--tab-color: var(--success);" onclick="showPaperTab('col')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-star"></use></svg>
+        My Collection <span id="col-count" class="paper-tab-count">({{ s.col_total }})</span>
+    </button>
+    <button type="button" role="tab" class="paper-tab focus-ring" data-tab="trash" style="--tab-color: var(--error);" onclick="showPaperTab('trash')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-trash-2"></use></svg>
+        Trash <span id="trash-count" class="paper-tab-count">({{ s.trash|length }})</span>
+    </button>
+</div>
+<div class="paper-sections" data-slug="{{ project.slug }}">
     {% with oob=False %}
     {% include "partials/section_new.html" %}
     {% include "partials/section_col.html" %}
@@ -16,6 +32,22 @@ window._paperSort = window._paperSort || {
 };
 window._paperFilter = window._paperFilter || {{ state.col_tags | tojson }};
 window._paperSlug = '{{ project.slug }}';
+
+// Which tab shows: the one asked for, else the last one this browser used in this project, else New Papers
+// when it has papers, else My Collection.
+function showPaperTab(tab) {
+    var list = document.getElementById('paper-list');
+    if (!list) return;
+    list.dataset.tab = tab;
+    document.querySelectorAll('.paper-tab').forEach(function (b) {
+        b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false');
+    });
+    try { sessionStorage.setItem('paper-tab:' + window._paperSlug, tab); } catch (e) {}
+}
+showPaperTab(window._paperTabWanted
+    || (function () { try { return sessionStorage.getItem('paper-tab:' + window._paperSlug); } catch (e) { return null; } })()
+    || ({{ s.new|length }} ? 'new' : 'col'));
+window._paperTabWanted = null;
 
 if (!window._paperStateHooked) {
     window._paperStateHooked = true;

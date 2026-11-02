@@ -1,0 +1,37 @@
+{# A card's notes. Part of paper_card.html (expects pp, project, _me).
+   Not per person: one shared textarea (drafts and conflict merging in base.html).
+   Per person: the same one text, in an editor that colors every run by its author (rich_notes.js). #}
+{% set _aid = pp.paper.arxiv_id %}
+{% macro shared_textarea(label=none) %}
+    {% if label %}<p style="font-size: 0.7rem; color: var(--ink-4); margin: 0 0 3px 2px;">{{ label }}</p>{% endif %}
+    <div style="position:relative;">
+        <textarea name="notes" placeholder="Notes... (auto-saved)"
+            id="notes-{{ _aid }}-{{ project.id }}"
+            data-arxiv-id="{{ _aid }}" data-project-id="{{ project.id }}"
+            style="width: 100%; background-color: var(--paper-3); border: none; outline: none; border-radius: var(--radius-md); padding: 8px 12px; font-size: 0.75rem; color: var(--ink-1); resize: vertical; min-height: 2.5rem;{% if pp.notes_height %} height: {{ pp.notes_height }}px;{% endif %}"
+            rows="2"
+            hx-post="/paper/{{ _aid }}/notes"
+            hx-trigger="keyup delay:1200ms, blur, notes-retry"
+            hx-vals='{"project_id": {{ project.id }}}'
+            hx-on::after-request="notesAfterRequest(event)">{{ pp.notes or "" }}</textarea>
+        <span id="notes-saved-{{ _aid }}-{{ project.id }}"
+            style="display:none;position:absolute;bottom:6px;right:8px;font-size:0.65rem;color:var(--success);pointer-events:none;">saved</span>
+    </div>
+{% endmacro %}
+
+{% if not _me %}
+{{ shared_textarea() }}
+
+{% else %}
+{% set _people = project_members(project) %}
+<div style="position: relative;">
+    <div class="rich-notes" contenteditable="plaintext-only" spellcheck="true" role="textbox" aria-multiline="true"
+        aria-label="Notes, shared by everyone; each person's text in their color"
+        data-arxiv-id="{{ _aid }}" data-project-id="{{ project.id }}" data-me="{{ _me.id }}"
+        data-runs='{{ note_runs(pp) | tojson }}'
+        style="min-height: 2.5rem; white-space: pre-wrap; word-break: break-word; background-color: var(--paper-3); border-radius: var(--radius-md); padding: 8px 12px; font-size: 0.75rem; color: var(--ink-1); outline: none; border-left: 3px solid {{ _me.color }};"></div>
+    <script type="application/json" class="rich-notes-people">{{ {'people': _people | map(attribute='id') | list, 'names': _people | map(attribute='name') | list, 'colors': _people | map(attribute='color') | list} | tojson }}</script>
+    <span class="rich-notes-status" style="display:none;position:absolute;bottom:6px;right:8px;font-size:0.65rem;color:var(--success);pointer-events:none;">saved</span>
+</div>
+
+{% endif %}

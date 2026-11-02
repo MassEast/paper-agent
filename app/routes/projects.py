@@ -11,7 +11,7 @@ from app import db
 from app.auth import login_required
 from app.usage import counted, project_usage, usage_by_project, KINDS as USAGE_KINDS
 from app.models import Project, ProjectPaper, Paper, CrawlLog, ScreenedPaper
-from app import paper_lists
+from app import members, paper_lists
 from app.routes import projects_bp
 from app.crawl import (
     start_crawl_async,
@@ -99,11 +99,17 @@ def detail(slug):
     project = Project.query.filter_by(slug=slug).first_or_404()
     if project.trashed_at:
         return redirect(url_for("projects.index"))
+    if request.args.get("as", "").isdigit():
+        # A link from this person's own crawl email: remember who they are, then the clean address
+        args = {k: v for k, v in request.args.items() if k != "as"}
+        return _remember_member(redirect(url_for("projects.detail", slug=slug, **args)), project,
+                                int(request.args["as"]))
 
     state = paper_lists.list_state(request.args)
     sections = paper_lists.sections(project, state)
     papers = ProjectPaper.query.filter_by(project_id=project.id).all()  # every paper: calendar dots
     focus_pp, focus_where = paper_lists.focus_status(project, state["focus"]) if state["focus"] else (None, None)
+    focus_sec = members.section_for(focus_pp, members.current(project)) if focus_pp else None
 
     recent_crawl = (
         CrawlLog.query.filter_by(project_id=project.id).order_by(CrawlLog.started_at.desc()).first()
@@ -155,6 +161,10 @@ def detail(slug):
         page_size=paper_lists.PAGE_SIZE,
         focus_pp=focus_pp,
         focus_where=focus_where,
+        focus_sec=focus_sec,
+        me=members.current(project),
+        people=members.members(project),
+        person_colors=members.COLORS,
         recent_crawl=recent_crawl,
         search_query=state["search"],
         context_epochs=context_epochs,
@@ -681,6 +691,7 @@ def update_notification_emails(slug):
 
     emails = ",".join(candidates)
     project.notification_emails = emails
+    members.sync_from_emails(project)  # every address is a person (named from the address, editable)
     db.session.commit()
 
     if request.headers.get("HX-Request"):
@@ -724,6 +735,49 @@ def toggle_nightly_crawl(slug):
         schedule_html = '<span id="crawl-schedule-text" style="color:var(--ink-4);">Off</span>'
 
     return setup_changed(schedule_html)
+
+
+def _remember_member(resp, project, member_id: int):
+    m = db.session.get(members.ProjectMember, member_id)
+    if m is not None and m.project_id == project.id:
+        resp.set_cookie(members.cookie_name(project), str(m.id), max_age=members.COOKIE_MAX_AGE, samesite="Lax")
+    return resp
+
+
+@projects_bp.route("/<slug>/whoami", methods=["POST"])
+@login_required
+def whoami(slug):
+    """'Who are you?': remember the chosen person in this browser. The people are the project's
+    notification addresses (members.sync_from_emails); nobody adds themselves."""
+    project = Project.query.filter_by(slug=slug).first_or_404()
+    member_id = request.form.get("member_id", type=int)
+    return _remember_member(redirect(url_for("projects.detail", slug=slug)), project, member_id or 0)
+
+
+@projects_bp.route("/<slug>/members/<int:member_id>", methods=["POST"])
+@login_required
+def update_member(slug, member_id):
+    """Rename a person (colors are given automatically, members.next_color)."""
+    project = Project.query.filter_by(slug=slug).first_or_404()
+    m = db.session.get(members.ProjectMember, member_id)
+    if m is None or m.project_id != project.id:
+        return ("not a person in this project", 404)
+    name = (request.form.get("name") or "").strip()
+    if name:
+        m.name = name[:40]
+    db.session.commit()
+    return ("", 204)
+
+
+@projects_bp.route("/<slug>/per-person", methods=["POST"])
+@login_required
+def set_per_person(slug):
+    """Per-person mode on/off."""
+    project = Project.query.filter_by(slug=slug).first_or_404()
+    if "enabled" in request.form:
+        members.set_per_person(project, request.form["enabled"] == "1")
+    db.session.commit()
+    return ("", 204)
 
 
 @projects_bp.route("/<slug>/toggle-biorxiv", methods=["POST"])

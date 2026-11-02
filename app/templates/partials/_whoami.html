@@ -1,0 +1,29 @@
+{# "Who are you?" for per-person projects (app/members.py). Open (and not closable) until this browser has
+   picked someone; afterwards the "You: …" chip in the nav opens it to switch. #}
+<style>#whoami[hidden] { display: none !important; }</style>
+<div id="whoami" {% if me %}hidden{% endif %} role="dialog" aria-modal="true" aria-labelledby="whoami-title"
+    style="position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); padding: 16px;">
+    <div style="width: 100%; max-width: 420px; background-color: var(--paper-1); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 20px 22px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <h2 id="whoami-title" style="font-size: 1.1rem; font-weight: 600; color: var(--ink-1);">Who are you?</h2>
+            {% if me %}<button type="button" aria-label="Close" onclick="document.getElementById('whoami').hidden = true" style="color: var(--ink-3); font-size: 1.2rem;">&times;</button>{% endif %}
+        </div>
+        <p style="font-size: 0.8rem; color: var(--ink-3); margin-bottom: 14px;">In {{ project.name }}, everyone has their own New Papers, tags, votes and paper chat;
+            My Collection and Trash are shared. This browser remembers your choice.</p>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            {% for m in people %}
+            <form method="POST" action="/projects/{{ project.slug }}/whoami">
+                <input type="hidden" name="member_id" value="{{ m.id }}">
+                <button type="submit" class="focus-ring whoami-person"
+                    style="width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius-md); font-size: 0.95rem; font-weight: 600; color: {{ m.color }}; border: 1px solid color-mix(in oklch, {{ m.color }} 50%, transparent); background-color: color-mix(in oklch, {{ m.color }} {{ 22 if me and me.id == m.id else 8 }}%, transparent); text-align: left;">
+                    <span style="width: 12px; height: 12px; border-radius: 9999px; background: {{ m.color }}; flex: none;"></span>
+                    {{ m.name }}
+                    {% if m.email %}<span style="margin-left: auto; font-size: 0.7rem; font-weight: 400; color: var(--ink-4);">{{ m.email }}</span>{% endif %}
+                </button>
+            </form>
+            {% endfor %}
+        </div>
+        <p style="font-size: 0.8rem; color: var(--ink-3); margin-top: 14px;">Not one of them? Then please don't change anything in this
+            project: the people here are the ones on its notification list.</p>
+    </div>
+</div>

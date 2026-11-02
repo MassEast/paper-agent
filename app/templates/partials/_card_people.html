@@ -1,0 +1,57 @@
+{# Per-person projects: what the others did with this paper, and this person's vote. Part of paper_card.html
+   (expects pp, project, _me, _sec). #}
+{% set _aid = pp.paper.arxiv_id %}
+{% set _shared = 'trash' if pp.trashed_at else ('new' if pp.manual_tag is none else 'col') %}
+{% if _sec == 'new' and unseen_move(pp) %}
+{% set _by = pp.moved_by %}
+<div class="moved-note" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-md); font-size: 0.8rem; color: var(--ink-2); background-color: color-mix(in oklch, {{ _by.color }} 10%, var(--paper-3)); border-left: 3px solid {{ _by.color }};">
+    <span style="flex: 1; min-width: 12rem;">
+        <strong style="color: {{ _by.color }};">{{ _by.name }}</strong>
+        {% if _shared == 'col' %}added this to My Collection{% elif _shared == 'trash' %}moved this to Trash{% else %}put this back into New Papers{% endif %}
+        <span style="color: var(--ink-4);">· {{ pp.moved_at | berlin_time('%b %d') }}</span>
+    </span>
+    {% if _shared == 'col' %}
+    <button type="button" class="focus-ring rw-chip-btn" hx-post="/paper/{{ _aid }}/seen" hx-vals='{"project_id": {{ project.id }}}'
+        hx-target="closest .paper-card" hx-swap="outerHTML" style="padding: 3px 10px; border-radius: var(--radius-md); font-size: 0.75rem;"
+        data-tip="Fine with me: the paper leaves your New Papers and stays in My Collection">Keep in My Collection</button>
+    {% elif _shared == 'trash' %}
+    <button type="button" class="focus-ring rw-chip-btn" hx-post="/paper/{{ _aid }}/seen" hx-vals='{"project_id": {{ project.id }}}'
+        hx-target="closest .paper-card" hx-swap="outerHTML" style="padding: 3px 10px; border-radius: var(--radius-md); font-size: 0.75rem;"
+        data-tip="Fine with me: the paper leaves your New Papers and stays in Trash">Leave in Trash</button>
+    <button type="button" class="focus-ring rw-chip-btn" hx-post="/paper/{{ _aid }}/restore" hx-vals='{"project_id": {{ project.id }}}'
+        hx-target="closest .paper-card" hx-swap="outerHTML" style="padding: 3px 10px; border-radius: var(--radius-md); font-size: 0.75rem;"
+        data-tip="Back into New Papers for everyone; {{ _by.name }} sees that you put it back">Put back into New Papers</button>
+    {% else %}
+    <button type="button" class="focus-ring rw-chip-btn" hx-post="/paper/{{ _aid }}/seen" hx-vals='{"project_id": {{ project.id }}}'
+        hx-target="closest .paper-card" hx-swap="outerHTML" style="padding: 3px 10px; border-radius: var(--radius-md); font-size: 0.75rem;">OK</button>
+    {% endif %}
+</div>
+{% endif %}
+
+{% set _mystate = my_state(pp) %}
+{% set _myvote = _mystate.vote if _mystate else none %}
+{% set _marks = others_marks(pp) %}
+{% set _avg = average_vote(pp) %}
+{% set _labels = {'important': 'Important', 'to_read': 'To read', 'to_discuss': 'Discuss'} %}
+<div class="card-people" style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 12px; font-size: 0.75rem; color: var(--ink-3);">
+    <span class="vote-stars" style="display: inline-flex; align-items: center; gap: 1px;" data-tip="Your vote: how good you find this paper (everyone sees it). Click your vote again to take it back.">
+        {% for v in range(1, 6) %}
+        <button type="button" class="focus-ring vote-star" aria-label="Vote {{ v }} of 5"
+            hx-post="/paper/{{ _aid }}/vote" hx-vals='{"project_id": {{ project.id }}, "vote": {{ v }}}'
+            hx-target="closest .paper-card" hx-swap="outerHTML"
+            style="background: none; border: none; padding: 0 1px; cursor: pointer; font-size: 1rem; line-height: 1; color: {{ _me.color if _myvote and v <= _myvote else 'var(--ink-4)' }};">{{ '★' if _myvote and v <= _myvote else '☆' }}</button>
+        {% endfor %}
+    </span>
+    {% if _avg is not none %}
+    <span data-tip="Average of everyone's votes" style="font-variant-numeric: tabular-nums;">⌀ {{ '%.1f' | format(_avg) }} ({{ paper_votes(pp) | length }})</span>
+    {% endif %}
+    {% for m, tags, vote in _marks %}
+    <span class="person-mark" data-tip="{{ m.name }}"
+        style="display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 9999px; border: 1px solid color-mix(in oklch, {{ m.color }} 45%, transparent); background-color: color-mix(in oklch, {{ m.color }} 10%, transparent);">
+        <span style="width: 7px; height: 7px; border-radius: 9999px; background: {{ m.color }};"></span>
+        <span style="color: {{ m.color }}; font-weight: 600;">{{ m.name }}</span>
+        {% for t in tags %}<span>{{ _labels[t] }}</span>{% endfor %}
+        {% if vote %}<span style="color: {{ m.color }};">★{{ vote }}</span>{% endif %}
+    </span>
+    {% endfor %}
+</div>

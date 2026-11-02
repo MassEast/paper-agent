@@ -74,7 +74,7 @@ def test_page_shows_first_page_of_each_list_and_a_sentinel(c, big_project):
     # New Papers is a one-card carousel: its next page loads when the carousel nears the end, not on scroll
     assert f'section=new&offset={PAGE_SIZE}' in html and 'hx-trigger="loadmore once"' in html
     assert f'data-left="{N_NEW - PAGE_SIZE}"' in html and 'data-carousel="next"' in html
-    assert "New Papers <span id=\"new-count\">(25)</span>" in html
+    assert '<span id="new-count" class="paper-tab-count">(25)</span>' in html  # in the New Papers tab
 
 
 def test_more_pages_until_the_end(c, big_project):
@@ -168,14 +168,14 @@ def test_new_papers_carousel_steps_loads_more_and_collect_shows_next_on_a_phone(
     context = browser.new_context(storage_state=state, viewport={"width": 390, "height": 844}, is_mobile=True)
     pg = context.new_page()
     pg.goto(f"{live_server}/projects/pl-proj")
-    pos = lambda: pg.locator(".new-carousel-pos").inner_text()
+    pos = lambda: pg.locator("#new-section .new-carousel-pos").inner_text()
     shown = lambda: pg.locator("#new-papers-list > .paper-card:visible")
     count = lambda: pg.locator("#new-papers-list > .paper-card").count()
     assert count() == PAGE_SIZE and shown().count() == 1 and pos() == f"1 / {N_NEW}"
-    assert pg.locator('[data-carousel="prev"]').is_disabled()
+    assert pg.locator('#new-section [data-carousel="prev"]').is_disabled()
 
     for _ in range(PAGE_SIZE - 1):  # nearing the last loaded card fetches the next page
-        pg.locator('[data-carousel="next"]').click()
+        pg.locator('#new-section [data-carousel="next"]').click()
     pg.wait_for_function(f"() => document.querySelectorAll('#new-papers-list > .paper-card').length > {PAGE_SIZE}")
     assert pos() == f"{PAGE_SIZE} / {N_NEW}" and shown().count() == 1
     pg.keyboard.press("ArrowRight")
@@ -190,6 +190,14 @@ def test_new_papers_carousel_steps_loads_more_and_collect_shows_next_on_a_phone(
     assert shown().count() == 1 and pos() == f"{PAGE_SIZE + 1} / {N_NEW - 1}"  # the next paper takes its place
     assert shown().first.get_attribute("id").startswith(f"paper-card-2602-{PAGE_SIZE + 1:05d}-")
     assert pg.locator("#new-count").inner_text() == f"({N_NEW - 1})"
+
+    # My Collection is a one-card carousel too, in its own tab
+    pg.locator(".paper-tab[data-tab='col']").click()
+    assert pg.locator("#curated-list > .paper-card:visible").count() == 1
+    assert pg.locator("#col-section .new-carousel-pos").inner_text() == "1 / 4"
+    pg.keyboard.press("ArrowRight")
+    assert pg.locator("#col-section .new-carousel-pos").inner_text() == "2 / 4"
+    pg.locator(".paper-tab[data-tab='new']").click()
 
     # sorting is done by the server and starts again at the first card
     pg.get_by_role("button", name="Release date").first.click()

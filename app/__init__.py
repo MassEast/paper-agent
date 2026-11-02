@@ -156,6 +156,12 @@ def create_app():
             "ALTER TABLE papers ADD COLUMN doi TEXT",
             "ALTER TABLE papers ADD COLUMN page_url TEXT",
             "ALTER TABLE papers ADD COLUMN scholar_lookup_at DATETIME",
+            "ALTER TABLE projects ADD COLUMN per_person BOOLEAN DEFAULT 0",
+            "ALTER TABLE project_papers ADD COLUMN moved_by_id INTEGER",
+            "ALTER TABLE project_papers ADD COLUMN moved_at DATETIME",
+            "ALTER TABLE project_papers ADD COLUMN notes_runs TEXT",
+            "ALTER TABLE project_papers ADD COLUMN tags_at_off TEXT",
+            "ALTER TABLE chat_messages ADD COLUMN member_id INTEGER",
         ]
         for _sql in _migrations:
             try:
@@ -163,6 +169,14 @@ def create_app():
                 db.session.commit()
             except Exception:
                 db.session.rollback()
+
+        # Every notification address is a person in its project (app/members.py); only matters once a
+        # project switches per-person mode on. Idempotent: adds only addresses without a person yet.
+        from app import members as _members_sync
+        from app.models import Project as _Project
+        for _p in _Project.query.filter(_Project.notification_emails.isnot(None)).all():
+            _members_sync.sync_from_emails(_p)
+        db.session.commit()
 
         # Re-enrich papers with missing authors — can happen if the arXiv enrichment thread
         # hit a 429 at startup. Scholar (institutions/citations) runs separately so those
@@ -198,6 +212,19 @@ def create_app():
     app.jinja_env.globals["enrich_step"] = enrich_step
     from app import chat
     chat.init_app(app)
+    from app import members as _members
+    app.jinja_env.globals.update(
+        person=_members.current,
+        card_section=lambda pp: _members.section_for(pp, _members.current(pp.project)),
+        unseen_move=lambda pp: _members.unseen_move(pp, _members.current(pp.project)),
+        my_tags=lambda pp: _members.tags_for(pp, _members.current(pp.project)),
+        my_state=lambda pp: _members.state(pp, _members.current(pp.project)),
+        others_marks=lambda pp: _members.others(pp, _members.current(pp.project)),
+        paper_votes=_members.votes,
+        average_vote=_members.average_vote,
+        project_members=_members.members,
+        note_runs=_members.runs,
+    )
 
     _berlin = ZoneInfo("Europe/Berlin")
 
