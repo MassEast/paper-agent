@@ -15,7 +15,7 @@
         <span style="margin-left: auto; display: inline-flex; gap: 4px; align-items: center;">
             {% with sec='col', by=state.col_by, dir=state.col_dir %}{% include "partials/_sort_buttons.html" %}{% endwith %}
             <button type="button" id="col-sort-group" onclick="toggleGroupBy()" data-tip="Group by tag: to read, then to discuss, then important"
-                style="padding: 2px 8px; font-size: 0.7rem; font-weight: 500; border: 1px solid var(--border-default); border-radius: var(--radius-md); cursor: pointer; {% if state.col_group %}background-color: var(--accent-muted); color: var(--accent-hover);{% else %}background-color: transparent; color: var(--ink-3);{% endif %}">Group by tag</button>
+                style="padding: 2px 8px; font-size: 0.7rem; font-weight: 500; border: 1px solid var(--border-default); border-radius: var(--radius-md); cursor: pointer; {% if state.col_group %}background-color: var(--accent-soft-bg); color: var(--accent-hover);{% else %}background-color: transparent; color: var(--ink-3);{% endif %}">Group by tag</button>
             <span class="col-tip-wrap" onmouseenter="this.querySelector('.col-tip').style.display='block'"
             onmouseleave="this.querySelector('.col-tip').style.display='none'">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-info"></use></svg>

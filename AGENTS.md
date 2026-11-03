@@ -42,7 +42,7 @@ See `.env.example` for the full list with comments. The hard-required ones (app 
 Browser → Flask blueprint routes (app/routes/) → crawl.py / llm.py → SQLite (Flask-SQLAlchemy)
 ```
 
-The UI is server-rendered Jinja2 with **HTMX** for partial updates (no JS framework). TailwindCSS via CDN. Design tokens in `app/static/tokens.css`.
+The UI is server-rendered Jinja2 with **HTMX** for partial updates (no JS framework). TailwindCSS via CDN. Design tokens in `app/static/tokens.css`: light theme by default (`:root[data-theme="light"]`), dark is the base `:root` set; the sun/moon switch in the nav (`base.html`) keeps the choice per browser in `localStorage` (`theme`), applied by a `<head>` script before first paint. New colors go in as tokens in both sets (`tests/test_theme.py` checks they match).
 
 ### LLM layer (`app/llm.py`)
 

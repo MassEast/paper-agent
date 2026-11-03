@@ -34,6 +34,8 @@
   /* badges, tags */
   --accent-ink: oklch(97% 0 0);
   /* text ON accent fill — verified ≥60 APCA */
+  --accent-soft-bg: var(--accent-muted);
+  /* fill of an active pill whose text is --accent-hover */
 
   /* === Focus === */
   --focus-ring: oklch(65% 0.18 305);
@@ -43,6 +45,8 @@
   --success: oklch(60% 0.15 145);
   /* green-500 equivalent */
   --success-bg: oklch(25% 0.08 145);
+  --success-ink: oklch(82% 0.13 145);
+  /* text on --success-bg */
   --warning: oklch(75% 0.15 75);
   /* yellow — less saturated for dark bg */
   --warning-bg: oklch(20% 0.06 75);
@@ -95,6 +99,54 @@
   --badge-method-bg: oklch(22% 0.08 210);
   --badge-survey-bg: oklch(22% 0.08 90);
   --badge-benchmark-bg: oklch(22% 0.08 170);
+
+  --scrollbar: oklch(40% 0.08 305);
+  --scrollbar-hover: oklch(52% 0.12 305);
+  color-scheme: dark;
+}
+
+/* Light theme, the default: base.html sets data-theme="light" on <html> unless this browser chose dark */
+:root[data-theme="light"] {
+  --paper-1: oklch(97% 0.004 305);
+  --paper-2: oklch(100% 0 0);
+  --paper-3: oklch(94.5% 0.004 305);
+
+  --ink-1: oklch(20% 0 0);
+  --ink-2: oklch(33% 0 0);
+  --ink-3: oklch(45% 0 0);
+  --ink-4: oklch(56% 0 0);
+  --ink-5: oklch(72% 0 0);
+
+  --accent: oklch(50% 0.2 305);
+  --accent-hover: oklch(43% 0.2 305);
+  --accent-muted: oklch(58% 0.13 305);
+  --accent-soft-bg: oklch(91% 0.05 305);
+  --focus-ring: oklch(55% 0.2 305);
+
+  --success: oklch(50% 0.15 145);
+  --success-bg: oklch(94% 0.05 145);
+  --success-ink: oklch(38% 0.12 145);
+  --warning: oklch(52% 0.13 65);
+  --warning-bg: oklch(95% 0.05 85);
+  --error: oklch(52% 0.2 25);
+  --error-bg: oklch(95% 0.035 25);
+
+  --border-subtle: oklch(92% 0 0);
+  --border-default: oklch(86% 0 0);
+  --border-strong: oklch(74% 0 0);
+
+  --tag-important-bg: oklch(92% 0.05 255);
+  --tag-important-ink: oklch(42% 0.15 255);
+
+  --badge-dataset-bg: oklch(93% 0.04 255);
+  --badge-architecture-bg: oklch(93% 0.04 275);
+  --badge-method-bg: oklch(93% 0.04 210);
+  --badge-survey-bg: oklch(93% 0.05 90);
+  --badge-benchmark-bg: oklch(93% 0.04 170);
+
+  --scrollbar: oklch(80% 0.05 305);
+  --scrollbar-hover: oklch(68% 0.09 305);
+  color-scheme: light;
 }
 
 /* Reduced motion — respect user preference */
@@ -327,13 +379,13 @@ textarea::placeholder {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: oklch(40% 0.08 305);
+  background: var(--scrollbar);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: oklch(52% 0.12 305);
+  background: var(--scrollbar-hover);
 }
 * {
   scrollbar-width: thin;
-  scrollbar-color: oklch(40% 0.08 305) transparent;
+  scrollbar-color: var(--scrollbar) transparent;
 }
