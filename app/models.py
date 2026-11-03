@@ -315,7 +315,7 @@ class ProjectPaper(db.Model):
             else:
                 first = cited[0] if len(cited[0]) <= 50 else cited[0][:48].rstrip() + "…"
                 parts.append(f'cites "{first}"' + (f" (+{len(cited) - 1})" if len(cited) > 1 else ""))
-        return " · ".join(parts)
+        return " and ".join(parts)
 
     def found_via_tip(self) -> str:
         """The card tooltip's longer version of found_via_text: one sentence per way the paper was found."""

@@ -104,6 +104,7 @@ def test_keywords_can_be_removed_and_the_checklist_follows(live_server, browser_
     context = browser.new_context(storage_state=state)
     pg = context.new_page()
     pg.goto(f"{live_server}/projects/banner-proj")
+    pg.get_by_role("button", name="Find papers").click()  # the keywords are in the Find papers panel
     pg.get_by_role("button", name="Remove keyword pruning").click()
     assert pg.locator('input[name="keyword_item"]').count() == 1
     pg.locator("#save-kw-btn").click()
@@ -133,6 +134,7 @@ def test_checklist_updates_live_and_banner_goes_when_switched_on(live_server, br
     pg.wait_for_selector("#crawl-off-banner")
     assert pg.locator("#crawl-off-banner li.done").count() == 3 and pg.locator("text=Now switch on").count() == 0
     pg.evaluate("window.__notReloaded = true")
+    pg.locator(".pd-actions button[aria-label=Settings]").click()  # email and the nightly switch are in Settings
 
     pg.fill(f"#notification-emails-{proj['project']}", "someone@example.org")
     pg.locator(f"#email-save-btn-{proj['project']}").click()

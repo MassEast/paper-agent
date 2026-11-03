@@ -47,9 +47,22 @@ def index():
     trashed_projects = [p for p in all_projects if p.trashed_at]
     return render_template(
         "projects.html", projects=projects, trashed_projects=trashed_projects, llm_model=LLM_MODELS[0],
-        usage_totals=usage_by_project(),
+        usage_totals=usage_by_project(), stats={p.id: _list_stats(p) for p in projects},
         cost_comparison_model=os.environ.get("LLM_COST_COMPARISON_MODEL", "Claude Sonnet 4.6"),
     )
+
+
+def _list_stats(project) -> dict:
+    """One row of the project list: what is in New Papers and My Collection (as the project page's tabs count
+    them, so per person in a per_person project), the latest crawl, and the people."""
+    me = members.current(project)
+    sections = [members.section_for(pp, me) for pp in project.papers]
+    return {
+        "new": sections.count("new"),
+        "col": sections.count("col"),
+        "last": project.crawl_logs[0] if project.crawl_logs else None,
+        "people": members.members(project) if project.per_person else [],
+    }
 
 
 @projects_bp.route("", methods=["POST"])

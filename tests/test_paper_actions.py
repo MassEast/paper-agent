@@ -298,6 +298,50 @@ def test_rescreen_leaves_papers_collected_meanwhile_alone(app, two_projects):
         crawl._rescreen_tasks.pop(ids["src"], None)
 
 
+def test_rescreen_leaves_papers_someone_worked_on_alone(app, two_projects):
+    """Re-screen acts for the whole project, whoever starts it: papers with notes, a vote or a paper chat stay in
+    New Papers even when they no longer fit, and are not sent to the model at all."""
+    from app import crawl, members
+    ids = two_projects
+    with app.app_context():
+        src = db.session.get(Project, ids["src"])
+        src.per_person = True
+        felix = members.add(src, "Felix", "felix@example.org")
+        made = {}
+        for i, kind in enumerate(["notes", "vote", "chat", "nothing"]):
+            p = Paper(arxiv_id=f"2601.2000{i}", title="Off topic", abstract="x", source="arxiv")
+            db.session.add(p)
+            db.session.flush()
+            pp = ProjectPaper(project_id=src.id, paper_id=p.id, notes="keep an eye on this" if kind == "notes" else None)
+            db.session.add(pp)
+            db.session.flush()
+            if kind == "vote":
+                members.state(pp, felix, create=True).vote = 2
+            if kind == "chat":
+                db.session.add(ChatMessage(project_paper_id=pp.id, role="user", content="Is this relevant?"))
+            made[kind] = p.id
+        db.session.commit()
+        try:
+            crawl._rescreen_tasks.pop(src.id, None)
+            with patch("app.crawl._screen_paper_quick", side_effect=_quick) as quick, \
+                 patch("app.crawl._screen_paper_deep", side_effect=_deep):
+                state = crawl.run_rescreen(src.id)
+            assert state["worked_on"] == 3 and state["trashed"] == 1
+            assert quick.call_count == 2  # "nothing" and the fixture's "New One"
+            for kind in ("notes", "vote", "chat"):
+                assert _link(src.id, made[kind]).trashed_at is None, kind
+            assert _link(src.id, made["nothing"]).trashed_at is not None
+        finally:
+            crawl._rescreen_tasks.pop(src.id, None)
+            for pid in made.values():
+                pp = _link(src.id, pid)
+                ChatMessage.query.filter_by(project_paper_id=pp.id).delete()
+                db.session.delete(pp)
+                db.session.delete(db.session.get(Paper, pid))
+            db.session.delete(felix)
+            db.session.commit()
+
+
 def test_rescreen_route_needs_a_research_interest(app, logged_in, two_projects):
     with app.app_context():
         db.session.get(Project, two_projects["src"]).research_interest = ""
@@ -325,15 +369,16 @@ def test_rescreen_status_refreshes_paper_list_once_when_done(app, logged_in, two
 
 # ── Card ──────────────────────────────────────────────────────────────────────
 
-def test_new_papers_card_has_its_actions_together_in_the_bottom_row(app, logged_in, two_projects):
+def test_new_papers_card_has_its_actions_in_the_bar_and_the_rest_in_the_menu(app, logged_in, two_projects):
     with app.app_context():
         _link(two_projects["src"], two_projects["new"]).relevance_reason = "It uses sparse attention."
         db.session.commit()
     html = logged_in.get("/projects/pa-source/papers").get_data(as_text=True)
     new_card = html[html.index('id="paper-card-2601-00001'):html.index('id="paper-card-2601-00002')]
-    order = [new_card.index(s) for s in ("Move to My Collection", "Copy / Move", "Notify", '/trash"')]
+    # The two triage actions (with their keys) first, then the ⋯ menu with Copy / Move and Notify
+    order = [new_card.index(s) for s in ("Move to My Collection", '/trash"', 'class="card-menu"', "Copy / Move", "Notify")]
     assert order == sorted(order)
-    assert 'style="color: var(--warning);"' in new_card  # yellow star
+    assert "<kbd>C</kbd>" in new_card and "<kbd>X</kbd>" in new_card
     assert "Why it's relevant for this project" in new_card and "It uses sparse attention." in new_card
     # Not in the title row any more: it comes after the summary and the arXiv/PDF links
     assert new_card.index(">PDF</a>") < new_card.index("Move to My Collection")
@@ -361,6 +406,7 @@ def test_move_from_card_menu_in_browser(app, page, two_projects):
     ids = two_projects
     card = page.locator('[id="paper-card-2601-00001-%d"]' % ids["src"])
     with patch("app.routes.papers.start_relevance_reason_async"):
+        card.locator(".card-menu summary").click()  # Copy / Move is in the ⋯ menu
         card.get_by_role("button", name="Copy / Move").click()
         card.locator(".transfer-target", has_text="Target Proj").get_by_role("button", name="Move").click()
         page.wait_for_function("() => !document.querySelector('#new-papers-list [id^=\"paper-card-2601-00001\"]')")
@@ -374,6 +420,7 @@ def test_rescreen_button_in_browser(app, page, two_projects):
     ids = two_projects
     page.on("dialog", lambda d: d.accept())  # hx-confirm
     with patch("app.crawl._screen_paper_quick", return_value=(False, "not-relevant", "m", 1, 1)):
+        page.locator(".pd-actions button[aria-label=Settings]").click()  # Re-screen is under the research interest
         page.get_by_role("button", name="Re-screen").click()
         page.locator("#rescreen-status", has_text="Re-screen done").wait_for(timeout=10_000)
     # The list refreshed by itself: New Papers is empty, the paper sits in Trash
@@ -447,8 +494,8 @@ def test_regenerate_refreshes_summary_and_this_projects_why_line(app, logged_in,
 @pytest.mark.slow
 def test_tooltips_show_fast_on_hover(app, page, two_projects):
     tip = page.locator("#rw-tip")
-    for button, text in ((page.locator("#rescreen-btn"), "Re-check every paper"),
-                         (page.get_by_role("button", name="Regenerate").first, "Re-fetches the figure")):
+    for button, text in ((page.locator(".pd-chip", has_text="keywords"), "Search keywords"),
+                         (page.locator(".card-menu summary").first, "More: Copy / Move")):
         button.hover()
         page.wait_for_function("() => document.getElementById('rw-tip').classList.contains('show')", timeout=600)
         assert text in tip.inner_text()
@@ -515,7 +562,7 @@ def test_summary_source_follows_what_the_generators_read():
 
 
 @pytest.mark.parametrize("content, source, label", [
-    ("FULL TEXT OF THE PAPER, much longer than the abstract", "full_text", "· from full text"),
+    ("FULL TEXT OF THE PAPER, much longer than the abstract", "full_text", ">from full text<"),
     (None, "abstract", "⚠ from abstract only"),
 ])
 def test_regenerate_records_and_shows_what_the_summary_was_made_from(app, logged_in, two_projects, content, source, label):

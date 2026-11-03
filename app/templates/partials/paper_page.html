@@ -1,17 +1,11 @@
 {# One page of a section's list, plus the sentinel that loads the next page when it scrolls into view
-   (New Papers and My Collection show one card at a time, so there the carousel fires 'loadmore' near the last loaded card).
+   (every section shows one card at a time: the carousel fires 'loadmore' near the last loaded card, and so does scrolling the title list to its end).
    Expects: project, section ('new'|'col'|'trash'), papers (the whole sorted list), offset, page_size. #}
 {% for pp in papers[offset:offset + page_size] %}
-{% if section == 'trash' %}
-{% include "partials/trash_row.html" %}
-{% else %}
-{% with show_curate=(section == 'new') %}
 {% include "partials/paper_card.html" %}
-{% endwith %}
-{% endif %}
 {% endfor %}
 {% if papers|length > offset + page_size %}
 <div class="list-more" data-left="{{ papers|length - offset - page_size }}" hx-get="/projects/{{ project.slug }}/papers/more?section={{ section }}&offset={{ offset + page_size }}"
-    hx-trigger="{{ 'loadmore once' if section in ('new', 'col') else 'intersect once' }}" hx-swap="outerHTML"
-    style="text-align: center; padding: 10px 0; font-size: 0.75rem; color: var(--ink-4);">Loading more… ({{ papers|length - offset - page_size }} left)</div>
+    hx-trigger="loadmore once" hx-swap="outerHTML"
+    style="text-align: center; padding: 10px 0; font-size: 0.75rem; color: var(--ink-4);">{{ papers|length - offset - page_size }} more</div>
 {% endif %}

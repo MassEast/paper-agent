@@ -77,7 +77,7 @@
                 if (s.url) extra.push('<a href="'+s.url+'" target="_blank" style="color:var(--accent);">sample figure</a>');
                 if (s.error) extra.push('<span style="color:var(--error);">'+s.error+'</span>');
                 var icon = s.ok ? '<span style="color:var(--success);">✓</span>' : '<span style="color:var(--error);">✗</span>';
-                rows.push('<div style="display:flex;align-items:center;gap:8px;padding:2px 0;">'+icon+'<span style="min-width:130px;color:var(--ink-2);">'+_SVC_NAMES[k]+'</span><span>'+extra.join(' · ')+'</span></div>');
+                rows.push('<div style="display:flex;align-items:center;gap:8px;padding:2px 0;">'+icon+'<span style="min-width:130px;color:var(--ink-2);">'+_SVC_NAMES[k]+'</span><span>'+extra.join(', ')+'</span></div>');
             });
             detail.innerHTML = rows.join('');
             detail.style.display = 'block';
@@ -114,7 +114,7 @@
     </div>
     <script>(function(){if(localStorage.getItem('ob-projects'))document.getElementById('onboarding-projects').style.display='none';})();</script>
 
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-8">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h1 class="text-2xl font-bold" style="color: var(--ink-1);">Your Projects</h1>
         <form action="/projects" method="POST" class="flex gap-3 w-full sm:w-auto">
             <input type="text" name="name" placeholder="New project name..." class="focus-ring"
@@ -127,71 +127,86 @@
     </div>
 
     {% if projects %}
-    <div class="grid gap-4" id="project-grid">
+    {# One row per project; the research interest shows when hovering the name #}
+    <div style="overflow-x: auto; background-color: var(--paper-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);">
+    <table class="project-table">
+        <thead>
+            <tr>
+                <th style="width: 34px;"></th>
+                <th>Project</th>
+                <th data-tip="Papers in New Papers, waiting for someone to keep or trash them">New</th>
+                <th>My Collection</th>
+                <th>Last crawl</th>
+                <th>People</th>
+                <th style="text-align: right;" data-tip="All LLM tokens this project used: crawls, paper chat, adding papers, Regenerate, Re-screen and the rest, at {{ cost_comparison_model }} pricing, for comparison">Cost</th>
+                <th>Nightly</th>
+                <th style="width: 34px;"></th>
+            </tr>
+        </thead>
+        <tbody id="project-grid">
         {% for project in projects %}
-        <div class="project-card" data-slug="{{ project.slug }}" style="position: relative;"
-             onmouseenter="this.querySelector('.project-trash-btn').style.opacity='1'"
-             onmouseleave="this.querySelector('.project-trash-btn').style.opacity='0'">
-            <a href="/projects/{{ project.slug }}" class="block"
-                style="background-color: var(--paper-2); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: var(--space-md);">
-                <div class="flex items-start justify-between">
-                    <div style="flex: 1; min-width: 0; padding-right: 16px;">
-                        <h2 class="text-xl font-semibold" style="color: var(--ink-1);">{{ project.name }}</h2>
-                        {% if project.research_interest %}
-                        <p style="color: var(--ink-3); margin-top: 4px; font-size: 0.875rem;" class="line-clamp-2">{{ project.research_interest }}</p>
-                        {% endif %}
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; margin-top: 10px;">
-                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;">
-                                <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">Papers</div>
-                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">{{ project.papers|length }}</div>
-                            </div>
-                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;">
-                                <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">Last crawl</div>
-                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">{{ project.crawl_logs[0].started_at.strftime('%b %d') if project.crawl_logs else 'Never' }}</div>
-                            </div>
-                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" {% if project.crawl_hour %}data-tip="Runs every night at {{ '%02d:00'|format(project.crawl_hour) }} UTC"{% endif %}>
-                                <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">Nightly</div>
-                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">
-                                    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle;background-color:{% if project.crawl_hour %}var(--success, #16a34a){% else %}var(--error){% endif %};{% if not project.crawl_hour %}opacity:0.7;{% endif %}"></span>{% if project.crawl_hour %}On{% else %}Off{% endif %}
-                                </div>
-                            </div>
-                            {% set _tokens = usage_totals.get(project.id, 0) %}
-                            {% if _tokens > 0 %}
-                            <div style="background-color: var(--paper-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 5px 10px; min-width: 0;" data-tip="All LLM tokens this project used: crawls, paper chat, adding papers, Regenerate, Re-screen and the rest (cost estimated at {{ cost_comparison_model }} pricing, for comparison). The breakdown is under the project's crawl calendar">
-                                <div style="font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-4);">LLM usage</div>
-                                <div style="font-size: 0.875rem; font-weight: 600; color: var(--ink-1); margin-top: 1px;">~€{{ _tokens|est_cost }} <span style="font-weight: 400; font-size: 0.75rem; color: var(--ink-4);">{{ _tokens|tokens_short }} tok</span></div>
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
-                    <span style="color: var(--ink-4); font-size: 1.25rem; flex-shrink: 0;">→</span>
-                </div>
-            </a>
-            <button type="button" class="project-star-btn" aria-pressed="false" aria-label="Star project"
-                data-tip="Star to keep it on top (saved in this browser)"
-                onclick="toggleProjectStar('{{ project.slug }}')"
-                style="position: absolute; top: 12px; right: 40px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: none; border: none; cursor: pointer; border-radius: var(--radius-md);">
-                <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M12 2l3 7 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-7z" />
-                </svg>
-            </button>
-            <form action="/projects/{{ project.slug }}/trash" method="POST"
-                class="project-trash-btn"
-                style="position: absolute; bottom: 10px; right: 14px; opacity: 0; transition: opacity 150ms;"
-                onsubmit="return confirm('Move \'{{ project.name }}\' to trash?');"
-                onclick="event.stopPropagation();">
-                <button type="submit" aria-label="Move project to trash" data-tip="Move project to trash (can be restored)"
-                    style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: none; border: none; cursor: pointer; color: var(--ink-4); border-radius: var(--radius-md);"
-                    onmouseover="this.style.color='var(--error)'"
-                    onmouseout="this.style.color='var(--ink-4)'">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <use href="/static/icons.svg#icon-trash-2"></use>
+        {% set st = stats[project.id] %}
+        <tr class="project-card" data-slug="{{ project.slug }}" onclick="if (!event.target.closest('button, form, a')) location.href='/projects/{{ project.slug }}'">
+            <td>
+                <button type="button" class="project-star-btn" aria-pressed="false" aria-label="Star project"
+                    data-tip="Star to keep it on top (saved in this browser)" onclick="toggleProjectStar('{{ project.slug }}')">
+                    <svg width="15" height="15" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 2l3 7 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-7z" />
                     </svg>
                 </button>
-            </form>
-        </div>
+            </td>
+            <td class="pt-name"><a href="/projects/{{ project.slug }}" {% if project.research_interest %}data-tip="{{ project.research_interest | truncate(400) }}"{% endif %}>{{ project.name }}</a></td>
+            <td>{% if st.new %}<span class="pt-new">{{ st.new }}</span>{% else %}<span class="pt-none">0</span>{% endif %}</td>
+            <td class="pt-num">{{ st.col }}</td>
+            <td>
+                {% if st.last %}
+                <span data-tip="{{ 'Nightly' if st.last.triggered_by == 'cron' else 'Manual' }} crawl, {{ st.last.status }}: {{ st.last.papers_added or 0 }} papers added">
+                    {{ st.last.started_at | berlin_time('%b %d') }}
+                    {% if st.last.status == 'error' %}<span style="color: var(--error);">failed</span>
+                    {% elif st.last.status == 'running' %}<span style="color: var(--warning);">running</span>
+                    {% else %}<span class="pt-none">{{ '+%d' % st.last.papers_added if st.last.papers_added else 'nothing new' }}</span>{% endif %}
+                </span>
+                {% else %}<span class="pt-none">never</span>{% endif %}
+            </td>
+            <td>{% if st.people %}<span data-tip="{{ st.people | map(attribute='name') | join(', ') }}">{% for m in st.people %}<span class="pt-dot" style="background: {{ m.color }};"></span>{% endfor %}</span>{% endif %}</td>
+            {% set _tokens = usage_totals.get(project.id, 0) %}
+            <td class="pt-num" style="text-align: right;" data-tip="{{ _tokens | tokens_short }} tokens">{% if _tokens %}€{{ _tokens | est_cost }}{% else %}<span class="pt-none">none</span>{% endif %}</td>
+            <td {% if project.crawl_hour %}data-tip="Runs every night at {{ '%02d:00' | format(project.crawl_hour) }} UTC"{% endif %}>
+                {% if project.crawl_hour %}<span style="color: var(--success);">on</span>{% else %}<span style="color: var(--error);">off</span>{% endif %}
+            </td>
+            <td>
+                <form action="/projects/{{ project.slug }}/trash" method="POST" class="project-trash-btn"
+                    onsubmit="return confirm('Move \'{{ project.name }}\' to trash?');">
+                    <button type="submit" aria-label="Move project to trash" data-tip="Move project to trash (can be restored)">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <use href="/static/icons.svg#icon-trash-2"></use>
+                        </svg>
+                    </button>
+                </form>
+            </td>
+        </tr>
         {% endfor %}
+        </tbody>
+    </table>
     </div>
+    <style>
+        .project-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+        .project-table th { padding: 10px 12px; text-align: left; font-size: 0.68rem; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-4); white-space: nowrap; }
+        .project-table td { padding: 11px 12px; border-top: 1px solid var(--border-subtle); color: var(--ink-3); white-space: nowrap; }
+        .project-table tbody tr { cursor: pointer; }
+        .project-table tbody tr:hover { background-color: var(--paper-3); }
+        .pt-name a { font-weight: 600; color: var(--ink-1); text-decoration: none; }
+        .pt-num { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+        .pt-none { color: var(--ink-4); }
+        .pt-new { display: inline-block; min-width: 2.2em; text-align: center; padding: 1px 9px; border-radius: 9999px; font-size: 0.78rem; font-weight: 700;
+            background-color: var(--accent); color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+        .pt-dot { display: inline-block; width: 9px; height: 9px; border-radius: 9999px; margin-right: 3px; }
+        .project-star-btn { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: none; border: none; cursor: pointer; border-radius: var(--radius-md); }
+        .project-trash-btn button { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: none; border: none; cursor: pointer; color: var(--ink-4); border-radius: var(--radius-md); opacity: 0; transition: opacity 150ms; }
+        .project-table tr:hover .project-trash-btn button { opacity: 1; }
+        @media (max-width: 640px) { .project-table th:nth-child(n+5), .project-table td:nth-child(n+5) { display: none; } }
+        .project-trash-btn button:hover { color: var(--error); }
+    </style>
     <script>
     // Starred projects: a per-browser convenience (one shared site login, so no per-user DB row).
     // Starred cards go on top, each group keeping the server order (newest first).

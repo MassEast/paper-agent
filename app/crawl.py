@@ -18,7 +18,7 @@ import arxiv
 import httpx
 
 from app import db
-from app.models import Project, Paper, PaperSummary, ProjectPaper, CrawlLog, ScreenedPaper, compute_screening_hash, \
+from app.models import ChatMessage, Project, Paper, PaperSummary, ProjectPaper, CrawlLog, ScreenedPaper, compute_screening_hash, \
     estimated_cost_eur
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
@@ -3410,7 +3410,7 @@ def start_rescreen_async(project_id: int, app=None) -> bool:
 
         app = current_app._get_current_object()
     _rescreen_tasks[project_id] = {
-        "status": "running", "total": 0, "checked": 0, "kept": 0, "trashed": 0, "skipped": 0,
+        "status": "running", "total": 0, "checked": 0, "kept": 0, "trashed": 0, "skipped": 0, "worked_on": 0,
         "error": None,
     }
 
@@ -3426,6 +3426,14 @@ def start_rescreen_async(project_id: int, app=None) -> bool:
     return True
 
 
+def _worked_on(pp) -> bool:
+    """Someone wrote notes on the paper, voted on it or asked the paper chat about it. Re-screen is for the whole
+    project, whoever starts it, so it leaves such papers in New Papers instead of trashing someone's work."""
+    if (pp.notes or "").strip() or any(st.vote for st in pp.member_states):
+        return True
+    return db.session.query(ChatMessage.id).filter_by(project_paper_id=pp.id).first() is not None
+
+
 @counts("rescreen")
 def run_rescreen(project_id: int) -> dict:
     """Re-check every New Papers paper against the project's current research interest and My
@@ -3435,7 +3443,7 @@ def run_rescreen(project_id: int) -> dict:
     the user collected or trashed while the re-screen ran. A parse failure keeps the paper:
     only a clear "not relevant" moves it to Trash."""
     state = _rescreen_tasks.setdefault(project_id, {
-        "status": "running", "total": 0, "checked": 0, "kept": 0, "trashed": 0, "skipped": 0,
+        "status": "running", "total": 0, "checked": 0, "kept": 0, "trashed": 0, "skipped": 0, "worked_on": 0,
         "error": None,
     })
     project = db.session.get(Project, project_id)
@@ -3461,6 +3469,9 @@ def run_rescreen(project_id: int) -> dict:
             continue
         if base_arxiv_id(pp.paper.arxiv_id) in already_relevant:
             state["skipped"] += 1
+            continue
+        if _worked_on(pp):
+            state["worked_on"] += 1
             continue
         todo.append({
             "link_id": pp.id, "arxiv_id": pp.paper.arxiv_id, "pdf_url": pp.paper.pdf_url,
@@ -3491,7 +3502,10 @@ def run_rescreen(project_id: int) -> dict:
                 # Fresh read: the user may have collected/trashed it from the UI meanwhile
                 pp = db.session.get(ProjectPaper, item["link_id"], populate_existing=True)
                 untouched = pp is not None and pp.manual_tag is None and not pp.trashed_at
-                if untouched and reason == "not-relevant":
+                if untouched and reason == "not-relevant" and _worked_on(pp):  # someone started on it meanwhile
+                    state["worked_on"] += 1
+                    verdict = "left alone (someone worked on it meanwhile)"
+                elif untouched and reason == "not-relevant":
                     pp.trashed_at = datetime.utcnow()
                     pp.moved_by_id = None  # an automatic move, nobody's: not shown in anyone's New Papers
                     pp.trashed_reason = "Re-screen: not relevant" + (" (from the abstract)" if source == "abstract" else "")
@@ -3525,8 +3539,8 @@ def run_rescreen(project_id: int) -> dict:
             raise
 
     state["status"] = "done"
-    _log.info("[rescreen] project %s done: %d screened, %d kept, %d moved to Trash, %d skipped",
-              project.name, state["checked"], state["kept"], state["trashed"], state["skipped"])
+    _log.info("[rescreen] project %s done: %d screened, %d kept, %d moved to Trash, %d skipped, %d left alone (worked on)",
+              project.name, state["checked"], state["kept"], state["trashed"], state["skipped"], state["worked_on"])
     return state
 
 

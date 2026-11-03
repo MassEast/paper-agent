@@ -107,9 +107,11 @@ def test_a_collected_or_trashed_paper_says_where_it_went(c, focus_project):
     _, slug, ids = focus_project
     html = c.get(f"/projects/{slug}?paper={ids['col']}").get_data(as_text=True)
     assert "already in My Collection (since Nov 01), shown first there" in html
+    # The tab switch is valid JS: the quotes around the tab name were HTML-escaped (a JS error) until 2026-11-03
+    assert """showPaperTab("col" || 'new');""" in html
     html = c.get(f"/projects/{slug}?paper={ids['trash']}").get_data(as_text=True)
     assert "moved to Trash on Nov 01 (not relevant)" in html
-    assert re.search(r'data-pp-row="\d+"', html)
+    assert re.search(r'data-pp-card="\d+"', html)  # Trash shows full cards (inbox layout)
 
 
 def test_a_paper_not_in_the_project_and_a_page_without_one(c, focus_project):

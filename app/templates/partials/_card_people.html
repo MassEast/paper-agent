@@ -8,7 +8,7 @@
     <span style="flex: 1; min-width: 12rem;">
         <strong style="color: {{ _by.color }};">{{ _by.name }}</strong>
         {% if _shared == 'col' %}added this to My Collection{% elif _shared == 'trash' %}moved this to Trash{% else %}put this back into New Papers{% endif %}
-        <span style="color: var(--ink-4);">· {{ pp.moved_at | berlin_time('%b %d') }}</span>
+        <span style="color: var(--ink-4); margin-left: 6px;">{{ pp.moved_at | berlin_time('%b %d') }}</span>
     </span>
     {% if _shared == 'col' %}
     <button type="button" class="focus-ring rw-chip-btn" hx-post="/paper/{{ _aid }}/seen" hx-vals='{"project_id": {{ project.id }}}'

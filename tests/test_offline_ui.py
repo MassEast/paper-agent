@@ -144,6 +144,7 @@ def test_unsaved_notes_survive_reload(app, page, seeded):
 
 @pytest.mark.slow
 def test_offline_crawl_toggle_does_not_flip(app, page, seeded):
+    page.evaluate("openDrawer('settings', 'crawl-section-%d')" % seeded)  # the toggle is in the Settings panel
     toggle = page.locator(f"#crawl-toggle-btn-{seeded}")
     assert toggle.get_attribute("data-on") == "false"
     page.context.set_offline(True)
@@ -156,6 +157,7 @@ def test_offline_crawl_toggle_does_not_flip(app, page, seeded):
 
 @pytest.mark.slow
 def test_offline_research_interest_save_reports_failure(app, page, seeded):
+    page.evaluate("openDrawer('settings')")  # the research interest is in the Settings panel
     page.fill("#research-interest-field", "changed interest")
     page.context.set_offline(True)
     page.click("#save-btn")
@@ -217,6 +219,7 @@ def test_crlf_research_interest_is_not_reported_unsaved(app, page, seeded):
 
 @pytest.mark.slow
 def test_research_interest_over_the_limit_cannot_be_saved(app, page, seeded):
+    page.evaluate("openDrawer('settings')")  # the research interest is in the Settings panel
     from app.models import RESEARCH_INTEREST_MAX_CHARS as MAX
     count = page.locator("#ri-count")
     assert count.inner_text().startswith(f"{len('original interest')} / {MAX:,} characters")
@@ -230,6 +233,7 @@ def test_research_interest_over_the_limit_cannot_be_saved(app, page, seeded):
 
 @pytest.mark.slow
 def test_generated_research_interest_over_the_limit_is_shown_not_saved(app, page, seeded):
+    page.evaluate("openDrawer('settings')")  # the research interest is in the Settings panel
     """Generate asks for at most 300 words; if the model writes more anyway, the save is refused and the
     text stays in the field with the counter in red, ready for another Generate."""
     from app.models import RESEARCH_INTEREST_MAX_CHARS as MAX

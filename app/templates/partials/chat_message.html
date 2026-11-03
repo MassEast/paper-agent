@@ -2,7 +2,7 @@
    once the answer has ended the server answers that poll with the whole log instead. #}
 {% if m.role == "user" %}
 <div class="chat-msg chat-user{% if m.status == 'queued' %} chat-queued{% endif %}" id="chat-msg-{{ m.id }}">{{ m.content }}
-    {%- if m.status == 'queued' %}<div class="chat-msg-meta">Queued: sent when the answer before it is done ·
+    {%- if m.status == 'queued' %}<div class="chat-msg-meta">Queued: sent when the answer before it is done.
         <button class="chat-link" hx-post="/chat/message/{{ m.id }}/remove" hx-target="#chat-msg-{{ m.id }}" hx-swap="outerHTML">Remove</button></div>{% endif -%}
 </div>
 {% else %}

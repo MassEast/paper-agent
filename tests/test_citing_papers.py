@@ -253,7 +253,7 @@ def test_found_via_text_names_keywords_and_the_recommendation():
     pp = ProjectPaper(found_via=json.dumps([{"via": "keyword", "name": "sparse attention"},
                                             {"via": "keyword", "name": "state space"},
                                             {"via": "recommended"}]))
-    assert pp.found_via_text() == 'keywords "sparse attention", "state space" · Semantic Scholar recommendation'
+    assert pp.found_via_text() == 'keywords "sparse attention", "state space" and Semantic Scholar recommendation'
     assert ProjectPaper(found_via='[{"via": "keyword"}]').found_via_text() == "arXiv keyword search"
     long = "A" * 60
     assert ProjectPaper(found_via=json.dumps([{"via": "cites", "arxiv_id": "1", "title": long}])).found_via_text() \

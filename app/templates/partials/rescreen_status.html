@@ -5,12 +5,12 @@
     hx-get="/projects/{{ project.slug }}/rescreen-status" hx-trigger="every 2s" hx-swap="outerHTML"
     style="padding: 8px 12px; border-radius: var(--radius-md); font-size: 0.8rem; background-color: var(--paper-3); border: 1px solid var(--border-default); color: var(--ink-2);">
     Re-screening New Papers against the current research interest:
-    {{ state.checked }} / {{ state.total }} done{% if state.trashed %} · {{ state.trashed }} moved to Trash{% endif %}
+    {{ state.checked }} / {{ state.total }} done{% if state.trashed %}, {{ state.trashed }} moved to Trash{% endif %}
 </div>
 {% elif state and state.status == 'done' %}
 <div id="rescreen-status" class="mb-3"
     style="padding: 8px 12px; border-radius: var(--radius-md); font-size: 0.8rem; background-color: color-mix(in oklch, var(--accent) 12%, var(--paper-1)); border: 1px solid var(--border-default); color: var(--ink-2); display: flex; align-items: center; gap: 8px;">
-    <span style="flex: 1;">Re-screen done: {{ state.checked }} checked, {{ state.kept }} kept, {{ state.trashed }} moved to Trash (restorable){% if state.skipped %}, {{ state.skipped }} skipped (already screened against this exact research interest and collection){% endif %}.</span>
+    <span style="flex: 1;">Re-screen done: {{ state.checked }} checked, {{ state.kept }} kept, {{ state.trashed }} moved to Trash (restorable){% if state.skipped %}, {{ state.skipped }} skipped (already screened against this exact research interest and collection){% endif %}{% if state.worked_on %}, {{ state.worked_on }} left alone because someone voted, wrote notes or chatted on them{% endif %}.</span>
     <button type="button" onclick="document.getElementById('rescreen-status').remove()"
         style="background: none; border: none; cursor: pointer; color: var(--ink-3); font-size: 0.75rem;">Close</button>
     {% if refresh %}

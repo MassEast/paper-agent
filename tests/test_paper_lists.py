@@ -74,7 +74,7 @@ def test_page_shows_first_page_of_each_list_and_a_sentinel(c, big_project):
     # New Papers is a one-card carousel: its next page loads when the carousel nears the end, not on scroll
     assert f'section=new&offset={PAGE_SIZE}' in html and 'hx-trigger="loadmore once"' in html
     assert f'data-left="{N_NEW - PAGE_SIZE}"' in html and 'data-carousel="next"' in html
-    assert '<span id="new-count" class="paper-tab-count">(25)</span>' in html  # in the New Papers tab
+    assert '<span id="new-count" class="paper-tab-count">25</span>' in html  # in the New Papers tab
 
 
 def test_more_pages_until_the_end(c, big_project):
@@ -116,8 +116,8 @@ def test_collect_removes_card_and_redraws_only_my_collection(c, big_project):
     assert 'id="col-section" hx-swap-oob="true"' in html
     assert _cards(_section(html, "col"))[0] == "2602-00015"
     assert 'id="new-section"' not in html
-    assert '<span id="new-count" hx-swap-oob="true">(24)</span>' in html
-    assert '<span id="col-count" hx-swap-oob="true">(4)</span>' in html
+    assert '<span id="new-count" class="paper-tab-count" hx-swap-oob="true">24</span>' in html
+    assert '<span id="col-count" class="paper-tab-count" hx-swap-oob="true">4</span>' in html
 
 
 def test_trash_and_restore_update_the_trash_and_new_sections(c, big_project):
@@ -125,7 +125,7 @@ def test_trash_and_restore_update_the_trash_and_new_sections(c, big_project):
     assert 'id="trash-section" hx-swap-oob="true"' in html and "New 3" in _section(html, "trash")
     html = c.post("/paper/2602.00003/restore", data={"project_id": big_project}, headers={"HX-Request": "true"}).data.decode()
     assert 'id="new-section" hx-swap-oob="true"' in html and "2602-00003" in _cards(_section(html, "new"))
-    assert '<span id="trash-count" hx-swap-oob="true">(0)</span>' in html
+    assert '<span id="trash-count" class="paper-tab-count" hx-swap-oob="true">0</span>' in html
 
 
 def test_tag_toggle_returns_the_card_and_fresh_tag_counts(c, big_project):
@@ -189,7 +189,7 @@ def test_new_papers_carousel_steps_loads_more_and_collect_shows_next_on_a_phone(
     assert pg.locator("#curated-list > .paper-card").first.get_attribute("id").startswith(f"paper-card-2602-{PAGE_SIZE:05d}-")
     assert shown().count() == 1 and pos() == f"{PAGE_SIZE + 1} / {N_NEW - 1}"  # the next paper takes its place
     assert shown().first.get_attribute("id").startswith(f"paper-card-2602-{PAGE_SIZE + 1:05d}-")
-    assert pg.locator("#new-count").inner_text() == f"({N_NEW - 1})"
+    assert pg.locator("#new-count").inner_text() == f"{N_NEW - 1}"
 
     # My Collection is a one-card carousel too, in its own tab
     pg.locator(".paper-tab[data-tab='col']").click()
@@ -203,6 +203,73 @@ def test_new_papers_carousel_steps_loads_more_and_collect_shows_next_on_a_phone(
     pg.get_by_role("button", name="Release date").first.click()
     pg.wait_for_function(f"() => document.querySelector('#new-papers-list > .paper-card:not([style*=\"none\"])').id.startsWith('paper-card-2602-{N_NEW - 1:05d}')")
     assert pos() == f"1 / {N_NEW - 1}"
+
+    # The phone's bottom bar acts on the card shown
+    first = shown().first.get_attribute("id")
+    pg.locator(".mobile-triage").get_by_role("button", name="Trash").click()
+    pg.wait_for_function(f"() => !document.querySelector('#new-papers-list > #{first}')")
+    assert pg.locator(f"#trash-papers-list > #{first}").count() == 1  # Trash shows the full card
+    assert pg.locator("#new-count").inner_text() == f"{N_NEW - 2}"
+    context.close()
+
+
+@pytest.mark.slow
+def test_inbox_title_list_and_keys_on_a_laptop(live_server, browser_session, big_project):
+    """The title list on the left shows the loaded cards; a click or J / K picks the card, C collects it,
+    X trashes it, and in Trash R restores it."""
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state, viewport={"width": 1440, "height": 900})
+    pg = context.new_page()
+    pg.goto(f"{live_server}/projects/pl-proj")
+    items = pg.locator("#inbox-list .inbox-item")
+    shown = lambda: pg.locator("#new-papers-list > .paper-card:visible").first.get_attribute("id")
+    assert items.count() == PAGE_SIZE and "is-current" in items.first.get_attribute("class")
+    # Sorting and Re-screen sit in the left column above the list; the ‹ › arrows are for phones only
+    assert pg.locator("#inbox-tools #new-sort-pub").is_visible() and not pg.locator("#new-section .new-carousel-nav").is_visible()
+    assert pg.locator("#inbox-list .inbox-more").inner_text().startswith(f"{N_NEW - PAGE_SIZE} more")
+
+    items.nth(3).click()
+    assert shown().startswith("paper-card-2602-00003-") and "is-current" in items.nth(3).get_attribute("class")
+    pg.keyboard.press("j")
+    assert shown().startswith("paper-card-2602-00004-")
+    pg.keyboard.press("k")
+    pg.keyboard.press("k")
+    assert shown().startswith("paper-card-2602-00002-")
+
+    pg.keyboard.press("c")  # to My Collection: the next paper takes its place
+    pg.wait_for_function("() => !document.querySelector('#new-papers-list [id^=\"paper-card-2602-00002-\"]')")
+    assert shown().startswith("paper-card-2602-00003-") and pg.locator("#new-count").inner_text() == f"{N_NEW - 1}"
+    pg.keyboard.press("x")  # trash
+    pg.wait_for_function("() => !document.querySelector('#new-papers-list [id^=\"paper-card-2602-00003-\"]')")
+    assert pg.locator("#trash-count").inner_text() == "1"
+
+    pg.locator(".paper-tab[data-tab='trash']").click()
+    assert pg.locator("#inbox-list .inbox-item").count() == 1
+    assert pg.locator("#inbox-list .inbox-why").first.inner_text().startswith("Trashed ")
+    pg.keyboard.press("r")  # restore
+    pg.wait_for_function("() => document.getElementById('trash-count').textContent.trim() === '0'")
+
+    # Scrolling the title list to its end loads the next page of cards
+    pg.locator(".paper-tab[data-tab='new']").click()
+    pg.locator("#inbox-list").evaluate("el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); }")
+    pg.wait_for_function(f"() => document.querySelectorAll('#inbox-list .inbox-item').length > {PAGE_SIZE - 1}")
+
+    # Find papers opens its side panel; keys don't act on cards while it is open
+    pg.get_by_role("button", name="Find papers").click()
+    assert pg.locator("#drawer-find").is_visible() and pg.locator("#arxiv-search-btn").is_visible()
+    before = shown()
+    pg.keyboard.press("j")
+    assert shown() == before
+    pg.keyboard.press("Escape")
+    assert not pg.locator("#drawer-find").is_visible()
+    # A side panel opens at the top, or at the top of the section a chip is about
+    pg.locator(".pd-actions button[aria-label=Settings]").click()
+    assert pg.locator("#drawer-settings .drawer-body").evaluate("el => el.scrollTop") == 0
+    pg.keyboard.press("Escape")
+    pg.locator(".pd-chip", has_text="Nightly").click()
+    top = pg.locator("#drawer-settings .drawer-body").evaluate(
+        "el => [...el.children].find(c => c.querySelector('[id^=crawl-section-]')).getBoundingClientRect().top - el.getBoundingClientRect().top")
+    assert 0 <= top <= 20
     context.close()
 
 

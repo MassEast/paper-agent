@@ -41,28 +41,6 @@
         }
     }
 
-
-    .detail-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: 24px;
-    }
-
-    @media (min-width: 1024px) {
-        .detail-grid {
-            grid-template-columns: minmax(0, 1fr) 360px;
-        }
-    }
-
-    .sidebar-col {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-    }
-
-    .sidebar-col>div {
-        min-width: 0;
-    }
 </style>
 <div style="max-width: 1600px; margin: 0 auto; padding: 10px 16px;">
     {% include "partials/crawl_banner.html" %}
@@ -78,14 +56,14 @@
             <div style="font-weight:600;color:var(--ink-1);margin-bottom:6px;">Getting started — here's what to do:
             </div>
             <ol style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px;">
-                <li><strong>Add papers to My Collection</strong> — use the "Add" button below. These become reference
+                <li><strong>Add papers to My Collection</strong>: use "Add paper" at the top. These become reference
                     examples for the AI screener.</li>
-                <li><strong>Write or generate a Research Interest</strong> — describe what you're working on (or click
+                <li><strong>Write or generate a Research Interest</strong> under Settings: describe what you're working on (or click
                     <em>Generate</em> to derive it from your collection).</li>
-                <li><strong>Generate Keywords</strong> — click <em>Generate keywords</em> in the sidebar; these drive
+                <li><strong>Generate Keywords</strong>: click <em>Regenerate via AI</em> under Find papers; these drive
                     the arXiv search.</li>
-                <li><strong>Set a notification email</strong> — so you get crawl results by email.</li>
-                <li><strong>Run a manual crawl</strong> — hit <em>Crawl now</em> to see it in action before the nightly
+                <li><strong>Set a notification email</strong> under Settings, so you get crawl results by email.</li>
+                <li><strong>Run a manual crawl</strong>: <em>Find papers</em> shows it in action before the nightly
                     schedule kicks in.</li>
             </ol>
         </div>
@@ -97,321 +75,47 @@
     <script>(function () { if (localStorage.getItem('ob-proj-{{ project.slug }}')) document.getElementById('onboarding-project').style.display = 'none'; })();</script>
     {% endif %}
 
-    <div class="detail-grid">
-        <div>
-            <div
-                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
-                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;"
-                    class="sm:flex-row sm:items-center justify-between mb-4 gap-2">
-                    <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--ink-1);">Research Interest</h2>
-                    <div style="display: flex; gap: 6px; align-items: center;">
-                        <button type="button" id="toggle-ri-help"
-                            style="font-size: 0.75rem; color: var(--ink-3); background: none; border: none; cursor: pointer; padding: 0 4px; display: inline-flex; align-items: center; gap: 6px;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                <use href="/static/icons.svg#icon-info"></use>
-                            </svg>
-                            How it works</button>
-                        <button class="focus-ring" type="button" id="generate-btn"
-                            style="font-size: 0.75rem; color: var(--accent); height: var(--button-height); padding: 0 12px; border-radius: var(--radius-md); background-color: color-mix(in oklch, var(--accent) 12%, var(--paper-2)); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent); cursor: pointer; width: fit-content; display: inline-flex; align-items: center; gap: 6px; transition: background-color 150ms ease, color 150ms ease;"
-                            data-tip="Let AI generate or improve the research interest from My Collection papers"
-                            onmouseover="if(!this.disabled) { this.style.backgroundColor='color-mix(in oklch, var(--accent) 22%, var(--paper-2))'; }"
-                            onmouseout="if(!this.disabled) { this.style.backgroundColor='color-mix(in oklch, var(--accent) 12%, var(--paper-2))'; }"
-                            onclick="generateResearchInterest()">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                <use href="/static/icons.svg#icon-sparkles"></use>
-                            </svg>
-                            Generate
-                        </button>
-                    </div>
-                </div>
-                <form action="/projects/{{ project.slug }}/research-interest" method="POST" id="research-form">
-                    <textarea class="focus-ring" name="research_interest" id="research-interest-field" rows="7"
-                        placeholder="Describe what you're working on. The AI will use this to find relevant papers."
-                        style="width: 100%; background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 12px 16px; color: var(--ink-1); outline: none; min-height: 140px; resize: vertical;"
-                        oninput="checkDirty()">{{ project.research_interest or "" }}</textarea>
-                    <div class="flex justify-between items-center mt-3">
-                        <p class="text-xs" id="ri-count" style="color: var(--ink-4); min-height: 1lh;"></p>
-                        <button class="focus-ring" type="submit" id="save-btn"
-                            style="height: var(--button-height); padding: 0 24px; min-width: 90px; white-space: nowrap; background-color: var(--paper-3); color: var(--ink-4); border-radius: var(--radius-md); border: 1px solid var(--border-default); display: inline-flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.55; cursor: not-allowed;"
-                            disabled aria-disabled="true">
-                            Save
-                        </button>
-                    </div>
-                </form>
-                <script>
-                    const saveBtn = document.getElementById('save-btn');
-                    const riField = document.getElementById('research-interest-field');
-                    // Read back from the field, not the raw DB string: browsers turn \r\n into \n in a
-                    // textarea, so a stored interest with \r\n would otherwise always look unsaved.
-                    let _riSavedValue = riField.value;
-                    const riForm = document.getElementById('research-form');
-
-                    function _setSaveBtnState(dirty) {
-                        saveBtn.disabled = !dirty;
-                        saveBtn.setAttribute('aria-disabled', dirty ? 'false' : 'true');
-                        saveBtn.style.backgroundColor = dirty ? 'var(--accent)' : 'var(--paper-3)';
-                        saveBtn.style.color = dirty ? 'var(--accent-ink)' : 'var(--ink-4)';
-                        saveBtn.style.opacity = dirty ? '1' : '0.55';
-                        saveBtn.style.cursor = dirty ? 'pointer' : 'not-allowed';
-                        if (!dirty) saveBtn.textContent = 'Save';
-                    }
-
-                    // Same limit as the server (RESEARCH_INTEREST_MAX_CHARS). No maxlength on the field: it would
-                    // cut a pasted text off without telling anyone.
-                    const RI_MAX = {{ research_interest_max }};
-                    const riCount = document.getElementById('ri-count');
-
-                    function checkDirty() {
-                        const n = Array.from(riField.value.trim()).length;
-                        const over = n > RI_MAX;
-                        riCount.textContent = over
-                            ? 'Too long: ' + n.toLocaleString('en') + ' / ' + RI_MAX.toLocaleString('en') + ' characters. Shorten it, or press Generate to condense it.'
-                            : n.toLocaleString('en') + ' / ' + RI_MAX.toLocaleString('en') + ' characters. The AI checks every new paper against this.';
-                        riCount.style.color = over ? 'var(--error)' : 'var(--ink-4)';
-                        _setSaveBtnState(riField.value !== _riSavedValue && !over);
-                    }
-                    checkDirty();
-
-                    function saveResearchInterest(value, onDone, onFail) {
-                        const fd = new FormData();
-                        fd.append('research_interest', value);
-                        function failed(reason, message) {
-                            // The field stays dirty, so Save stays active for a retry (unless the text is too long)
-                            checkDirty();
-                            if (!saveBtn.disabled) saveBtn.innerHTML = _xSvg + ' Not saved';
-                            showToast(message || ('Research interest ' + reason + ' — it was NOT saved. Click Save again once you\'re back online.'));
-                            if (onFail) onFail();
-                        }
-                        fetch(riForm.action, {
-                            method: 'POST',
-                            headers: { 'X-Requested-With': 'fetch' },
-                            body: fd,
-                        }).then(r => {
-                            if (r.ok && !r.redirected) {
-                                _riSavedValue = value;
-                                htmx.trigger(document.body, 'crawlSetupChanged');  // the "To turn it on" checklist
-                                _setSaveBtnState(false);
-                                saveBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
-                                setTimeout(() => { saveBtn.textContent = 'Save'; }, 2000);
-                                if (onDone) onDone();
-                            } else if (r.status === 400) {
-                                r.text().then(t => failed('', t + ' It was NOT saved.'));
-                            } else {
-                                failed(r.redirected ? '(logged out)' : '(server error ' + r.status + ')');
-                            }
-                        }).catch(() => failed('(no connection)'));
-                    }
-                    unsavedChecks.push(() => riField.value !== _riSavedValue);
-
-                    riForm.addEventListener('submit', function (e) {
-                        e.preventDefault();
-                        saveResearchInterest(riField.value);
-                    });
-
-                    const _genOrigHtml = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-sparkles"></use></svg> Generate';
-                    const _checkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg>';
-                    const _xSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-x"></use></svg>';
-
-                    // Shared animated loading helper. Returns a stop() function.
-                    function startGeneratingAnim(btnEl, opts) {
-                        opts = opts || {};
-                        const label = opts.label || 'Generating';
-                        const estimate = opts.estimate || '10–15s';
-                        const spinner = '<div style="width:12px;height:12px;border-radius:50%;border:2px solid rgba(128,128,128,0.25);border-top-color:currentColor;animation:spin 0.75s linear infinite;flex-shrink:0;display:inline-block;vertical-align:middle;"></div>';
-                        const t0 = Date.now();
-                        function render() {
-                            const secs = Math.floor((Date.now() - t0) / 1000);
-                            const timer = ' <span style="opacity:0.5;font-size:0.82em;">(' + secs + 's / ~' + estimate + ')</span>';
-                            btnEl.innerHTML = spinner + ' ' + label + '...' + timer;
-                        }
-                        render();
-                        const iv = setInterval(render, 1000);
-                        return function () { clearInterval(iv); };
-                    }
-
-                    function generateResearchInterest() {
-                        const btn = document.getElementById('generate-btn');
-                        btn.disabled = true;
-                        btn.style.opacity = '0.7';
-                        const stopAnim = startGeneratingAnim(btn, { estimate: '10–15s' });
-
-                        const existingText = riField.value.trim();
-                        fetch('/projects/{{ project.slug }}/generate-research-interest', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ existing_text: existingText })
-                        })
-                            .then(r => r.json())
-                            .then(d => {
-                                stopAnim();
-                                if (d.research_interest) {
-                                    riField.value = d.research_interest;
-                                    btn.innerHTML = _checkSvg + ' Saving...';
-                                    saveResearchInterest(d.research_interest, () => {
-                                        btn.innerHTML = _checkSvg + ' Generated & saved';
-                                        setTimeout(() => {
-                                            btn.innerHTML = _genOrigHtml;
-                                            btn.disabled = false;
-                                            btn.style.opacity = '1';
-                                        }, 2000);
-                                    }, () => {
-                                        btn.innerHTML = _genOrigHtml;
-                                        btn.disabled = false;
-                                        btn.style.opacity = '1';
-                                    });
-                                } else {
-                                    btn.innerHTML = _xSvg + ' ' + (d.error || 'Error');
-                                    btn.disabled = false;
-                                    btn.style.opacity = '1';
-                                    setTimeout(() => { btn.innerHTML = _genOrigHtml; }, 3000);
-                                }
-                            })
-                            .catch(() => {
-                                stopAnim();
-                                btn.innerHTML = _xSvg + ' Error';
-                                btn.disabled = false;
-                                btn.style.opacity = '1';
-                                setTimeout(() => { btn.innerHTML = _genOrigHtml; }, 2000);
-                            });
-                    }
-                </script>
-
-                <div id="ri-help" class="hidden"
-                    style="margin-top: 10px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
-                    <p style="font-weight: 600; margin-bottom: 6px; color: var(--ink-1);">How research interest
-                        generation works</p>
-                    <p>If you already have text in the box, Generate <strong>refines your existing
-                            description</strong> into at most about 300 words (a longer text gets condensed), using papers in My Collection as silent background context — the
-                        output will not mention specific papers or authors, only ideas, problems, methods, and goals.
-                    </p>
-                    <p style="margin-top: 6px;">If the box is empty, the LLM reads <strong>titles and abstracts of all
-                            papers in My Collection</strong> (up to {{ reference_papers_limit }}, priority-ordered by tag) and
-                        writes a research interest from scratch (at most about 300 words).</p>
-                    <p style="margin-top: 6px;">The research interest goes into every screening prompt, so it is
-                        limited to {{ "{:,}".format(research_interest_max) }} characters.</p>
-                    <p style="margin-top: 6px;">Only My Collection is used: New Papers and Trash are ignored.</p>
-                    <p style="margin-top: 6px; color: var(--ink-4);">Tip: the more diverse and well-tagged your
-                        collection, the more precise the generated description.</p>
-                    <button type="button" onclick="document.getElementById('prompt-ri').classList.toggle('hidden')"
-                        style="margin-top: 6px; font-size: 0.7rem; color: var(--accent-muted); text-decoration: underline; background: none; border: none; cursor: pointer; padding: 0;">show
-                        prompt</button>
-                    <pre id="prompt-ri" class="hidden"
-                        style="margin-top: 6px; white-space: pre-wrap; font-size: 0.68rem; background-color: var(--paper-2); border-radius: 4px; padding: 8px; color: var(--ink-3); font-family: monospace; line-height: 1.4;">{{ prompt_research_interest }}</pre>
-                </div>
-                <script>
-                    document.getElementById('toggle-ri-help').addEventListener('click', function () {
-                        const h = document.getElementById('ri-help');
-                        h.classList.toggle('hidden');
-                        this.style.color = h.classList.contains('hidden') ? 'var(--ink-3)' : 'var(--ink-1)';
-                    });
-                </script>
-            </div>
-
-            <div
-                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2">
-                    <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--ink-1);">Add to My Collection</h2>
-                    <button type="button" id="toggle-add-help"
-                        style="font-size: 0.75rem; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; background: none; border: none; cursor: pointer; padding: 0;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                            <use href="/static/icons.svg#icon-info"></use>
-                        </svg>
-                        How it works
-                    </button>
-                </div>
-                <div id="add-help" class="hidden"
-                    style="margin-bottom: 12px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
-                    <p style="font-weight: 600; margin-bottom: 8px; color: var(--ink-1);">What happens when you paste a
-                        URL</p>
-                    <ol
-                        style="list-style: decimal; padding-left: 16px; display: flex; flex-direction: column; gap: 6px;">
-                        <li><strong>arXiv URL</strong> — fetched directly from arXiv. Full enrichment: figure, citation
-                            count, page count, LLM summary &amp; contributions, author institutions.</li>
-                        <li><strong>bioRxiv URL</strong> — becomes the same paper a bioRxiv crawl would store: DOI, institution
-                            and posting date from bioRxiv, full text (HTML version, else PDF) for the summary, figure 1
-                            (added later by the nightly run if bioRxiv has no HTML version yet), citation count.</li>
-                        <li><strong>Any other URL (PDF, ACL, NeurIPS, blog…)</strong>
-                            <ol
-                                style="list-style: lower-alpha; padding-left: 14px; margin-top: 4px; display: flex; flex-direction: column; gap: 4px;">
-                                <li>HTML page is fetched. If it has an arXiv link that matches the title → treated as
-                                    arXiv paper (full enrichment above).</li>
-                                <li>If no arXiv link but a DOI is present (<code>citation_doi</code> meta tag) →
-                                    Semantic Scholar is queried. If Scholar knows an arXiv preprint for that DOI → full
-                                    arXiv enrichment.</li>
-                                <li>Otherwise arXiv is searched for the page's title; a matching title → full
-                                    arXiv enrichment.</li>
-                                <li>If no arXiv match → stored as a web paper. Title, authors, abstract (from
-                                    <code>citation_abstract</code> only — not site taglines), and the stripped page body
-                                    are extracted. LLM generates a summary from the full page text. No figure, no
-                                    citation count. The PDF (for page count and institutions) is only downloaded from
-                                    open-access hosts (arXiv, bioRxiv, ACL Anthology, PMLR, OpenReview, NeurIPS, CVF,
-                                    AAAI, IJCAI, JMLR). Its DOI (or, without one, a Semantic Scholar title match) makes
-                                    it a seed for the Semantic Scholar recommendations and citations, like an arXiv
-                                    paper.</li>
-                                <li>If the publisher blocks the page (ScienceDirect, Cell, Wiley and others answer
-                                    automated requests with an error page) or it has no abstract → title, abstract and
-                                    authors come from OpenAlex and Crossref via the paper's DOI (for Elsevier links, the
-                                    DOI is found from the article id in the link). No publisher page or PDF is fetched
-                                    for this; the summary is then made from the abstract.</li>
-                            </ol>
-                        </li>
-                    </ol>
-                    <p style="margin-top: 8px; color: var(--ink-3);">All papers are tagged <em>Important</em> on add and
-                        skip LLM screening.</p>
-                </div>
-                <script>
-                    document.getElementById('toggle-add-help').addEventListener('click', function () {
-                        const h = document.getElementById('add-help');
-                        h.classList.toggle('hidden');
-                        this.style.color = h.classList.contains('hidden') ? 'var(--ink-3)' : 'var(--ink-1)';
-                    });
-                </script>
-                <form action="/projects/{{ project.slug }}/collection-add" method="POST">
-                    <div class="flex flex-col sm:flex-row gap-3">
-                        <input type="url" name="url" placeholder="Paste any URL — arXiv, ACL, NeurIPS, blog…"
-                            style="flex: 1 1 auto; min-width: 0; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 16px; color: var(--ink-1); outline: none;">
-                        <button class="focus-ring" type="submit" data-tip="Adds the paper to My Collection, tagged &quot;important&quot;"
-                            style="height: var(--button-height); padding: 0 24px; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; white-space: nowrap;">
-                            Add
-                        </button>
-                    </div>
-                </form>
-                {% if request.args.get('add_info') == 'already_exists' %}
-                <p
-                    style="font-size: 0.8rem; color: var(--warning); margin-top: 8px; padding: 8px 12px; background-color: color-mix(in oklch, var(--warning) 12%, var(--paper-2)); border: 1px solid color-mix(in oklch, var(--warning) 40%, transparent); border-radius: var(--radius-md); font-weight: 500;">
-                    ⚠ This paper is already in My Collection.</p>
-                {% elif request.args.get('add_info') == 'non_arxiv' %}
-                <p
-                    style="font-size: 0.8rem; color: var(--ink-2); margin-top: 8px; padding: 8px 12px; background-color: var(--paper-3); border-radius: var(--radius-md);">
-                    Non-arXiv URL added — fetching metadata in background.</p>
-                {% endif %}
-            </div>
-
-            <div
-                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
-                    <h2
-                        style="font-size: 1.125rem; font-weight: 600; color: var(--ink-1); display: inline-flex; align-items: center; gap: 8px;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                            <use href="/static/icons.svg#icon-book"></use>
-                        </svg>
-                        All Papers ({{ new_papers|length + curated_papers|length }})
-                    </h2>
-                    <div class="flex items-center gap-2" style="flex-shrink: 0;">
-                        <a href="/project/{{ project.slug }}/export.csv" download data-tip="New Papers and My Collection (not Trash) as CSV: title, authors, link, tag, abstract"
-                            class="focus-ring"
-                            style="height: var(--input-height); padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 600; color: var(--ink-2); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); text-decoration: none; white-space: nowrap;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                <use href="/static/icons.svg#icon-download"></use>
-                            </svg>
-                            CSV
-                        </a>
-                        <input type="text" name="search" placeholder="Search..." value="{{ search_query or '' }}"
-                            hx-get="/projects/{{ project.slug }}/papers" hx-target="#paper-list"
-                            hx-trigger="keyup changed delay:300ms"
-                            style="height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 12px; color: var(--ink-1); font-size: 0.875rem; width: 200px; outline: none;">
-                    </div>
-                </div>
+    {# Project header: the settings shrink to chips; each opens its side panel (drawers below) #}
+    {% set _usage_total = usage.values() | sum %}
+    <div class="pd-head">
+        <button type="button" class="pd-ri focus-ring" onclick="openDrawer('settings', 'research-form')" data-tip="Research interest: the AI checks every new paper against it. Click to edit.">
+            <span class="pd-label">Research interest</span>
+            <span class="pd-ri-text">{{ project.research_interest or "None yet: click to write one" }}</span>
+        </button>
+        <div class="pd-chips">
+            <button type="button" class="pd-chip focus-ring" onclick="openDrawer('settings', 'crawl-section-{{ project.id }}')"
+                data-tip="{% if project.crawl_hour %}The nightly crawl runs at {{ '%02d:00' | format(project.crawl_hour) }} UTC{% else %}The nightly crawl is off{% endif %}">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-calendar"></use></svg>
+                {% if project.crawl_hour %}Nightly {{ '%02d:00' | format(project.crawl_hour) }}{% else %}<span style="color: var(--error);">Nightly off</span>{% endif %}
+            </button>
+            <button type="button" class="pd-chip focus-ring" onclick="openDrawer('find', 'keyword-list')" data-tip="Search keywords: what arXiv and bioRxiv are searched for">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-tag"></use></svg>
+                {{ project.saved_keywords_list | length }} keywords
+            </button>
+            {% if project.per_person %}
+            <button type="button" class="pd-chip focus-ring" onclick="openDrawer('settings', 'people-settings')" data-tip="{{ people | map(attribute='name') | join(', ') }}">
+                {% for m in people %}<span class="pd-dot" style="background: {{ m.color }};"></span>{% endfor %}
+                {{ people | length }} people
+            </button>
+            {% endif %}
+            <button type="button" class="pd-chip focus-ring" onclick="openDrawer('settings', 'usage-panel')" data-tip="LLM usage of this project so far, at {{ cost_comparison_model }} pricing, for comparison">
+                €{{ _usage_total | est_cost }}
+            </button>
+        </div>
+        <div class="pd-actions">
+            <button type="button" class="focus-ring pd-btn pd-btn-accent" onclick="openDrawer('find')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-search"></use></svg>
+                Find papers
+            </button>
+            <button type="button" class="focus-ring pd-btn" onclick="openDrawer('add')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-plus"></use></svg>
+                Add paper
+            </button>
+            <button type="button" class="focus-ring pd-btn" onclick="openDrawer('settings')" aria-label="Settings" data-tip="Settings: research interest, people, email, nightly crawl, LLM usage">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-settings"></use></svg>
+            </button>
+        </div>
+    </div>
 
                 {% with state=rescreen if rescreen and rescreen.status == 'running' else None %}
                 {% include "partials/rescreen_status.html" %}
@@ -438,17 +142,53 @@
                 <script>
                 window._paperFocus = {{ state.focus }};
                 document.addEventListener('DOMContentLoaded', function () {
-                    var el = document.querySelector('[data-pp-card="{{ focus_pp.id if focus_pp else '' }}"], [data-pp-row="{{ focus_pp.id if focus_pp else '' }}"]');
+                    var el = document.querySelector('[data-pp-card="{{ focus_pp.id if focus_pp else '' }}"]');
                     if (!el) return;
-                    showPaperTab({{ ('"' ~ focus_sec ~ '"') if focus_sec else 'null' }} || 'new');
+                    showPaperTab({{ focus_sec | tojson }} || 'new');
                     el.classList.add('paper-focused');
                     el.scrollIntoView({ block: 'center' });
                 });
                 </script>
                 {% endif %}
-                <div id="paper-list">
-                    {% include "partials/paper_list.html" %}
-                </div>
+    {# Progress of a crawl started from Find papers (polled; filled by the scripts in the Find papers panel) #}
+    <div id="crawl-status-container"></div>
+
+    {# Inbox: the title list on the left, the chosen paper's card on the right (one at a time). The list is
+       built from the loaded cards by the inbox script at the end of this page. #}
+    <div class="inbox">
+        <div class="inbox-side">
+            <div class="paper-tabs" role="tablist" aria-label="Paper lists">
+                <button type="button" role="tab" class="paper-tab focus-ring" data-tab="new" style="--tab-color: var(--accent);" onclick="showPaperTab('new')">
+                    New <span id="new-count" class="paper-tab-count">{{ s.new|length }}</span>
+                    {% if me %}<span class="paper-tab-who" style="--who: {{ me.color }};" data-tip="Your own New Papers, {{ me.name }}" aria-label="for {{ me.name }}"></span>{% endif %}
+                </button>
+                <button type="button" role="tab" class="paper-tab focus-ring" data-tab="col" style="--tab-color: var(--success);" onclick="showPaperTab('col')">
+                    My Collection <span id="col-count" class="paper-tab-count">{{ s.col_total }}</span>
+                </button>
+                <button type="button" role="tab" class="paper-tab focus-ring" data-tab="trash" style="--tab-color: var(--error);" onclick="showPaperTab('trash')">
+                    Trash <span id="trash-count" class="paper-tab-count">{{ s.trash|length }}</span>
+                </button>
+            </div>
+            <div class="inbox-search">
+                <input type="text" name="search" placeholder="Search titles, authors, notes…" value="{{ search_query or '' }}"
+                    hx-get="/projects/{{ project.slug }}/papers" hx-target="#paper-list"
+                    hx-trigger="keyup changed delay:300ms" class="focus-ring">
+                <a href="/project/{{ project.slug }}/export.csv" download class="focus-ring inbox-csv"
+                    data-tip="New Papers and My Collection (not Trash) as CSV: title, authors, link, tag, abstract">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-download"></use></svg>
+                    CSV
+                </a>
+            </div>
+            <div id="inbox-tools"></div>
+            <div id="inbox-list" role="listbox" aria-label="Papers"></div>
+            <div class="inbox-keys"><kbd>J</kbd><kbd>K</kbd> next / previous <kbd>C</kbd> to My Collection <kbd>X</kbd> trash <kbd>/</kbd> search</div>
+        </div>
+        <div class="inbox-main">
+            <div id="paper-list">
+                {% include "partials/paper_list.html" %}
+            </div>
+        </div>
+    </div>
                 <script>
                 (function() {
                     function initNotesResize(textarea) {
@@ -483,161 +223,22 @@
 
                 })();
                 </script>
-            </div>
-        </div>
 
-        <div class="sidebar-col">
-            {% include "partials/_people_settings.html" %}
-            <div
-                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
-                <h2
-                    style="font-size: 1rem; font-weight: 600; color: var(--ink-1); display: inline-flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"
-                        style="color: var(--accent);">
-                        <use href="/static/icons.svg#icon-mail"></use>
-                    </svg>
-                    Notifications and Nightly Crawl
-                </h2>
+    {# Phone: the two triage actions of the card shown, always in reach #}
+    <div class="mobile-triage">
+        <button type="button" class="focus-ring card-act card-act-trash" onclick="inboxAct('trash')">Trash</button>
+        <button type="button" class="focus-ring card-act card-act-keep mobile-keep" onclick="inboxAct('keep')">To My Collection</button>
+        <button type="button" class="focus-ring card-act card-act-keep mobile-restore" onclick="inboxAct('restore')">Restore</button>
+    </div>
+</div>
 
-                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: 8px;">Email when new papers are found
-                </p>
-                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: 8px;">Sender: <span
-                        style="color: var(--accent-muted);">{{ notification_sender }}</span></p>
-                <div>
-                    <input type="text" id="notification-emails-{{ project.id }}" placeholder="your@email.com"
-                        value="{{ project.notification_emails or '' }}" oninput="setEmailDirty('{{ project.id }}')"
-                        style="width: 100%; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 12px; color: var(--ink-1); margin-bottom: 8px; outline: none;">
-                    <div id="notification-emails-tags-{{ project.id }}" class="flex flex-wrap gap-1"
-                        style="margin-bottom: 8px;">
-                        {% for _email in (project.notification_emails or '').split(',') %}
-                        {% if _email.strip() %}
-                        <span
-                            style="padding: 2px 8px; font-size: 0.75rem; background-color: color-mix(in oklch, var(--accent) 20%, var(--paper-2)); color: var(--ink-2); border-radius: 9999px;">{{
-                            _email.strip() }}</span>
-                        {% endif %}
-                        {% endfor %}
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <span id="email-save-status-{{ project.id }}"
-                            style="font-size: 0.75rem; color: var(--ink-4); min-height: 1lh;">Separate multiple with
-                            commas</span>
-                        <button type="button" id="email-save-btn-{{ project.id }}" class="focus-ring" disabled
-                            onclick="saveNotificationEmails('{{ project.slug }}', '{{ project.id }}')"
-                            style="height: var(--button-height); padding: 0 20px; min-width: 90px; white-space: nowrap; background-color: var(--paper-3); color: var(--ink-4); border-radius: var(--radius-md); border: 1px solid var(--border-default); font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.55; cursor: not-allowed;">
-                            Save
-                        </button>
-                    </div>
-                </div>
-                <script>
-                    (function () {
-                        let _emailSaved = {{ (project.notification_emails or '') | tojson
-                    }};
-                    function setEmailDirty(pid) {
-                        const input = document.getElementById('notification-emails-' + pid);
-                        const btn = document.getElementById('email-save-btn-' + pid);
-                        const dirty = input.value !== _emailSaved;
-                        btn.disabled = !dirty;
-                        btn.style.backgroundColor = dirty ? 'var(--accent)' : 'var(--paper-3)';
-                        btn.style.color = dirty ? 'var(--accent-ink)' : 'var(--ink-4)';
-                        btn.style.opacity = dirty ? '1' : '0.55';
-                        btn.style.cursor = dirty ? 'pointer' : 'not-allowed';
-                    }
-                    window.setEmailDirty = setEmailDirty;
-                    function renderEmailTags(pid, emailsCsv) {
-                        const wrap = document.getElementById('notification-emails-tags-' + pid);
-                        const parsed = (emailsCsv || '').split(',').map(s => s.trim()).filter(Boolean);
-                        wrap.innerHTML = parsed.map(e =>
-                            '<span style="padding: 2px 8px; font-size: 0.75rem; background-color: color-mix(in oklch, var(--accent) 20%, var(--paper-2)); color: var(--ink-2); border-radius: 9999px;">'
-                            + e.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>'
-                        ).join('');
-                    }
-                    function saveNotificationEmails(slug, pid) {
-                        const input = document.getElementById('notification-emails-' + pid);
-                        const btn = document.getElementById('email-save-btn-' + pid);
-                        const status = document.getElementById('email-save-status-' + pid);
-                        btn.disabled = true;
-                        const body = new URLSearchParams({ notification_emails: input.value });
-                        fetch('/projects/' + slug + '/notification-emails', { method: 'POST', body, headers: { 'HX-Request': 'true' } })
-                            .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); }).then(msg => {
-                                if (msg.toLowerCase().includes('invalid')) {
-                                    status.innerHTML = '<span style="color:var(--error);font-size:0.75rem;">' + msg.replace(/<[^>]+>/g, '') + '</span>';
-                                    btn.disabled = false;
-                                    btn.style.backgroundColor = 'var(--accent)'; btn.style.color = 'var(--accent-ink)';
-                                    btn.style.opacity = '1'; btn.style.cursor = 'pointer';
-                                } else {
-                                    _emailSaved = input.value;
-                                    htmx.trigger(document.body, 'crawlSetupChanged');  // the "To turn it on" checklist
-                                    status.innerHTML = '';
-                                    renderEmailTags(pid, input.value);
-                                    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
-                                    btn.style.opacity = '0.55'; btn.style.cursor = 'not-allowed';
-                                    setTimeout(() => { btn.textContent = 'Save'; setEmailDirty(pid); }, 2000);
-                                }
-                            }).catch(() => {
-                                status.innerHTML = '<span style="color:var(--error);font-size:0.75rem;">Not saved — check your connection and try again</span>';
-                                setEmailDirty(pid);
-                            });
-                    }
-                    window.saveNotificationEmails = saveNotificationEmails;
-                    }) ();
-                </script>
-
-                <hr style="border-color: var(--border-subtle); margin: 12px 0;">
-
-                {# What is still missing is listed in the banner at the top (partials/crawl_banner.html); the
-                   server refuses to switch on without a research interest and keywords. #}
-                <div id="crawl-section-{{ project.id }}">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                    <span style="font-size: 0.75rem; color: var(--ink-3);">Nightly crawl</span>
-                    <button type="button" id="crawl-toggle-btn-{{ project.id }}"
-                        hx-post="/projects/{{ project.slug }}/toggle-nightly-crawl" hx-target="#crawl-schedule-text"
-                        hx-swap="outerHTML"
-                        hx-on::after-request="onCrawlToggle(event, '{{ project.id }}')"
-                        style="position: relative; width: 40px; height: 22px; border-radius: 22px; border: none; cursor: pointer; padding: 0;
-                            background-color: {% if project.crawl_hour %}var(--accent){% else %}var(--border-default){% endif %}; transition: background-color 0.2s;"
-                        data-on="{{ 'true' if project.crawl_hour else 'false' }}">
-                        <span style="position: absolute; height: 16px; width: 16px; background-color: white; border-radius: 50%;
-                            top: 3px; transition: left 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-                            left: {% if project.crawl_hour %}21px{% else %}3px{% endif %};"
-                            id="crawl-toggle-knob-{{ project.id }}"></span>
-                    </button>
-                </div>
-                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: 0;">
-                    {% if project.crawl_hour %}
-                    <span id="crawl-schedule-text">Daily at {{ "%02d:00"|format(project.crawl_hour) }} UTC</span>
-                    {% else %}
-                    <span id="crawl-schedule-text" style="color:var(--ink-4);">Off</span>
-                    {% endif %}
-                    <span style="color: var(--ink-5);">&nbsp;· spread across 01–04 UTC</span>
-                </p>
-                <label data-tip="Also search bioRxiv in the nightly crawl, and have it ticked in Find Papers"
-                    style="display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.75rem; color: var(--ink-3); cursor: pointer; user-select: none;">
-                    <input type="checkbox" {% if project.use_biorxiv %}checked{% endif %}
-                        onchange="fetch('/projects/{{ project.slug }}/toggle-biorxiv', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'enabled=' + (this.checked ? '1' : '0')}).then(function (r) { if (!r.ok) alert('Could not save this setting.'); })"
-                        style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
-                    <span>Also search bioRxiv</span>
-                </label>
-                </div>
-                <script>
-                    function onCrawlToggle(event, pid) {
-                        // Only flip the visual toggle if the server accepted the request.
-                        // On error the server returns a data-error span — leave the knob alone.
-                        // No connection / server error: nothing was swapped and nothing changed server-side.
-                        if (!event.detail.successful) return;
-                        var el = document.getElementById('crawl-schedule-text');
-                        if (el && el.dataset.error) return;
-                        var btn = document.getElementById('crawl-toggle-btn-' + pid);
-                        var knob = document.getElementById('crawl-toggle-knob-' + pid);
-                        if (!btn || !knob) return;
-                        var nowOn = btn.dataset.on !== 'true';
-                        btn.dataset.on = nowOn ? 'true' : 'false';
-                        btn.style.backgroundColor = nowOn ? 'var(--accent)' : 'var(--border-default)';
-                        knob.style.left = nowOn ? '21px' : '3px';
-                        // The "crawl is off" banner at the top redraws itself (HX-Trigger: crawlSetupChanged)
-                    }
-                </script>
-            </div>
-
+<div class="drawer-backdrop" hidden onclick="closeDrawers()"></div>
+<aside class="drawer" id="drawer-find" hidden aria-label="Find papers">
+    <div class="drawer-head">
+        <h2>Find papers</h2>
+        <button type="button" class="focus-ring drawer-close" aria-label="Close" onclick="closeDrawers()">&times;</button>
+    </div>
+    <div class="drawer-body">
             <!-- Keywords widget — always visible, auto-populated from saved keywords -->
             <div
                 style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
@@ -719,7 +320,6 @@
                     });
                 </script>
             </div>
-
             <!-- Paper Crawler: date range + search + status -->
             <div
                 style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
@@ -931,10 +531,8 @@
                         </div>
                     </div>
 
-                    <div id="crawl-status-container" style="margin-top: 12px;"></div>
                 </div>
             </div>
-
             <div
                 style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-subtle); padding: var(--space-lg);">
                 <h2
@@ -1187,7 +785,7 @@
                                 if (ssCount > 0) parts.push('Semantic Scholar: ' + ssCount);
                                 if (citingCount > 0) parts.push(citingCount + ' cite My Collection');
                                 if (alreadyKnown > 0) parts.push(alreadyKnown + ' already in project (skipped)');
-                                sourceNote = '<p style="font-size:0.7rem;color:var(--ink-4);margin-bottom:8px;">' + parts.join(' · ') + '</p>';
+                                sourceNote = '<p style="font-size:0.7rem;color:var(--ink-4);margin-bottom:8px;">' + parts.join(', ') + '</p>';
                                 if (previouslyRejected > 0) {
                                     sourceNote += '<p style="font-size:0.7rem;color:var(--ink-4);margin-bottom:8px;">' + previouslyRejected +
                                         ' previously rejected</p>';
@@ -1236,8 +834,8 @@
                                                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
                                                 _spinnerHtml + ' Waiting for arXiv&hellip; (' + waiters + ' request' + (waiters > 1 ? 's' : '') + ' ahead, ' + s + 's)</div>';
                                         } else {
-                                            const scholarInfo = data.citations ? ' · checking citations of My Collection (' + data.citations + ')…'
-                                                : data.scholar_status === 'running' ? ' · fetching Semantic Scholar…' : '';
+                                            const scholarInfo = data.citations ? ', checking citations of My Collection (' + data.citations + ')…'
+                                                : data.scholar_status === 'running' ? ', fetching Semantic Scholar…' : '';
                                             countContent.innerHTML =
                                                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
                                                 _spinnerHtml + ' Searching ' + sourceLabel + '&hellip; ' + s + 's' + scholarInfo + '</div>';
@@ -1298,6 +896,7 @@
                             .then(html => {
                                 statusContainer.innerHTML = html;
                                 if (typeof htmx !== 'undefined') htmx.process(statusContainer);
+                                closeDrawers();  // the progress shows above the paper list
                                 startCrawlPolling();
                                 if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; }
                             })
@@ -1335,17 +934,8 @@
                                     if (!html.includes('Crawling in progress')) {
                                         clearInterval(crawlPollInterval);
                                         crawlPollInterval = null;
-                                        // Refresh paper list to show newly added papers without full page reload
-                                        fetch('/projects/' + projectSlug + '/papers')
-                                            .then(r => r.text())
-                                            .then(ph => {
-                                                const paperList = document.getElementById('paper-list');
-                                                if (paperList && ph.trim()) {
-                                                    paperList.innerHTML = ph;
-                                                    if (typeof htmx !== 'undefined') htmx.process(paperList);
-                                                }
-                                            })
-                                            .catch(() => { });
+                                        // Refresh the paper list to show newly added papers (htmx, so the tab counts update too)
+                                        htmx.ajax('GET', '/projects/' + projectSlug + '/papers', '#paper-list');
                                     }
                                 })
                                 .catch(() => { });
@@ -1470,15 +1060,15 @@
                             const foundStr = log.papers_found + ' found';
                             const skippedStr = log.papers_found > log.papers_added ? (log.papers_found - log.papers_added) + ' skipped' : '';
                             const addedStr = log.papers_added + ' added';
-                            const counts = [foundStr, skippedStr, addedStr].filter(Boolean).join(' · ');
+                            const counts = [foundStr, skippedStr, addedStr].filter(Boolean).join(', ');
                             const srcs = (log.sources_used || 'arxiv,ss').split(',');
                             const srcLabels = srcs.map(s => s === 'arxiv' ? 'arXiv' : s === 'biorxiv' ? 'bioRxiv' : (s === 'ss' || s === 'semantic_scholar') ? 'Semantic Scholar' : s === 'citations' ? 'citations' : s).join(' + ');
                             html += '<div style="background-color: var(--paper-3); border-radius: var(--radius-sm); padding: 8px; font-size: 0.75rem; color: var(--ink-2); margin-bottom: 4px;">'
                                 + '<span style="color: ' + statusColor + '; font-weight: 600;">' + log.status + '</span>'
-                                + ' · <span style="color: ' + triggerColor + '; font-weight: 600;">' + triggerLabel + '</span>'
-                                + ' · ran ' + runDate
-                                + ' · range ' + fmtDate(log.date_from) + ' → ' + fmtDate(log.date_to)
-                                + ' · <span style="color: var(--accent);">' + srcLabels + '</span>'
+                                + ' <span style="color: ' + triggerColor + '; font-weight: 600;">' + triggerLabel + '</span>'
+                                + ', ran ' + runDate
+                                + ', range ' + fmtDate(log.date_from) + ' → ' + fmtDate(log.date_to)
+                                + ', <span style="color: var(--accent);">' + srcLabels + '</span>'
                                 + '<br><span style="color: var(--ink-3);">' + counts + '</span>'
                                 + '</div>';
                         });
@@ -1512,7 +1102,471 @@
                     });
                 </script>
             </div>
+    </div>
+</aside>
+<aside class="drawer" id="drawer-add" hidden aria-label="Add paper">
+    <div class="drawer-head">
+        <h2>Add paper</h2>
+        <button type="button" class="focus-ring drawer-close" aria-label="Close" onclick="closeDrawers()">&times;</button>
+    </div>
+    <div class="drawer-body">
+            <div
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2">
+                    <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--ink-1);">Add to My Collection</h2>
+                    <button type="button" id="toggle-add-help"
+                        style="font-size: 0.75rem; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; background: none; border: none; cursor: pointer; padding: 0;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <use href="/static/icons.svg#icon-info"></use>
+                        </svg>
+                        How it works
+                    </button>
+                </div>
+                <div id="add-help" class="hidden"
+                    style="margin-bottom: 12px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
+                    <p style="font-weight: 600; margin-bottom: 8px; color: var(--ink-1);">What happens when you paste a
+                        URL</p>
+                    <ol
+                        style="list-style: decimal; padding-left: 16px; display: flex; flex-direction: column; gap: 6px;">
+                        <li><strong>arXiv URL</strong> — fetched directly from arXiv. Full enrichment: figure, citation
+                            count, page count, LLM summary &amp; contributions, author institutions.</li>
+                        <li><strong>bioRxiv URL</strong> — becomes the same paper a bioRxiv crawl would store: DOI, institution
+                            and posting date from bioRxiv, full text (HTML version, else PDF) for the summary, figure 1
+                            (added later by the nightly run if bioRxiv has no HTML version yet), citation count.</li>
+                        <li><strong>Any other URL (PDF, ACL, NeurIPS, blog…)</strong>
+                            <ol
+                                style="list-style: lower-alpha; padding-left: 14px; margin-top: 4px; display: flex; flex-direction: column; gap: 4px;">
+                                <li>HTML page is fetched. If it has an arXiv link that matches the title → treated as
+                                    arXiv paper (full enrichment above).</li>
+                                <li>If no arXiv link but a DOI is present (<code>citation_doi</code> meta tag) →
+                                    Semantic Scholar is queried. If Scholar knows an arXiv preprint for that DOI → full
+                                    arXiv enrichment.</li>
+                                <li>Otherwise arXiv is searched for the page's title; a matching title → full
+                                    arXiv enrichment.</li>
+                                <li>If no arXiv match → stored as a web paper. Title, authors, abstract (from
+                                    <code>citation_abstract</code> only — not site taglines), and the stripped page body
+                                    are extracted. LLM generates a summary from the full page text. No figure, no
+                                    citation count. The PDF (for page count and institutions) is only downloaded from
+                                    open-access hosts (arXiv, bioRxiv, ACL Anthology, PMLR, OpenReview, NeurIPS, CVF,
+                                    AAAI, IJCAI, JMLR). Its DOI (or, without one, a Semantic Scholar title match) makes
+                                    it a seed for the Semantic Scholar recommendations and citations, like an arXiv
+                                    paper.</li>
+                                <li>If the publisher blocks the page (ScienceDirect, Cell, Wiley and others answer
+                                    automated requests with an error page) or it has no abstract → title, abstract and
+                                    authors come from OpenAlex and Crossref via the paper's DOI (for Elsevier links, the
+                                    DOI is found from the article id in the link). No publisher page or PDF is fetched
+                                    for this; the summary is then made from the abstract.</li>
+                            </ol>
+                        </li>
+                    </ol>
+                    <p style="margin-top: 8px; color: var(--ink-3);">All papers are tagged <em>Important</em> on add and
+                        skip LLM screening.</p>
+                </div>
+                <script>
+                    document.getElementById('toggle-add-help').addEventListener('click', function () {
+                        const h = document.getElementById('add-help');
+                        h.classList.toggle('hidden');
+                        this.style.color = h.classList.contains('hidden') ? 'var(--ink-3)' : 'var(--ink-1)';
+                    });
+                </script>
+                <form action="/projects/{{ project.slug }}/collection-add" method="POST">
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <input type="url" name="url" placeholder="Paste any URL — arXiv, ACL, NeurIPS, blog…"
+                            style="flex: 1 1 auto; min-width: 0; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 16px; color: var(--ink-1); outline: none;">
+                        <button class="focus-ring" type="submit" data-tip="Adds the paper to My Collection, tagged &quot;important&quot;"
+                            style="height: var(--button-height); padding: 0 24px; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; white-space: nowrap;">
+                            Add
+                        </button>
+                    </div>
+                </form>
+                {% if request.args.get('add_info') == 'already_exists' %}
+                <p
+                    style="font-size: 0.8rem; color: var(--warning); margin-top: 8px; padding: 8px 12px; background-color: color-mix(in oklch, var(--warning) 12%, var(--paper-2)); border: 1px solid color-mix(in oklch, var(--warning) 40%, transparent); border-radius: var(--radius-md); font-weight: 500;">
+                    ⚠ This paper is already in My Collection.</p>
+                {% elif request.args.get('add_info') == 'non_arxiv' %}
+                <p
+                    style="font-size: 0.8rem; color: var(--ink-2); margin-top: 8px; padding: 8px 12px; background-color: var(--paper-3); border-radius: var(--radius-md);">
+                    Non-arXiv URL added — fetching metadata in background.</p>
+                {% endif %}
+            </div>
+    </div>
+</aside>
+<aside class="drawer" id="drawer-settings" hidden aria-label="Settings">
+    <div class="drawer-head">
+        <h2>Settings</h2>
+        <button type="button" class="focus-ring drawer-close" aria-label="Close" onclick="closeDrawers()">&times;</button>
+    </div>
+    <div class="drawer-body">
+            <div
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;"
+                    class="sm:flex-row sm:items-center justify-between mb-4 gap-2">
+                    <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--ink-1);">Research Interest</h2>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <button type="button" id="toggle-ri-help"
+                            style="font-size: 0.75rem; color: var(--ink-3); background: none; border: none; cursor: pointer; padding: 0 4px; display: inline-flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <use href="/static/icons.svg#icon-info"></use>
+                            </svg>
+                            How it works</button>
+                        <button class="focus-ring" type="button" id="generate-btn"
+                            style="font-size: 0.75rem; color: var(--accent); height: var(--button-height); padding: 0 12px; border-radius: var(--radius-md); background-color: color-mix(in oklch, var(--accent) 12%, var(--paper-2)); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent); cursor: pointer; width: fit-content; display: inline-flex; align-items: center; gap: 6px; transition: background-color 150ms ease, color 150ms ease;"
+                            data-tip="Let AI generate or improve the research interest from My Collection papers"
+                            onmouseover="if(!this.disabled) { this.style.backgroundColor='color-mix(in oklch, var(--accent) 22%, var(--paper-2))'; }"
+                            onmouseout="if(!this.disabled) { this.style.backgroundColor='color-mix(in oklch, var(--accent) 12%, var(--paper-2))'; }"
+                            onclick="generateResearchInterest()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <use href="/static/icons.svg#icon-sparkles"></use>
+                            </svg>
+                            Generate
+                        </button>
+                    </div>
+                </div>
+                <form action="/projects/{{ project.slug }}/research-interest" method="POST" id="research-form">
+                    <textarea class="focus-ring" name="research_interest" id="research-interest-field" rows="7"
+                        placeholder="Describe what you're working on. The AI will use this to find relevant papers."
+                        style="width: 100%; background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 12px 16px; color: var(--ink-1); outline: none; min-height: 140px; resize: vertical;"
+                        oninput="checkDirty()">{{ project.research_interest or "" }}</textarea>
+                    <div class="flex justify-between items-center mt-3">
+                        <p class="text-xs" id="ri-count" style="color: var(--ink-4); min-height: 1lh;"></p>
+                        <button class="focus-ring" type="submit" id="save-btn"
+                            style="height: var(--button-height); padding: 0 24px; min-width: 90px; white-space: nowrap; background-color: var(--paper-3); color: var(--ink-4); border-radius: var(--radius-md); border: 1px solid var(--border-default); display: inline-flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.55; cursor: not-allowed;"
+                            disabled aria-disabled="true">
+                            Save
+                        </button>
+                    </div>
+                </form>
+                {# Re-screen New Papers against the saved interest; its progress shows above the paper list #}
+                <div style="display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+                    {% if project.research_interest %}
+            <button type="button" class="focus-ring rw-chip-btn section-tool" id="rescreen-btn" hx-on::after-request="closeDrawers()"
+                data-tip="For everyone in this project: re-checks every paper in New Papers against the saved research interest and My Collection, with the same two-step screen a crawl uses. Papers that no longer fit go to Trash (restorable); papers someone voted on, wrote notes on or asked the chat about are left alone."
+                hx-post="/projects/{{ project.slug }}/rescreen" hx-target="#rescreen-status" hx-swap="outerHTML"
+                hx-confirm="Re-screen New Papers for everyone in this project, against the saved research interest? Papers that no longer fit move to Trash (you can restore them). Papers already screened against this exact interest and collection are skipped, and so are papers someone voted on, wrote notes on or asked the chat about.">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-rotate-ccw"></use></svg>
+                Re-screen
+            </button>
+            {% endif %}
+                    <span style="font-size: 0.72rem; color: var(--ink-4);">Changed the interest? Check New Papers against it again.</span>
+                </div>
+                <script>
+                    const saveBtn = document.getElementById('save-btn');
+                    const riField = document.getElementById('research-interest-field');
+                    // Read back from the field, not the raw DB string: browsers turn \r\n into \n in a
+                    // textarea, so a stored interest with \r\n would otherwise always look unsaved.
+                    let _riSavedValue = riField.value;
+                    const riForm = document.getElementById('research-form');
 
+                    function _setSaveBtnState(dirty) {
+                        saveBtn.disabled = !dirty;
+                        saveBtn.setAttribute('aria-disabled', dirty ? 'false' : 'true');
+                        saveBtn.style.backgroundColor = dirty ? 'var(--accent)' : 'var(--paper-3)';
+                        saveBtn.style.color = dirty ? 'var(--accent-ink)' : 'var(--ink-4)';
+                        saveBtn.style.opacity = dirty ? '1' : '0.55';
+                        saveBtn.style.cursor = dirty ? 'pointer' : 'not-allowed';
+                        if (!dirty) saveBtn.textContent = 'Save';
+                    }
+
+                    // Same limit as the server (RESEARCH_INTEREST_MAX_CHARS). No maxlength on the field: it would
+                    // cut a pasted text off without telling anyone.
+                    const RI_MAX = {{ research_interest_max }};
+                    const riCount = document.getElementById('ri-count');
+
+                    function checkDirty() {
+                        const n = Array.from(riField.value.trim()).length;
+                        const over = n > RI_MAX;
+                        riCount.textContent = over
+                            ? 'Too long: ' + n.toLocaleString('en') + ' / ' + RI_MAX.toLocaleString('en') + ' characters. Shorten it, or press Generate to condense it.'
+                            : n.toLocaleString('en') + ' / ' + RI_MAX.toLocaleString('en') + ' characters. The AI checks every new paper against this.';
+                        riCount.style.color = over ? 'var(--error)' : 'var(--ink-4)';
+                        _setSaveBtnState(riField.value !== _riSavedValue && !over);
+                    }
+                    checkDirty();
+
+                    function saveResearchInterest(value, onDone, onFail) {
+                        const fd = new FormData();
+                        fd.append('research_interest', value);
+                        function failed(reason, message) {
+                            // The field stays dirty, so Save stays active for a retry (unless the text is too long)
+                            checkDirty();
+                            if (!saveBtn.disabled) saveBtn.innerHTML = _xSvg + ' Not saved';
+                            showToast(message || ('Research interest ' + reason + ' — it was NOT saved. Click Save again once you\'re back online.'));
+                            if (onFail) onFail();
+                        }
+                        fetch(riForm.action, {
+                            method: 'POST',
+                            headers: { 'X-Requested-With': 'fetch' },
+                            body: fd,
+                        }).then(r => {
+                            if (r.ok && !r.redirected) {
+                                _riSavedValue = value;
+                                htmx.trigger(document.body, 'crawlSetupChanged');  // the "To turn it on" checklist
+                                _setSaveBtnState(false);
+                                saveBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
+                                setTimeout(() => { saveBtn.textContent = 'Save'; }, 2000);
+                                if (onDone) onDone();
+                            } else if (r.status === 400) {
+                                r.text().then(t => failed('', t + ' It was NOT saved.'));
+                            } else {
+                                failed(r.redirected ? '(logged out)' : '(server error ' + r.status + ')');
+                            }
+                        }).catch(() => failed('(no connection)'));
+                    }
+                    unsavedChecks.push(() => riField.value !== _riSavedValue);
+
+                    riForm.addEventListener('submit', function (e) {
+                        e.preventDefault();
+                        saveResearchInterest(riField.value);
+                    });
+
+                    const _genOrigHtml = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-sparkles"></use></svg> Generate';
+                    const _checkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg>';
+                    const _xSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-x"></use></svg>';
+
+                    // Shared animated loading helper. Returns a stop() function.
+                    function startGeneratingAnim(btnEl, opts) {
+                        opts = opts || {};
+                        const label = opts.label || 'Generating';
+                        const estimate = opts.estimate || '10–15s';
+                        const spinner = '<div style="width:12px;height:12px;border-radius:50%;border:2px solid rgba(128,128,128,0.25);border-top-color:currentColor;animation:spin 0.75s linear infinite;flex-shrink:0;display:inline-block;vertical-align:middle;"></div>';
+                        const t0 = Date.now();
+                        function render() {
+                            const secs = Math.floor((Date.now() - t0) / 1000);
+                            const timer = ' <span style="opacity:0.5;font-size:0.82em;">(' + secs + 's / ~' + estimate + ')</span>';
+                            btnEl.innerHTML = spinner + ' ' + label + '...' + timer;
+                        }
+                        render();
+                        const iv = setInterval(render, 1000);
+                        return function () { clearInterval(iv); };
+                    }
+
+                    function generateResearchInterest() {
+                        const btn = document.getElementById('generate-btn');
+                        btn.disabled = true;
+                        btn.style.opacity = '0.7';
+                        const stopAnim = startGeneratingAnim(btn, { estimate: '10–15s' });
+
+                        const existingText = riField.value.trim();
+                        fetch('/projects/{{ project.slug }}/generate-research-interest', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ existing_text: existingText })
+                        })
+                            .then(r => r.json())
+                            .then(d => {
+                                stopAnim();
+                                if (d.research_interest) {
+                                    riField.value = d.research_interest;
+                                    btn.innerHTML = _checkSvg + ' Saving...';
+                                    saveResearchInterest(d.research_interest, () => {
+                                        btn.innerHTML = _checkSvg + ' Generated & saved';
+                                        setTimeout(() => {
+                                            btn.innerHTML = _genOrigHtml;
+                                            btn.disabled = false;
+                                            btn.style.opacity = '1';
+                                        }, 2000);
+                                    }, () => {
+                                        btn.innerHTML = _genOrigHtml;
+                                        btn.disabled = false;
+                                        btn.style.opacity = '1';
+                                    });
+                                } else {
+                                    btn.innerHTML = _xSvg + ' ' + (d.error || 'Error');
+                                    btn.disabled = false;
+                                    btn.style.opacity = '1';
+                                    setTimeout(() => { btn.innerHTML = _genOrigHtml; }, 3000);
+                                }
+                            })
+                            .catch(() => {
+                                stopAnim();
+                                btn.innerHTML = _xSvg + ' Error';
+                                btn.disabled = false;
+                                btn.style.opacity = '1';
+                                setTimeout(() => { btn.innerHTML = _genOrigHtml; }, 2000);
+                            });
+                    }
+                </script>
+
+                <div id="ri-help" class="hidden"
+                    style="margin-top: 10px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
+                    <p style="font-weight: 600; margin-bottom: 6px; color: var(--ink-1);">How research interest
+                        generation works</p>
+                    <p>If you already have text in the box, Generate <strong>refines your existing
+                            description</strong> into at most about 300 words (a longer text gets condensed), using papers in My Collection as silent background context — the
+                        output will not mention specific papers or authors, only ideas, problems, methods, and goals.
+                    </p>
+                    <p style="margin-top: 6px;">If the box is empty, the LLM reads <strong>titles and abstracts of all
+                            papers in My Collection</strong> (up to {{ reference_papers_limit }}, priority-ordered by tag) and
+                        writes a research interest from scratch (at most about 300 words).</p>
+                    <p style="margin-top: 6px;">The research interest goes into every screening prompt, so it is
+                        limited to {{ "{:,}".format(research_interest_max) }} characters.</p>
+                    <p style="margin-top: 6px;">Only My Collection is used: New Papers and Trash are ignored.</p>
+                    <p style="margin-top: 6px; color: var(--ink-4);">Tip: the more diverse and well-tagged your
+                        collection, the more precise the generated description.</p>
+                    <button type="button" onclick="document.getElementById('prompt-ri').classList.toggle('hidden')"
+                        style="margin-top: 6px; font-size: 0.7rem; color: var(--accent-muted); text-decoration: underline; background: none; border: none; cursor: pointer; padding: 0;">show
+                        prompt</button>
+                    <pre id="prompt-ri" class="hidden"
+                        style="margin-top: 6px; white-space: pre-wrap; font-size: 0.68rem; background-color: var(--paper-2); border-radius: 4px; padding: 8px; color: var(--ink-3); font-family: monospace; line-height: 1.4;">{{ prompt_research_interest }}</pre>
+                </div>
+                <script>
+                    document.getElementById('toggle-ri-help').addEventListener('click', function () {
+                        const h = document.getElementById('ri-help');
+                        h.classList.toggle('hidden');
+                        this.style.color = h.classList.contains('hidden') ? 'var(--ink-3)' : 'var(--ink-1)';
+                    });
+                </script>
+            </div>
+            {% include "partials/_people_settings.html" %}
+            <div
+                style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
+                <h2
+                    style="font-size: 1rem; font-weight: 600; color: var(--ink-1); display: inline-flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                        style="color: var(--accent);">
+                        <use href="/static/icons.svg#icon-mail"></use>
+                    </svg>
+                    Notifications and Nightly Crawl
+                </h2>
+
+                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: 8px;">Email when new papers are found
+                </p>
+                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: 8px;">Sender: <span
+                        style="color: var(--accent-muted);">{{ notification_sender }}</span></p>
+                <div>
+                    <input type="text" id="notification-emails-{{ project.id }}" placeholder="your@email.com"
+                        value="{{ project.notification_emails or '' }}" oninput="setEmailDirty('{{ project.id }}')"
+                        style="width: 100%; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 12px; color: var(--ink-1); margin-bottom: 8px; outline: none;">
+                    <div id="notification-emails-tags-{{ project.id }}" class="flex flex-wrap gap-1"
+                        style="margin-bottom: 8px;">
+                        {% for _email in (project.notification_emails or '').split(',') %}
+                        {% if _email.strip() %}
+                        <span
+                            style="padding: 2px 8px; font-size: 0.75rem; background-color: color-mix(in oklch, var(--accent) 20%, var(--paper-2)); color: var(--ink-2); border-radius: 9999px;">{{
+                            _email.strip() }}</span>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span id="email-save-status-{{ project.id }}"
+                            style="font-size: 0.75rem; color: var(--ink-4); min-height: 1lh;">Separate multiple with
+                            commas</span>
+                        <button type="button" id="email-save-btn-{{ project.id }}" class="focus-ring" disabled
+                            onclick="saveNotificationEmails('{{ project.slug }}', '{{ project.id }}')"
+                            style="height: var(--button-height); padding: 0 20px; min-width: 90px; white-space: nowrap; background-color: var(--paper-3); color: var(--ink-4); border-radius: var(--radius-md); border: 1px solid var(--border-default); font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center; gap: 6px; opacity: 0.55; cursor: not-allowed;">
+                            Save
+                        </button>
+                    </div>
+                </div>
+                <script>
+                    (function () {
+                        let _emailSaved = {{ (project.notification_emails or '') | tojson
+                    }};
+                    function setEmailDirty(pid) {
+                        const input = document.getElementById('notification-emails-' + pid);
+                        const btn = document.getElementById('email-save-btn-' + pid);
+                        const dirty = input.value !== _emailSaved;
+                        btn.disabled = !dirty;
+                        btn.style.backgroundColor = dirty ? 'var(--accent)' : 'var(--paper-3)';
+                        btn.style.color = dirty ? 'var(--accent-ink)' : 'var(--ink-4)';
+                        btn.style.opacity = dirty ? '1' : '0.55';
+                        btn.style.cursor = dirty ? 'pointer' : 'not-allowed';
+                    }
+                    window.setEmailDirty = setEmailDirty;
+                    function renderEmailTags(pid, emailsCsv) {
+                        const wrap = document.getElementById('notification-emails-tags-' + pid);
+                        const parsed = (emailsCsv || '').split(',').map(s => s.trim()).filter(Boolean);
+                        wrap.innerHTML = parsed.map(e =>
+                            '<span style="padding: 2px 8px; font-size: 0.75rem; background-color: color-mix(in oklch, var(--accent) 20%, var(--paper-2)); color: var(--ink-2); border-radius: 9999px;">'
+                            + e.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>'
+                        ).join('');
+                    }
+                    function saveNotificationEmails(slug, pid) {
+                        const input = document.getElementById('notification-emails-' + pid);
+                        const btn = document.getElementById('email-save-btn-' + pid);
+                        const status = document.getElementById('email-save-status-' + pid);
+                        btn.disabled = true;
+                        const body = new URLSearchParams({ notification_emails: input.value });
+                        fetch('/projects/' + slug + '/notification-emails', { method: 'POST', body, headers: { 'HX-Request': 'true' } })
+                            .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); }).then(msg => {
+                                if (msg.toLowerCase().includes('invalid')) {
+                                    status.innerHTML = '<span style="color:var(--error);font-size:0.75rem;">' + msg.replace(/<[^>]+>/g, '') + '</span>';
+                                    btn.disabled = false;
+                                    btn.style.backgroundColor = 'var(--accent)'; btn.style.color = 'var(--accent-ink)';
+                                    btn.style.opacity = '1'; btn.style.cursor = 'pointer';
+                                } else {
+                                    _emailSaved = input.value;
+                                    htmx.trigger(document.body, 'crawlSetupChanged');  // the "To turn it on" checklist
+                                    status.innerHTML = '';
+                                    renderEmailTags(pid, input.value);
+                                    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><use href="/static/icons.svg#icon-check"></use></svg> Saved';
+                                    btn.style.opacity = '0.55'; btn.style.cursor = 'not-allowed';
+                                    setTimeout(() => { btn.textContent = 'Save'; setEmailDirty(pid); }, 2000);
+                                }
+                            }).catch(() => {
+                                status.innerHTML = '<span style="color:var(--error);font-size:0.75rem;">Not saved — check your connection and try again</span>';
+                                setEmailDirty(pid);
+                            });
+                    }
+                    window.saveNotificationEmails = saveNotificationEmails;
+                    }) ();
+                </script>
+
+                <hr style="border-color: var(--border-subtle); margin: 12px 0;">
+
+                {# What is still missing is listed in the banner at the top (partials/crawl_banner.html); the
+                   server refuses to switch on without a research interest and keywords. #}
+                <div id="crawl-section-{{ project.id }}">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="font-size: 0.75rem; color: var(--ink-3);">Nightly crawl</span>
+                    <button type="button" id="crawl-toggle-btn-{{ project.id }}"
+                        hx-post="/projects/{{ project.slug }}/toggle-nightly-crawl" hx-target="#crawl-schedule-text"
+                        hx-swap="outerHTML"
+                        hx-on::after-request="onCrawlToggle(event, '{{ project.id }}')"
+                        style="position: relative; width: 40px; height: 22px; border-radius: 22px; border: none; cursor: pointer; padding: 0;
+                            background-color: {% if project.crawl_hour %}var(--accent){% else %}var(--border-default){% endif %}; transition: background-color 0.2s;"
+                        data-on="{{ 'true' if project.crawl_hour else 'false' }}">
+                        <span style="position: absolute; height: 16px; width: 16px; background-color: white; border-radius: 50%;
+                            top: 3px; transition: left 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                            left: {% if project.crawl_hour %}21px{% else %}3px{% endif %};"
+                            id="crawl-toggle-knob-{{ project.id }}"></span>
+                    </button>
+                </div>
+                <p style="font-size: 0.75rem; color: var(--ink-4); margin-bottom: 0;">
+                    {% if project.crawl_hour %}
+                    <span id="crawl-schedule-text">Daily at {{ "%02d:00"|format(project.crawl_hour) }} UTC</span>
+                    {% else %}
+                    <span id="crawl-schedule-text" style="color:var(--ink-4);">Off</span>
+                    {% endif %}
+                    <span style="color: var(--ink-5);">&nbsp;(spread across 01–04 UTC)</span>
+                </p>
+                <label data-tip="Also search bioRxiv in the nightly crawl, and have it ticked in Find Papers"
+                    style="display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.75rem; color: var(--ink-3); cursor: pointer; user-select: none;">
+                    <input type="checkbox" {% if project.use_biorxiv %}checked{% endif %}
+                        onchange="fetch('/projects/{{ project.slug }}/toggle-biorxiv', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'enabled=' + (this.checked ? '1' : '0')}).then(function (r) { if (!r.ok) alert('Could not save this setting.'); })"
+                        style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
+                    <span>Also search bioRxiv</span>
+                </label>
+                </div>
+                <script>
+                    function onCrawlToggle(event, pid) {
+                        // Only flip the visual toggle if the server accepted the request.
+                        // On error the server returns a data-error span — leave the knob alone.
+                        // No connection / server error: nothing was swapped and nothing changed server-side.
+                        if (!event.detail.successful) return;
+                        var el = document.getElementById('crawl-schedule-text');
+                        if (el && el.dataset.error) return;
+                        var btn = document.getElementById('crawl-toggle-btn-' + pid);
+                        var knob = document.getElementById('crawl-toggle-knob-' + pid);
+                        if (!btn || !knob) return;
+                        var nowOn = btn.dataset.on !== 'true';
+                        btn.dataset.on = nowOn ? 'true' : 'false';
+                        btn.style.backgroundColor = nowOn ? 'var(--accent)' : 'var(--border-default)';
+                        knob.style.left = nowOn ? '21px' : '3px';
+                        // The "crawl is off" banner at the top redraws itself (HX-Trigger: crawlSetupChanged)
+                    }
+                </script>
+            </div>
             <div id="usage-panel"
                 style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-subtle); padding: var(--space-lg);">
                 <h2 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 12px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px;"
@@ -1543,12 +1597,9 @@
                 <p style="font-size: 0.8rem; color: var(--ink-4);">No LLM usage yet.</p>
                 {% endif %}
             </div>
-
-        </div>
-    </div>
     {% set _usage_total = usage.values() | sum %}
     <div
-        style="margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+        style="margin-top: 4px; display: flex; align-items: center; gap: 4px 12px; flex-wrap: wrap;">
         <span style="font-size: 0.75rem; color: var(--ink-4); display: inline-flex; align-items: center; gap: 5px;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <use href="/static/icons.svg#icon-hash"></use>
@@ -1562,11 +1613,37 @@
             ~€{{ _usage_total | est_cost }}
         </span>
         <span style="font-size: 0.7rem; color: var(--ink-4);">({{ cost_comparison_model }} pricing, for comparison)</span>
-        <span style="font-size: 0.7rem; color: var(--ink-4);">·</span>
         <span style="font-size: 0.7rem; color: var(--ink-4);">All LLM inference via <code style="font-family: monospace; font-size: 0.68rem;">{{ llm_model }}</code>{% if llm_api_base %} at <code style="font-family: monospace; font-size: 0.68rem;">{{ llm_api_base }}</code>{% endif %}
         </span>
     </div>
-</div>
+    </div>
+</aside>
+<script>
+    // Side panels (Find papers, Add paper, Settings): one open at a time; Escape or the backdrop closes it.
+    function openDrawer(name, anchorId) {
+        closeDrawers();
+        document.getElementById('drawer-' + name).hidden = false;
+        document.querySelector('.drawer-backdrop').hidden = false;
+        document.body.classList.add('drawer-open');
+        // Open at the top of the section the chip is about (the panel's box holding anchorId), else at the top
+        const body = document.querySelector('#drawer-' + name + ' .drawer-body');
+        const anchor = anchorId && document.getElementById(anchorId);
+        let box = anchor;
+        while (box && box.parentElement !== body) box = box.parentElement;
+        body.classList.toggle('anchored', !!box);  // room below, so even the last section can scroll to the top
+        body.scrollTop = box ? box.offsetTop - body.offsetTop - 16 : 0;
+    }
+    function closeDrawers() {
+        document.querySelectorAll('.drawer').forEach(d => { d.hidden = true; });
+        document.querySelector('.drawer-backdrop').hidden = true;
+        document.body.classList.remove('drawer-open');
+    }
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && document.body.classList.contains('drawer-open')) closeDrawers();
+    });
+    {% if request.args.get('add_info') %}openDrawer('add');{% endif %}
+</script>
+
 
 <!-- Figure lightbox modal -->
 <div id="figure-lightbox"
@@ -1589,15 +1666,19 @@
     </button>
 </div>
 <script>
-    // Carousels for New Papers and My Collection: one card at a time; ← / → buttons, arrow keys (outside text
-    // fields, for the tab that is showing) or a swipe. Cards stay server-rendered in pages of PAGE_SIZE; nearing
-    // the last loaded card fires 'loadmore' on the page sentinel. A card that leaves (collect / trash) is removed
-    // by htmx, so the next one moves into the same position; a re-rendered section (sort change, filter, crawl)
-    // starts again at the first card.
+    // Inbox: every section shows one card at a time (the "carousel"); the title list on the left
+    // (#inbox-list) is built from the cards loaded so far, and clicking a title shows that card. Cards stay
+    // server-rendered in pages of PAGE_SIZE; nearing the last loaded card, or scrolling the title list to its
+    // end, fires 'loadmore' on the page sentinel. A card that leaves (collect / trash / restore) is removed
+    // by htmx, so the next one moves into the same position; a re-rendered section (sort change, filter,
+    // crawl) starts again at the first card. Keys (outside text fields): J / ↓ / → next, K / ↑ / ← previous,
+    // C to My Collection, X trash, R restore, / search. Phones: swipe, and the bottom bar.
     (function () {
         const carousels = { new: { list: 'new-papers-list', sec: 'new-section', idx: 0 },
-                            col: { list: 'curated-list', sec: 'col-section', idx: 0 } };
+                            col: { list: 'curated-list', sec: 'col-section', idx: 0 },
+                            trash: { list: 'trash-papers-list', sec: 'trash-section', idx: 0 } };
         function cards(list) { return list ? Array.from(list.querySelectorAll(':scope > .paper-card')) : []; }
+        function tab() { const pl = document.getElementById('paper-list'); return pl && carousels[pl.dataset.tab] ? pl.dataset.tab : 'new'; }
         function show1(c) {
             const list = document.getElementById(c.list), sec = document.getElementById(c.sec);
             if (!list || !sec) return;
@@ -1613,7 +1694,65 @@
             if (next) next.disabled = c.idx >= total - 1;
             if (more) { more.style.display = 'none'; if (c.idx >= cs.length - 2) htmx.trigger(more, 'loadmore'); }
         }
-        function show() { show1(carousels.new); show1(carousels.col); }
+        function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
+        function renderSide() {
+            const side = document.getElementById('inbox-list');
+            if (!side) return;
+            const name = tab(), c = carousels[name], list = document.getElementById(c.list);
+            const cs = cards(list), more = list && list.querySelector(':scope > .list-more');
+            side.textContent = '';
+            cs.forEach((card, i) => {
+                const item = el('button', 'inbox-item focus-ring' + (i === c.idx ? ' is-current' : ''));
+                item.type = 'button';
+                item.setAttribute('role', 'option');
+                item.setAttribute('aria-selected', i === c.idx ? 'true' : 'false');
+                item.dataset.i = i;
+                item.appendChild(el('span', 'inbox-title', card.dataset.title));
+                const sub = card.dataset.trashed ? 'Trashed ' + card.dataset.trashed : card.dataset.why;
+                if (sub) item.appendChild(el('span', 'inbox-why', sub));
+                if (card.dataset.moved) {
+                    const m = el('span', 'inbox-moved', card.dataset.moved + (name === 'new' ? ' moved this' : ''));
+                    m.style.color = card.dataset.movedColor;
+                    item.appendChild(m);
+                }
+                const tags = (card.dataset.tags || '').split(',').filter(Boolean);
+                if (name === 'col' && tags.length) {
+                    const t = el('span', 'inbox-tags');
+                    tags.forEach(tag => t.appendChild(el('span', 'inbox-tag inbox-tag-' + tag, tag.replace('_', ' '))));
+                    item.appendChild(t);
+                }
+                side.appendChild(item);
+            });
+            if (more) side.appendChild(el('div', 'inbox-more', more.dataset.left + ' more, loading as you scroll'));
+            if (!cs.length) {
+                const sec = document.getElementById(c.sec), empty = sec && sec.querySelector('.tab-empty, #curated-list-filter-empty');
+                side.appendChild(el('div', 'inbox-empty', empty ? empty.textContent.trim() : 'Nothing here.'));
+            }
+            const cur = side.querySelector('.is-current');
+            if (cur) {
+                const r = cur.getBoundingClientRect(), sr = side.getBoundingClientRect();
+                if (r.top < sr.top || r.bottom > sr.bottom) cur.scrollIntoView({ block: 'nearest' });
+            }
+        }
+        // Each section renders its toolbar (sort, tag filter, Re-screen) inside itself; it is moved into the left
+        // column (#inbox-tools). A re-rendered section brings a fresh toolbar, which replaces the moved one.
+        function placeTools() {
+            const slot = document.getElementById('inbox-tools');
+            if (!slot) return;
+            Object.keys(carousels).forEach(name => {
+                const sec = document.getElementById(carousels[name].sec);
+                if (sec && sec.dataset.toolsPlaced) return;  // already done for this rendering
+                slot.querySelectorAll('[data-sec="' + name + '"]').forEach(e => e.remove());
+                if (!sec) return;
+                sec.dataset.toolsPlaced = '1';
+                const bar = sec.querySelector('.section-toolbar');
+                if (bar) { bar.dataset.sec = name; slot.appendChild(bar); }
+            });
+            const name = tab();
+            slot.querySelectorAll('.section-toolbar').forEach(b => { b.hidden = b.dataset.sec !== name; });
+        }
+        function show() { placeTools(); show1(carousels.new); show1(carousels.col); show1(carousels.trash); renderSide(); }
+        window.inboxRefresh = show;
         function step(name, d) {
             const c = carousels[name], list = document.getElementById(c.list);
             if (!list) return;
@@ -1621,29 +1760,55 @@
             c.idx = Math.max(0, Math.min(c.idx + d, cards(list).length - 1));
             if (c.idx === before) return;
             show1(c);
+            renderSide();
             const sec = document.getElementById(c.sec);
             if (sec.getBoundingClientRect().top < 0) sec.scrollIntoView({ block: 'start' });
         }
-        function which(el) { return el.closest('#col-section') ? 'col' : el.closest('#new-section') ? 'new' : null; }
+        // The card shown in the current tab, and its action button (keep / trash / restore)
+        window.inboxAct = function (act) {
+            const c = carousels[tab()], card = cards(document.getElementById(c.list))[c.idx];
+            const btn = card && card.querySelector('.card-actions [data-act="' + act + '"]');
+            if (btn && !btn.disabled) btn.click();
+        };
+        function which(e) { return e.closest('#trash-section') ? 'trash' : e.closest('#col-section') ? 'col' : e.closest('#new-section') ? 'new' : null; }
         document.addEventListener('click', function (e) {
             const b = e.target.closest('button[data-carousel]');
             const name = b && which(b);
-            if (name) step(name, b.dataset.carousel === 'next' ? 1 : -1);
+            if (name) { step(name, b.dataset.carousel === 'next' ? 1 : -1); return; }
+            const item = e.target.closest('.inbox-item');
+            if (item) {
+                const c = carousels[tab()];
+                c.idx = parseInt(item.dataset.i, 10);
+                show1(c);
+                renderSide();
+            }
         });
+        document.getElementById('inbox-list').addEventListener('scroll', function () {
+            if (this.scrollTop + this.clientHeight < this.scrollHeight - 120) return;
+            const list = document.getElementById(carousels[tab()].list);
+            const more = list && list.querySelector(':scope > .list-more');
+            if (more) htmx.trigger(more, 'loadmore');
+        });
+        const NEXT = { ArrowRight: 1, ArrowDown: 1, j: 1, ArrowLeft: -1, ArrowUp: -1, k: -1 };
+        const ACT = { c: 'keep', x: 'trash', r: 'restore' };
         document.addEventListener('keydown', function (e) {
-            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
             if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            if (document.body.classList.contains('drawer-open')) return;
             const t = e.target;
             if (t.closest('input, textarea, select, [contenteditable], .chat-panel')) return;
-            const pl = document.getElementById('paper-list');
-            const name = pl && (pl.dataset.tab === 'col' ? 'col' : pl.dataset.tab === 'new' ? 'new' : null);
-            if (!name || !document.getElementById(carousels[name].list)) return;
-            e.preventDefault();
-            step(name, e.key === 'ArrowRight' ? 1 : -1);
+            if (e.key === '/') {
+                e.preventDefault();
+                document.querySelector('.inbox-search input').focus();
+                return;
+            }
+            const name = tab();
+            if (!document.getElementById(carousels[name].list)) return;
+            if (NEXT[e.key]) { e.preventDefault(); step(name, NEXT[e.key]); }
+            else if (ACT[e.key]) { e.preventDefault(); inboxAct(ACT[e.key]); }
         });
         let sx = null, sy = null, sname = null;
         document.addEventListener('touchstart', function (e) {
-            sname = e.target.closest('#new-papers-list') ? 'new' : e.target.closest('#curated-list') ? 'col' : null;
+            sname = e.target.closest('.new-carousel') ? which(e.target) : null;
             if (!sname || e.touches.length !== 1) { sx = null; return; }
             sx = e.touches[0].clientX; sy = e.touches[0].clientY;
         }, { passive: true });

@@ -347,7 +347,7 @@ class TestPresentation:
         link = ProjectPaper(found_via=json.dumps([{"via": "keyword", "name": "tabular"},
                                                   {"via": "biorxiv", "name": "cell shape"},
                                                   {"via": "biorxiv", "name": "resistance"}]))
-        assert link.found_via_text() == 'keyword "tabular" · bioRxiv keywords "cell shape", "resistance"'
+        assert link.found_via_text() == 'keyword "tabular" and bioRxiv keywords "cell shape", "resistance"'
         assert 'bioRxiv keyword search' in link.found_via_tip()
 
     def test_email_lists_biorxiv_only_when_it_found_something(self):

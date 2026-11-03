@@ -81,8 +81,8 @@ def test_rescreen_counts_the_calls_made_in_its_worker_threads(app, proj):
             return False, "not-relevant", "m", 1, 7
 
         with patch("app.crawl._screen_paper_quick", side_effect=quick):
-            crawl.run_rescreen(proj)
-        assert _rows(proj) == [("rescreen", 7, 1)]
+            state = crawl.run_rescreen(proj)
+        assert _rows(proj) == [("rescreen", 7, 1)], state
 
 
 def test_streamed_chat_answer_counts_the_server_usage(app, proj, monkeypatch):

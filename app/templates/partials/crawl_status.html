@@ -50,10 +50,7 @@
     <div class="mt-1 text-xs" style="color: var(--ink-4);">You can close this page, the crawl keeps running</div>
     {% endif %}
     <div class="mt-1 text-xs" style="color: var(--ink-3);">
-        {{ crawl.papers_found }} found
-        {% if crawl.papers_checked > 0 %}
-        · {{ crawl.papers_checked }} screened
-        {% endif %}
+        {{ crawl.papers_found }} found{% if crawl.papers_checked > 0 %}, {{ crawl.papers_checked }} screened{% endif %}
         → {{ crawl.papers_added }} added
         {% if crawl.papers_checked > crawl.papers_added %}
         ({{ crawl.papers_checked - crawl.papers_added }} skipped)
@@ -92,7 +89,7 @@
             {% set limit = crawl.paper_limit if crawl.paper_limit and crawl.paper_limit > 0 else crawl.papers_found %}
             {% set to_screen = [limit, crawl.papers_found]|min %}
             {% if crawl.papers_checked < to_screen %}
-            <span class="ml-2">{{ crawl.papers_checked }} / {{ to_screen }} done ({{ ((crawl.papers_checked / to_screen * 100) if to_screen > 0 else 0)|round|int }}%){% if in_flight > 0 %} · {{ in_flight }} processing{% endif %}</span>
+            <span class="ml-2">{{ crawl.papers_checked }} / {{ to_screen }} done ({{ ((crawl.papers_checked / to_screen * 100) if to_screen > 0 else 0)|round|int }}%){% if in_flight > 0 %}, {{ in_flight }} processing{% endif %}</span>
             {% else %}
             <span class="ml-2" style="color: var(--success);">All papers analyzed.</span>
             {% endif %}
