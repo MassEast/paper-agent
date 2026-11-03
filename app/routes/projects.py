@@ -218,7 +218,8 @@ def update_research_interest(slug):
 @projects_bp.route("/<slug>/collection-add", methods=["POST"])
 @login_required
 def add_to_collection(slug):
-    """Bypass-add a paper directly to My Collection — no LLM screening, full enrichment in background.
+    """Bypass-add a paper directly to My Collection (tagged important), or with to_new=1 to New Papers so
+    everyone in the project comes across it there. No LLM screening, full enrichment in background.
 
     Accepts arXiv URLs (full enrichment) and any other URL (web-paper enrichment, with
     automatic arXiv detection if the page links to a matching arXiv paper).
@@ -229,6 +230,13 @@ def add_to_collection(slug):
 
     project = Project.query.filter_by(slug=slug).first_or_404()
     url = request.form.get("url", "").strip()
+    to_new = request.form.get("to_new") == "1"
+
+    def _place(pp):
+        if to_new:
+            pp.manual_tag, pp.paper_tags, pp.collected_at = None, "[]", None
+        else:
+            pp.manual_tag, pp.paper_tags, pp.collected_at = "related", '["important"]', datetime.utcnow()
     if not url:
         return redirect(url_for("projects.detail", slug=slug))
 
@@ -246,9 +254,7 @@ def add_to_collection(slug):
                 if pp.trashed_at:
                     # Restore from trash — treat like a fresh add
                     pp.trashed_at = None
-                    pp.manual_tag = "related"
-                    pp.paper_tags = '["important"]'
-                    pp.collected_at = datetime.utcnow()
+                    _place(pp)
                     db.session.commit()
                     if not existing_paper.abstract:
                         start_collection_add_async(project.id, arxiv_id, existing_paper.id, _app)
@@ -256,8 +262,8 @@ def add_to_collection(slug):
                 # Active in collection already
                 return redirect(url_for("projects.detail", slug=slug, add_info="already_exists"))
             # Paper exists in DB but not linked to this project
-            pp = ProjectPaper(project_id=project.id, paper_id=existing_paper.id, origin="manual",
-                              manual_tag="related", paper_tags='["important"]', collected_at=datetime.utcnow())
+            pp = ProjectPaper(project_id=project.id, paper_id=existing_paper.id, origin="manual")
+            _place(pp)
             db.session.add(pp)
             db.session.commit()
             if not existing_paper.abstract:
@@ -267,8 +273,8 @@ def add_to_collection(slug):
         paper = Paper(arxiv_id=arxiv_id, title=f"arXiv:{arxiv_id}", source="manual", authors="[]")
         db.session.add(paper)
         db.session.flush()
-        pp = ProjectPaper(project_id=project.id, paper_id=paper.id, origin="manual",
-                          manual_tag="related", paper_tags='["important"]', collected_at=datetime.utcnow())
+        pp = ProjectPaper(project_id=project.id, paper_id=paper.id, origin="manual")
+        _place(pp)
         db.session.add(pp)
         db.session.commit()
         start_collection_add_async(project.id, arxiv_id, paper.id, _app)
@@ -282,14 +288,12 @@ def add_to_collection(slug):
             if pp:
                 if pp.trashed_at:
                     pp.trashed_at = None
-                    pp.manual_tag = "related"
-                    pp.paper_tags = '["important"]'
-                    pp.collected_at = datetime.utcnow()
+                    _place(pp)
                     db.session.commit()
                     return redirect(url_for("projects.detail", slug=slug))
                 return redirect(url_for("projects.detail", slug=slug, add_info="already_exists"))
-            pp = ProjectPaper(project_id=project.id, paper_id=existing_paper.id, origin="manual",
-                              manual_tag="related", paper_tags='["important"]', collected_at=datetime.utcnow())
+            pp = ProjectPaper(project_id=project.id, paper_id=existing_paper.id, origin="manual")
+            _place(pp)
             db.session.add(pp)
             db.session.commit()
             return redirect(url_for("projects.detail", slug=slug))
@@ -297,8 +301,8 @@ def add_to_collection(slug):
         paper = Paper(arxiv_id=synthetic_id, title="Fetching…", pdf_url=url, page_url=url, source="web", authors="[]")
         db.session.add(paper)
         db.session.flush()
-        pp = ProjectPaper(project_id=project.id, paper_id=paper.id, origin="manual",
-                          manual_tag="related", paper_tags='["important"]', collected_at=datetime.utcnow())
+        pp = ProjectPaper(project_id=project.id, paper_id=paper.id, origin="manual")
+        _place(pp)
         db.session.add(pp)
         db.session.commit()
         start_web_paper_add_async(project.id, url, paper.id, _app)

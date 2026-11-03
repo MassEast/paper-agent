@@ -1113,7 +1113,7 @@
             <div
                 style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-lg);">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2">
-                    <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--ink-1);">Add to My Collection</h2>
+                    <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--ink-1);">Add a paper</h2>
                     <button type="button" id="toggle-add-help"
                         style="font-size: 0.75rem; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; background: none; border: none; cursor: pointer; padding: 0;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1159,8 +1159,9 @@
                             </ol>
                         </li>
                     </ol>
-                    <p style="margin-top: 8px; color: var(--ink-3);">All papers are tagged <em>Important</em> on add and
-                        skip LLM screening.</p>
+                    <p style="margin-top: 8px; color: var(--ink-3);">Papers skip LLM screening. They go to My Collection tagged
+                        <em>Important</em>, or, with "Put it in New Papers instead" ticked, to New Papers, where everyone in the
+                        project comes across it.</p>
                 </div>
                 <script>
                     document.getElementById('toggle-add-help').addEventListener('click', function () {
@@ -1173,16 +1174,21 @@
                     <div class="flex flex-col sm:flex-row gap-3">
                         <input type="url" name="url" placeholder="Paste any URL — arXiv, ACL, NeurIPS, blog…"
                             style="flex: 1 1 auto; min-width: 0; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 16px; color: var(--ink-1); outline: none;">
-                        <button class="focus-ring" type="submit" data-tip="Adds the paper to My Collection, tagged &quot;important&quot;"
+                        <button class="focus-ring" type="submit" data-tip="Adds the paper to My Collection, tagged &quot;important&quot; (or to New Papers, if ticked below)"
                             style="height: var(--button-height); padding: 0 24px; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; white-space: nowrap;">
                             Add
                         </button>
                     </div>
+                    <label style="display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.8rem; color: var(--ink-2); cursor: pointer;"
+                        data-tip="For a paper the others should see too: it shows up in everyone's New Papers instead of going straight to My Collection">
+                        <input type="checkbox" name="to_new" value="1" style="accent-color: var(--accent);">
+                        Put it in New Papers instead
+                    </label>
                 </form>
                 {% if request.args.get('add_info') == 'already_exists' %}
                 <p
                     style="font-size: 0.8rem; color: var(--warning); margin-top: 8px; padding: 8px 12px; background-color: color-mix(in oklch, var(--warning) 12%, var(--paper-2)); border: 1px solid color-mix(in oklch, var(--warning) 40%, transparent); border-radius: var(--radius-md); font-weight: 500;">
-                    ⚠ This paper is already in My Collection.</p>
+                    ⚠ This paper is already in this project.</p>
                 {% elif request.args.get('add_info') == 'non_arxiv' %}
                 <p
                     style="font-size: 0.8rem; color: var(--ink-2); margin-top: 8px; padding: 8px 12px; background-color: var(--paper-3); border-radius: var(--radius-md);">

@@ -118,3 +118,30 @@ def test_card_line_per_origin(c, app, two):
     assert text.startswith("Added by hand") and "Collected" not in text and "pasted link" in tip
     text, tip = _date_line(html, "2612.00008")
     assert text.startswith("Added ") and "| Collected" in text and "how is not known" in tip
+
+
+def _placement(app, pid):
+    with app.app_context():
+        return {pp.paper.arxiv_id: (pp.manual_tag, pp.tags_list, pp.collected_at is not None, pp.trashed_at is None)
+                for pp in ProjectPaper.query.filter_by(project_id=pid)}
+
+
+def test_adding_by_url_goes_to_my_collection_or_on_request_to_new_papers(c, app, two):
+    web_new = "web:" + __import__("hashlib").sha256(b"https://example.org/new").hexdigest()[:12]
+    with patch("app.routes.projects.start_collection_add_async"), patch("app.routes.projects.start_web_paper_add_async"):
+        c.post("/projects/origin-a/collection-add", data={"url": "https://arxiv.org/abs/2612.00011"})
+        c.post("/projects/origin-a/collection-add", data={"url": "https://arxiv.org/abs/2612.00012", "to_new": "1"})
+        c.post("/projects/origin-a/collection-add", data={"url": "https://example.org/new", "to_new": "1"})
+    got = _placement(app, two["a"])
+    assert got["2612.00011"] == ("related", ["important"], True, True)  # default: My Collection, important
+    assert got["2612.00012"] == (None, [], False, True)  # New Papers, no tags
+    assert got[web_new] == (None, [], False, True)
+    # Re-adding a trashed paper with the box ticked brings it back to New Papers
+    with app.app_context():
+        pp = ProjectPaper.query.filter_by(project_id=two["a"]).join(Paper).filter(Paper.arxiv_id == "2612.00011").one()
+        pp.trashed_at = datetime.utcnow()
+        db.session.commit()
+    with patch("app.routes.projects.start_collection_add_async"):
+        c.post("/projects/origin-a/collection-add", data={"url": "https://arxiv.org/abs/2612.00011", "to_new": "1"})
+    assert _placement(app, two["a"])["2612.00011"] == (None, [], False, True)
+    assert 'name="to_new"' in c.get("/projects/origin-a").data.decode()
