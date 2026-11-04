@@ -373,6 +373,10 @@ def _llm_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int 
                 last_err = e
                 too_long = isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 400
                 _log.warning("[LLM] stream %s attempt %d failed: %s", model, attempt + 1, str(e)[:300])
+                if too_long and max_tokens > MAX_TOKENS_CEILING:
+                    # A smaller fallback model can't take an answer the size of the first one's context
+                    max_tokens = MAX_TOKENS_CEILING
+                    continue
                 if too_long:
                     break
                 time.sleep((2**attempt) + random.uniform(0, 1))

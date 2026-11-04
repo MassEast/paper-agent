@@ -82,7 +82,7 @@ class FakeModel:
 
     def __init__(self, *scripts, prompt_tokens=42000, finish_reason="stop"):
         self.scripts = list(scripts)
-        self.calls, self.closed = [], []
+        self.calls, self.closed, self.max_tokens = [], [], []
         self.prompt_tokens, self.finish_reason = prompt_tokens, finish_reason
         self._gate = threading.Semaphore(0)
         self.waiting = threading.Event()
@@ -92,6 +92,7 @@ class FakeModel:
 
     def __call__(self, messages, temperature, max_tokens):
         self.calls.append(messages)
+        self.max_tokens.append(max_tokens)
         n = len(self.calls)
         script = self.scripts.pop(0) if self.scripts else ["Ok."]
         try:
@@ -193,6 +194,23 @@ def test_llm_stream_falls_back_to_the_next_model_before_the_first_chunk(monkeypa
     assert out[-2] == "Fine." and out[-1]["model"] == llm.MODELS[1]
 
 
+def test_llm_stream_retries_with_the_usual_limit_when_a_model_refuses_a_long_answer(monkeypatch):
+    """The chat asks for the rest of the first model's context; a smaller fallback model refuses that (400)."""
+    sent = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        sent.append((body["model"], body["max_tokens"]))
+        if body["max_tokens"] > llm.MAX_TOKENS_CEILING:
+            return httpx.Response(400, json={"error": {"message": "max_tokens too large"}})
+        return httpx.Response(200, text=_sse(["Fine."]))
+
+    _mock_http(monkeypatch, handler)
+    out = list(llm._llm_stream([{"role": "user", "content": "hi"}], max_tokens=150_000))
+    assert sent == [(llm.MODELS[0], 150_000), (llm.MODELS[0], llm.MAX_TOKENS_CEILING)]
+    assert out[-2] == "Fine."
+
+
 def test_llm_stream_gives_up_when_every_model_fails(monkeypatch):
     _mock_http(monkeypatch, lambda request: httpx.Response(503, text="down"))
     with pytest.raises(llm.LLMUnavailableError):
@@ -270,6 +288,19 @@ def test_answer_streams_without_thinking_then_is_saved(c, app, chat_pp, monkeypa
 
     system = model.calls[0][0]["content"]
     assert PAPER_TEXT[:100] in system and "sparse attention" in system and "It sparsifies attention." in system
+
+
+def test_an_answer_may_use_the_rest_of_the_context_and_says_so_when_it_never_got_past_thinking(
+        c, app, chat_pp, monkeypatch, full_text):
+    """2026-11-04: the model thought through all of a fixed 16k-token limit and the chat showed only "Cut off"."""
+    model = FakeModel([""], finish_reason="length")
+    monkeypatch.setattr(chat, "_llm_stream", model)
+    _ask(c, chat_pp, "Do they really show that?")
+    _idle(chat_pp["pp"])
+    assert model.max_tokens[0] > 100_000  # the rest of the context, not the 16k ceiling
+    assert model.max_tokens[0] == chat.answer_budget(round(sum(len(m["content"]) for m in model.calls[0])
+                                                           / chat.CHARS_PER_TOKEN))
+    assert _msgs(app, chat_pp["pp"])[-1][2].startswith("*(The model thought until the output limit")
 
 
 def test_answer_keeps_going_with_the_page_closed(c, app, chat_pp, monkeypatch, full_text):

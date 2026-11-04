@@ -38,7 +38,10 @@ _log = logging.getLogger(__name__)
 # The first model's context window: set CHAT_CONTEXT_TOKENS to what your endpoint reports (a vLLM server
 # names it in the "maximum context length" error of a too-long request).
 CONTEXT_LIMIT = int(os.environ.get("CHAT_CONTEXT_TOKENS", 196000))
-MAX_ANSWER_TOKENS = MAX_TOKENS_CEILING  # thinking + answer; the server counts it against the context
+# Room kept free for thinking + answer when deciding whether the chat is full. The answer itself may use the
+# whole rest of the context (answer_budget): a hard question once made the model think through 16k tokens and
+# stop before writing anything (2026-11-04).
+MAX_ANSWER_TOKENS = MAX_TOKENS_CEILING
 MAX_PAPER_CHARS = 150_000  # ~40k tokens, the same cap the deep relevance check uses
 MAX_QUESTION_CHARS = 20_000
 
@@ -192,6 +195,11 @@ def _context_used(msgs: list) -> int | None:
     """Tokens the conversation fills, as the model counted them for the latest finished answer."""
     counted = [m for m in msgs if m.role == "assistant" and m.context_tokens]
     return max(counted, key=lambda m: m.id).context_tokens if counted else None
+
+
+def answer_budget(prompt_tokens: int) -> int:
+    """max_tokens for an answer: the rest of the context, less a margin for the token estimate."""
+    return max(MAX_ANSWER_TOKENS, CONTEXT_LIMIT - round(prompt_tokens * 1.1) - 1000)
 
 
 def _would_overflow(used: int | None, question: str) -> bool:
@@ -355,7 +363,7 @@ def _answer(answer_id: int) -> None:
                                  else round(sum(len(m["content"]) for m in messages) / CHARS_PER_TOKEN))
         live["phase"] = "thinking"
         final = None
-        stream = _llm_stream(messages, temperature=0.3, max_tokens=MAX_ANSWER_TOKENS)
+        stream = _llm_stream(messages, temperature=0.3, max_tokens=answer_budget(live["prompt_tokens"]))
         for event in stream:
             if live["stop"]:
                 stream.close()  # closes the HTTP stream, so the server stops generating too
@@ -374,7 +382,8 @@ def _answer(answer_id: int) -> None:
             _log.info("[chat] answer %d stopped by the user after %d chars", answer_id, len(answer))
             return
         if final["finish_reason"] == "length":
-            answer += "\n\n*(Cut off: the answer hit the output limit.)*"
+            answer += ("\n\n*(Cut off: the answer hit the output limit.)*" if answer.strip() else
+                       "*(The model thought until the output limit and didn't get to an answer. Ask again, or more narrowly.)*")
         # The answer's own tokens are estimated: completion_tokens also counts the thinking, which is
         # never sent back
         _finish(answer_id, status="done", content=answer, model=final["model"],

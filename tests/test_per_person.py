@@ -1,7 +1,7 @@
 """Several people in one project (app/members.py, Project.per_person; built 2026-11-02 for LLM Anatomy).
 
 My Collection and Trash are shared; New Papers, tags, votes and the paper chat are per person; a paper someone
-else collected or trashed stays in your New Papers until you've seen it. Notes: one per person, or one shared
+else collected or trashed stays in your New Papers until you've acted on it (kept it there or moved it). Notes: one per person, or one shared
 text whose runs remember their author. Each person gets their own email whose links say who they are."""
 
 import json

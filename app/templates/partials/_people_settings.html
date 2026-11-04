@@ -9,9 +9,17 @@
         <input type="checkbox" {% if project.per_person %}checked{% endif %}
             onchange="fetch('/projects/{{ project.slug }}/per-person', {method: 'POST', body: new URLSearchParams({enabled: this.checked ? '1' : '0'})}).then(function (r) { if (r.ok) location.reload(); else alert('Could not save this setting.'); })"
             style="width: 14px; height: 14px; margin-top: 2px; flex-shrink: 0; accent-color: var(--accent);">
-        <span>Several people work in this project<br><span style="font-size: 0.72rem; color: var(--ink-4);">Everyone gets their own New Papers, tags, votes and paper chat, and their own email.
-            My Collection and Trash stay shared, and a paper someone else collected or trashed shows up in your New Papers until you've seen it.</span></span>
+        <span>Several people work in this project<br><span style="font-size: 0.72rem; color: var(--ink-4);">Everyone gets their own New Papers, tags, votes and paper chat, and their own email.</span></span>
     </label>
+    {# What members.section_for does, in words (app/members.py) #}
+    <details style="margin: 6px 0 0 22px; font-size: 0.72rem; color: var(--ink-4);">
+        <summary style="cursor: pointer; color: var(--accent); width: fit-content;">How sharing works</summary>
+        <ul style="margin: 6px 0 0 0; padding-left: 16px; list-style: disc; display: flex; flex-direction: column; gap: 4px;">
+            <li>Each paper is in one shared place: New Papers, My Collection or Trash. The last move counts.</li>
+            <li>When someone moves a paper (collects it, trashes it, also from My Collection, or puts it back), it stays in everyone else's New Papers, marked with who did it, until they keep it there or move it themselves.</li>
+            <li>Disagree? Move it again, e.g. collect a paper someone trashed. They then find your move in their New Papers.</li>
+        </ul>
+    </details>
     {% if project.per_person %}
     <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 6px;">
         {% for m in people %}
