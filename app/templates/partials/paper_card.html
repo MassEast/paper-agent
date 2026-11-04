@@ -4,7 +4,7 @@
 {% set show_curate = _sec == 'new' %}
 {% set show_restore = _sec == 'trash' %}
 {% set _mytags = my_tags(pp) %}
-<div class="paper-card" data-pp-card="{{ pp.id }}"
+<div class="paper-card" data-pp-card="{{ pp.id }}" data-paper-id="{{ pp.paper.id }}"
     id="paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
     {# "Date added" sort key: in My Collection, when it was collected (older links have no collected_at) #}
     {% set _sort_added = (pp.collected_at if pp.manual_tag and pp.collected_at else pp.added_at) %}

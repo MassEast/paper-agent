@@ -154,3 +154,36 @@ def test_a_flagged_paper_in_a_per_person_project_goes_to_everyone_with_their_own
     for email, html in sent.items():
         assert f"/projects/proj?as={ids[email]}&paper=7" in html
     assert "Flagged by A at" in sent["b@example.org"]
+
+
+def test_every_card_carries_its_paper_id_for_the_address_bar(c, focus_project):
+    _, slug, ids = focus_project
+    html = c.get(f"/projects/{slug}").get_data(as_text=True)
+    assert f'data-paper-id="{ids["new0"]}"' in html and f'data-paper-id="{ids["col"]}"' in html
+
+
+@pytest.mark.slow
+def test_the_address_bar_names_the_shown_card_so_reload_and_shared_links_open_it(live_server, browser_session,
+                                                                                focus_project):
+    """Since 2026-11-04: picking a card writes ?paper=<Paper.id> (the emails' link) into the address bar."""
+    _, slug, ids = focus_project
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state)
+    page = context.new_page()
+    page.goto(f"{live_server}/projects/{slug}?as=1")
+    page.wait_for_function("window.htmx !== undefined")
+    assert f"paper={ids['new0']}" in page.url and "as=" not in page.url  # the first card; never someone's as=
+    page.locator("#inbox-list .inbox-item").nth(2).click()
+    assert page.url.endswith(f"?paper={ids['new2']}")
+    page.reload()
+    page.wait_for_function("window.htmx !== undefined")
+    shown = page.locator("#new-papers-list > .paper-card:visible")
+    assert shown.get_attribute("data-paper-id") == str(ids["new2"])
+    assert page.locator("#paper-focus-note").count() == 0  # a reload is not "opened from a link"
+    other = context.new_page()  # someone opening the shared link gets the note
+    other.goto(page.url)
+    assert other.locator("#paper-focus-note").count() == 1
+    other.close()
+    page.evaluate("showPaperTab('col')")
+    assert page.url.endswith(f"?paper={ids['col']}")
+    context.close()

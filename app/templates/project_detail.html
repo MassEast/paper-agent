@@ -142,6 +142,11 @@
                 <script>
                 window._paperFocus = {{ state.focus }};
                 document.addEventListener('DOMContentLoaded', function () {
+                    // This tab wrote the link itself (picking a card, then reload): no "opened from a link" note
+                    if (sessionStorage.getItem('rw-shown-paper-url') === location.href) {
+                        var note = document.getElementById('paper-focus-note');
+                        if (note) note.remove();
+                    }
                     var el = document.querySelector('[data-pp-card="{{ focus_pp.id if focus_pp else '' }}"]');
                     if (!el) return;
                     showPaperTab({{ focus_sec | tojson }} || 'new');
@@ -1739,6 +1744,14 @@
                 const r = cur.getBoundingClientRect(), sr = side.getBoundingClientRect();
                 if (r.top < sr.top || r.bottom > sr.bottom) cur.scrollIntoView({ block: 'nearest' });
             }
+            // The address bar names the card shown (?paper=<Paper.id>, the same link the emails use), so a reload
+            // or a shared link opens it. Without as=: a shared link must not make the visitor someone else.
+            const u = new URL(location.href), shown = cs[c.idx];
+            u.searchParams.delete('as');
+            if (shown && shown.dataset.paperId) u.searchParams.set('paper', shown.dataset.paperId);
+            else u.searchParams.delete('paper');
+            if (u.href !== location.href) history.replaceState(null, '', u);
+            sessionStorage.setItem('rw-shown-paper-url', u.href);
         }
         // Each section renders its toolbar (sort, tag filter, Re-screen) inside itself; it is moved into the left
         // column (#inbox-tools). A re-rendered section brings a fresh toolbar, which replaces the moved one.
