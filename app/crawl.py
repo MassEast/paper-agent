@@ -17,7 +17,7 @@ import contextvars
 import arxiv
 import httpx
 
-from app import db
+from app import db, figures
 from app.models import ChatMessage, Project, Paper, PaperSummary, ProjectPaper, CrawlLog, ScreenedPaper, compute_screening_hash, \
     estimated_cost_eur
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
@@ -67,6 +67,7 @@ def _is_open_access_pdf_domain(url: str) -> bool:
 
 
 MAX_WEB_ENRICH_ATTEMPTS = 3
+FIGURE_REDO_PER_RUN = 25  # nightly backfill: older arXiv papers given Figure 1 from the PDF per run (4 runs a night)
 BIORXIV_FIGURE_DAYS = 30  # the nightly backfill looks for a bioRxiv paper's figure 1 until this long after posting
 # Nightly full-text re-read of New Papers screened from the abstract (refresh_from_full_text)
 MAX_FULL_TEXT_ATTEMPTS = 3
@@ -849,6 +850,15 @@ _FIGURE_SKIP = (
 
 
 def get_paper_figure(arxiv_id: str) -> tuple[Optional[str], Optional[str]]:
+    """(figure_url, caption) of Figure 1: cut from the PDF (app/figures.py, so also a figure drawn in TikZ or
+    made of several images), else the first image figure of the arXiv HTML."""
+    figure_url, caption = figures.pdf_figure(arxiv_id)
+    if figure_url:
+        return figure_url, caption
+    return _html_figure(arxiv_id)
+
+
+def _html_figure(arxiv_id: str) -> tuple[Optional[str], Optional[str]]:
     """Return (figure_url, caption_text) for the first suitable figure in the paper.
 
     Tries arXiv HTML first (has inline figures + captions), falls back to abs page.
@@ -963,13 +973,18 @@ def get_paper_figure(arxiv_id: str) -> tuple[Optional[str], Optional[str]]:
 def _fetch_figure_html(figure_url: str, caption: Optional[str] = None) -> str:
     """Download figure URL, add white padding, return embedded HTML block. Returns '' on failure."""
     try:
-        with _biorxiv_gap() if _is_biorxiv(figure_url) else _ArxivLockCtx():  # each site's own rate limit
-            with _http_client(timeout=15, follow_redirects=True) as http:
-                img_resp = http.get(figure_url)
-        if img_resp.status_code != 200 or len(img_resp.content) <= 1000:
-            return ""
-        img_data = img_resp.content
-        content_type = img_resp.headers.get("content-type", "image/png")
+        path = figures.local_path(figure_url)
+        if path:  # Figure 1 cut from the PDF, saved by us
+            with open(path, "rb") as f:
+                img_data, content_type = f.read(), "image/png"
+        else:
+            with _biorxiv_gap() if _is_biorxiv(figure_url) else _ArxivLockCtx():  # each site's own rate limit
+                with _http_client(timeout=15, follow_redirects=True) as http:
+                    img_resp = http.get(figure_url)
+            if img_resp.status_code != 200 or len(img_resp.content) <= 1000:
+                return ""
+            img_data = img_resp.content
+            content_type = img_resp.headers.get("content-type", "image/png")
         try:
             from PIL import Image
             import io
@@ -3900,5 +3915,35 @@ def backfill_missing_paper_metadata() -> int:
         db.session.commit()
         updated += bool(paper.figure_url)
         _log.info("[backfill] bioRxiv %s: %s", paper.arxiv_id, "figure 1 added" if paper.figure_url else "no HTML yet")
+
+    updated += redo_pdf_figures()
+
+    return updated
+
+
+def redo_pdf_figures() -> int:
+    """Nightly backfill Pass 5: Figure 1 from the PDF for arXiv papers from before 2026-11-04. They have the first
+    image figure of the arXiv HTML (often not Figure 1) or none. Newest first, only papers someone can see (in a
+    project, not trashed there), each tried once. Returns how many got one."""
+    from sqlalchemy import or_
+    updated = 0
+    in_use = db.session.query(ProjectPaper.paper_id).filter(ProjectPaper.trashed_at.is_(None))
+    redo = Paper.query.filter(
+        ~Paper.arxiv_id.like("web:%"),
+        Paper.figure_pdf_tried_at.is_(None),
+        or_(Paper.figure_url.is_(None), ~Paper.figure_url.like(figures.URL_PREFIX + "%")),
+        Paper.id.in_(in_use),
+    ).order_by(Paper.id.desc()).limit(FIGURE_REDO_PER_RUN).all()
+    if redo:
+        _log.info("[backfill] Figure 1 from the PDF for %d older arXiv paper(s) (capped at %d/run)",
+                  len(redo), FIGURE_REDO_PER_RUN)
+    for paper in redo:
+        paper.figure_pdf_tried_at = datetime.utcnow()
+        figure_url, caption = figures.pdf_figure(paper.arxiv_id)
+        if figure_url:
+            paper.figure_url, paper.figure_caption = figure_url, caption
+            updated += 1
+        db.session.commit()
+        _log.info("[backfill] %s: %s", paper.arxiv_id, "Figure 1 from the PDF" if figure_url else "kept the old figure")
 
     return updated

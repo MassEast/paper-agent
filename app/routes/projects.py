@@ -876,7 +876,7 @@ def health_check():
             from app.crawl import get_paper_figure
             test_id = "2605.30322v1"
             url, caption = get_paper_figure(test_id)
-            ok = url is not None and url.startswith("http")
+            ok = url is not None and (url.startswith("http") or url.startswith("/figures/"))
             doubled = bool(url and f"{test_id}/{test_id}" in url)
             return "figure_fetch", {"ok": ok and not doubled, "url": url, "caption": caption, "elapsed_ms": round((time.time() - t0) * 1000), "error": "doubled ID in URL" if doubled else (None if ok else "No figure URL returned")}
         except Exception as e:

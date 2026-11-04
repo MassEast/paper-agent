@@ -8,5 +8,6 @@ arxiv
 python-dotenv
 Pillow
 pypdf
+pymupdf==2.1
 markdown-it-py
 mdit-py-plugins

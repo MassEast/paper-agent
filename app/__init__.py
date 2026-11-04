@@ -125,6 +125,7 @@ def create_app():
             "ALTER TABLE papers ADD COLUMN page_count INTEGER",
             "ALTER TABLE projects ADD COLUMN trashed_at DATETIME",
             "ALTER TABLE papers ADD COLUMN figure_caption TEXT",
+            "ALTER TABLE papers ADD COLUMN figure_pdf_tried_at DATETIME",
             "CREATE TABLE IF NOT EXISTS screened_papers (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES projects(id), arxiv_id TEXT NOT NULL, screening_hash TEXT NOT NULL, is_relevant INTEGER NOT NULL DEFAULT 0, screened_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
             "CREATE INDEX IF NOT EXISTS idx_screened_lookup ON screened_papers(project_id, arxiv_id, screening_hash)",
             "ALTER TABLE papers ADD COLUMN citation_fetched_at DATETIME",

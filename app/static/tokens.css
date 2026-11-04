@@ -91,8 +91,8 @@
   --tag-important-ink: oklch(80% 0.12 255);
   --tag-discuss-bg: var(--warning-bg);
   --tag-discuss-ink: var(--warning);
-  --tag-related-bg: var(--paper-3);
-  --tag-related-ink: var(--ink-2);
+  --tag-read-bg: oklch(30% 0.08 155);
+  --tag-read-ink: oklch(80% 0.12 155);
 
   --badge-dataset-bg: oklch(22% 0.08 255);
   --badge-architecture-bg: oklch(22% 0.08 275);
@@ -137,6 +137,8 @@
 
   --tag-important-bg: oklch(92% 0.05 255);
   --tag-important-ink: oklch(42% 0.15 255);
+  --tag-read-bg: oklch(93% 0.06 155);
+  --tag-read-ink: oklch(42% 0.12 155);
 
   --badge-dataset-bg: oklch(93% 0.04 255);
   --badge-architecture-bg: oklch(93% 0.04 275);

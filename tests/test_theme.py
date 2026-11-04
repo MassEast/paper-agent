@@ -20,6 +20,6 @@ def test_both_themes_define_the_same_color_tokens():
     light = css.split(':root[data-theme="light"] {', 1)[1].split("}", 1)[0]
     colors = lambda block: {m for m in re.findall(r"(--[\w-]+):\s*(?:oklch|var)", block)}
     missing = {t for t in colors(dark) - colors(light)
-               if not t.startswith(("--tag-discuss", "--tag-related"))}  # these point at tokens that switch
+               if not t.startswith("--tag-discuss")}  # these point at tokens that switch
     missing.discard("--accent-ink")  # white text on the accent fill, the same in both themes
     assert missing == set(), missing

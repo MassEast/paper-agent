@@ -68,6 +68,7 @@ class Paper(db.Model):
     source = db.Column(db.Text)
     figure_url = db.Column(db.Text)
     figure_caption = db.Column(db.Text)
+    figure_pdf_tried_at = db.Column(db.DateTime)  # the nightly backfill tried to cut Figure 1 from the PDF
     enrich_complete = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     # Web-paper (non-arXiv) PDF metadata backfill (Pass 3 of backfill_missing_paper_metadata):

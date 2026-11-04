@@ -16,6 +16,7 @@ os.environ.setdefault("LLM_API_BASE", "http://test-llm-endpoint.invalid/v1")
 os.environ.setdefault("LLM_MODELS", "test-model-large,test-model-small")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("SITE_PASSWORD", "testpass")
+os.environ["FIGURES_DIR"] = tempfile.mkdtemp(prefix="figures-")  # Figure 1 PNGs cut from PDFs (app/figures.py)
 
 import pytest
 
@@ -139,3 +140,9 @@ FAKE_PAPER = {
     "year": 2025,
     "categories": ["cs.LG"],
 }
+
+
+@pytest.fixture(autouse=True)
+def _no_arxiv_pdf_download(monkeypatch):
+    """No test downloads a PDF for its Figure 1 (get_paper_figure, nightly backfill Pass 5); tests of it patch in a PDF."""
+    monkeypatch.setattr("app.figures._download_pdf", lambda arxiv_id: None)

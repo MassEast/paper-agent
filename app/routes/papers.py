@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import datetime
 
-from flask import current_app, render_template, request, jsonify, Response
+from flask import current_app, render_template, request, jsonify, Response, send_from_directory
 
 _log = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ from app.auth import login_required
 from app.usage import counted
 from app.models import ChatMessage, Paper, ProjectPaper, Project
 from app import chat
-from app import members, paper_lists
+from app import figures, members, paper_lists
 from app.routes import papers_bp
 from app.utils import base_arxiv_id
 from app.crawl import (
@@ -99,6 +99,13 @@ def _collect(pp):
     if pp.trashed_at:  # collecting a paper someone trashed takes it out of Trash
         pp.trashed_at = None
         pp.trashed_reason = None
+
+
+@papers_bp.route("/figures/<name>")
+@login_required
+def figure_file(name):
+    """Figure 1 cut from a paper's PDF (app/figures.py). send_from_directory refuses paths outside the folder."""
+    return send_from_directory(figures.figures_dir(), name, mimetype="image/png", max_age=24 * 3600)  # a day: Regenerate rewrites the same file
 
 
 @papers_bp.route("/paper/<arxiv_id>/tag", methods=["POST"])
