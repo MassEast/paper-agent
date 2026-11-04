@@ -13,7 +13,7 @@ What is shared and what is per person:
   So when Justus collects a paper, Felix still finds it in his New Papers, marked "added by Justus", until he
   keeps it, tags it, trashes it or restores it. Each paper is in exactly one of your sections.
 - Tags, votes and the paper chat are per person; everyone sees the others' tags and votes.
-- Notes stay one shared text, but its runs remember who wrote them (ProjectPaper.notes_runs), so each
+- Notes stay one shared text, but its runs remember who wrote them and on which day (ProjectPaper.notes_runs), so each
   person's words show in their color. Old notes (ProjectPaper.notes) stay as the shared note from before.
 """
 
@@ -209,25 +209,27 @@ def set_per_person(project, on: bool) -> None:
 # ── Notes ───────────────────────────────────────────────────────────────────────────────────────────────
 
 def runs(pp) -> list:
-    """[[member_id or None, text], ...]. Old notes become one run nobody wrote."""
+    """[[member_id or None, text, day "YYYY-MM-DD" or None], ...]. Old notes become one run nobody wrote; runs
+    from before 2026-11-04 have no day."""
     if pp.notes_runs:
-        runs = json.loads(pp.notes_runs)
-        if "".join(t for _, t in runs) == (pp.notes or ""):
+        runs = [[r[0], r[1], r[2] if len(r) > 2 else None] for r in json.loads(pp.notes_runs)]
+        if "".join(r[1] for r in runs) == (pp.notes or ""):
             return runs
         # edited while per-person mode was off: the plain text is newer, its authors are unknown
-    return [[None, pp.notes]] if pp.notes else []
+    return [[None, pp.notes, None]] if pp.notes else []
 
 
 def merge_runs(runs_in: list) -> list:
-    """Drop empty runs and join neighbours by the same person."""
+    """Drop empty runs and join neighbours by the same person on the same day."""
     out = []
-    for mid, text in runs_in:
+    for r in runs_in:
+        mid, text, day = r[0], r[1], r[2] if len(r) > 2 else None
         if not text:
             continue
-        if out and out[-1][0] == mid:
+        if out and out[-1][0] == mid and out[-1][2] == day:
             out[-1][1] += text
         else:
-            out.append([mid, text])
+            out.append([mid, text, day])
     return out
 
 

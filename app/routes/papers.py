@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import logging
+import re
 from datetime import datetime
 
 from flask import current_app, render_template, request, jsonify, Response, send_from_directory
@@ -165,17 +166,19 @@ def vote_paper(arxiv_id):
 @papers_bp.route("/paper/<arxiv_id>/notes-runs", methods=["POST"])
 @login_required
 def update_notes_runs(arxiv_id):
-    """Per-person projects: the whole note as runs [[member id or null, text], ...] (who wrote what).
+    """Per-person projects: the whole note as runs [[member id or null, text, day or null], ...] (who wrote what,
+    and on which day; the day is the writer's browser's, "YYYY-MM-DD").
     ProjectPaper.notes keeps the plain text (export, Copy / Move, the paper chat)."""
     pp = _project_paper(arxiv_id)
     ids = {m.id for m in members.members(pp.project)}
     runs = json.loads(request.form.get("runs", "[]"))
-    if not all(isinstance(r, list) and len(r) == 2 and (r[0] is None or r[0] in ids) and isinstance(r[1], str)
+    if not all(isinstance(r, list) and len(r) in (2, 3) and (r[0] is None or r[0] in ids) and isinstance(r[1], str)
+               and (len(r) == 2 or r[2] is None or (isinstance(r[2], str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", r[2])))
                for r in runs):
         return ("bad runs", 400)
     runs = members.merge_runs(runs)
     pp.notes_runs = json.dumps(runs)
-    pp.notes = "".join(t for _, t in runs)
+    pp.notes = "".join(r[1] for r in runs)
     db.session.commit()
     return ("", 204)
 

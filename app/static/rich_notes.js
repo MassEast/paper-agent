@@ -1,8 +1,9 @@
 // Shared notes that remember who wrote what (per-person projects;
-// partials/_card_notes.html). The text is a list of runs [[member id or null, text], ...]. Each run is
-// drawn as a span in its author's color, and hovering it shows the name. On every edit, the changed
-// stretch (between the unchanged start and the unchanged end) gets the person typing. Saved 1.2 s after
-// the last keystroke, and on leaving the field.
+// partials/_card_notes.html). The text is a list of runs [[member id or null, text, day or null], ...].
+// Each run is drawn as a span in its author's color, and hovering it shows the name and the day it was
+// written (runs from before 2026-11-04 have no day). On every edit, the changed stretch (between the
+// unchanged start and the unchanged end) gets the person typing and today's date. Saved 1.2 s after the
+// last keystroke, and on leaving the field.
 (function () {
     function people(el) {
         var raw = JSON.parse(el.parentElement.querySelector('.rich-notes-people').textContent);
@@ -28,20 +29,30 @@
         return out;
     }
 
+    // Who wrote each character, and when: [member id, day]
     function authorsOf(runs) {
         var a = [];
-        runs.forEach(function (r) { for (var i = 0; i < r[1].length; i++) a.push(r[0]); });
+        runs.forEach(function (r) { for (var i = 0; i < r[1].length; i++) a.push([r[0], r[2] || null]); });
         return a;
     }
 
     function runsOf(text, authors) {
         var runs = [];
         for (var i = 0; i < text.length; i++) {
-            var last = runs[runs.length - 1];
-            if (last && last[0] === authors[i]) last[1] += text[i];
-            else runs.push([authors[i], text[i]]);
+            var last = runs[runs.length - 1], a = authors[i];
+            if (last && last[0] === a[0] && last[2] === a[1]) last[1] += text[i];
+            else runs.push([a[0], text[i], a[1]]);
         }
         return runs;
+    }
+
+    function today() {
+        var d = new Date(), pad = function (n) { return (n < 10 ? '0' : '') + n; };
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
+
+    function dayLabel(day) {  // "2026-09-28" -> "Sep 28, 2026"
+        return new Date(day + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
     function caretOffset(el) {
@@ -78,7 +89,7 @@
             span.textContent = r[1];
             var p = r[0] != null && who[r[0]];
             span.dataset.m = r[0] == null ? '' : r[0];
-            span.dataset.tip = p ? p.name : 'Written before notes were per person';
+            span.dataset.tip = (p ? p.name : 'Written before notes were per person') + (r[2] ? ', ' + dayLabel(r[2]) : '');
             if (p) span.style.color = p.color;
             el.appendChild(span);
         });
@@ -113,10 +124,10 @@
         while (p < old.length && p < now.length && old[p] === now[p]) p++;
         var s = 0;
         while (s < old.length - p && s < now.length - p && old[old.length - 1 - s] === now[now.length - 1 - s]) s++;
-        var me = parseInt(el.dataset.me, 10);
+        var me = parseInt(el.dataset.me, 10), day = today();
         var inserted = now.length - p - s;
         var mid = [];
-        for (var i = 0; i < inserted; i++) mid.push(me);
+        for (var i = 0; i < inserted; i++) mid.push([me, day]);
         el._runs = runsOf(now, authors.slice(0, p).concat(mid, authors.slice(old.length - s)));
         var caret = caretOffset(el);
         draw(el);

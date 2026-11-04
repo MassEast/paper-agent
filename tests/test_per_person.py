@@ -160,11 +160,25 @@ def test_shared_notes_keep_who_wrote_which_run(client, team, app):
     assert c.post("/paper/2611.00000/notes-runs", data={"project_id": pid, "runs": json.dumps(runs)}).status_code == 204
     with app.app_context():
         pp = ProjectPaper.query.filter_by(project_id=pid, paper_id=team["papers"][0]).one()
-        assert members.runs(pp) == [[ju, "Good baseline. "], [fe, "Agreed."]]
+        assert members.runs(pp) == [[ju, "Good baseline. ", None], [fe, "Agreed.", None]]
         assert pp.notes == "Good baseline. Agreed."  # plain text for export, Copy / Move and the chat
     assert c.post("/paper/2611.00000/notes-runs", data={"project_id": pid, "runs": json.dumps([[999999, "x"]])}).status_code == 400
     html = c.get(f"/projects/{SLUG}").get_data(as_text=True)
     assert 'class="rich-notes"' in html
+
+
+def test_each_run_of_a_note_keeps_the_day_it_was_written(client, team, app):
+    """Since 2026-11-04 (hover shows "Name, Sep 28, 2026"); the same person on two days stays two runs."""
+    pid = team["id"]
+    ju = team["people"]["Justus"]
+    c = _as(client, team, "Justus")
+    runs = [[ju, "Old part. ", "2026-09-28"], [ju, "New ", "2026-11-04"], [ju, "part.", "2026-11-04"]]
+    assert c.post("/paper/2611.00000/notes-runs", data={"project_id": pid, "runs": json.dumps(runs)}).status_code == 204
+    with app.app_context():
+        pp = ProjectPaper.query.filter_by(project_id=pid, paper_id=team["papers"][0]).one()
+        assert members.runs(pp) == [[ju, "Old part. ", "2026-09-28"], [ju, "New part.", "2026-11-04"]]
+    bad = [[ju, "x", "yesterday"]]
+    assert c.post("/paper/2611.00000/notes-runs", data={"project_id": pid, "runs": json.dumps(bad)}).status_code == 400
 
 
 def test_the_chat_is_per_person(team, app):
@@ -285,7 +299,7 @@ def test_a_note_edited_with_per_person_mode_off_is_not_lost_when_it_is_on_again(
         pp = ProjectPaper.query.filter_by(project_id=team["id"], paper_id=team["papers"][0]).one()
         pp.notes_runs = json.dumps([[team["people"]["Felix"], "old"]])
         pp.notes = "old, then edited with the mode off"
-        assert members.runs(pp) == [[None, "old, then edited with the mode off"]]
+        assert members.runs(pp) == [[None, "old, then edited with the mode off", None]]
         db.session.rollback()
 
 
@@ -367,3 +381,25 @@ def test_a_paper_moved_with_the_mode_off_is_nobodys_move(client, team, app):
     _switch(client, True)
     per_person = _views(app, team)[0]
     assert per_person["Justus"][2][0] == per_person["Felix"][2][0] == "trash"  # not "Felix moved this" in New
+
+
+@pytest.mark.slow
+def test_typing_in_a_note_shows_name_and_day_on_hover(live_server, browser_session, team, app):
+    """rich_notes.js in a real browser: new text gets today's date, the hover says "Justus, Nov 4, 2026"."""
+    from datetime import date
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state)
+    page = context.new_page()
+    page.goto(f"{live_server}/projects/{SLUG}?as={team['people']['Justus']}")
+    page.wait_for_function("window.htmx !== undefined")
+    note = page.locator(".rich-notes:visible").first
+    note.click()
+    page.keyboard.type("Nice idea.")
+    page.wait_for_function("document.querySelector('.rich-notes-status').textContent === 'saved'")
+    label = date.today().strftime("%b %-d, %Y")
+    assert note.locator("span").first.get_attribute("data-tip") == f"Justus, {label}"
+    with app.app_context():
+        pps = ProjectPaper.query.filter_by(project_id=team["id"]).all()
+        runs = [members.runs(pp) for pp in pps if pp.notes]
+        assert runs == [[[team["people"]["Justus"], "Nice idea.", date.today().isoformat()]]]
+    context.close()
