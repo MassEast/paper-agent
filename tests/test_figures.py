@@ -19,18 +19,31 @@ PARAGRAPH = ("We study how models learn from data and report results on several 
 CAPTION = "Figure 1: Overview of the method. The left panel shows the input, the right panel the out-\nput."
 
 
-def _pdf(two_columns=False, hidden_latex_data=False, figure=True, caption=CAPTION, at_top=False):
+def _pdf(two_columns=False, hidden_latex_data=False, figure=True, caption=CAPTION, at_top=False, word_lines=False,
+         title_page=False):
     """A letter page: running header and rule, a paragraph, Figure 1 (panel label above a box with labels in it),
     its caption, another paragraph. In two_columns the figure and caption are in the right column, with a
     paragraph in the left column at the same height. at_top: no paragraph above, the figure starts right below
-    the running header (as in CLIP, 2103.00020)."""
+    the running header (as in CLIP, 2103.00020). word_lines: the paragraph above ends in three lines that are a
+    block each, the last one short, close above the figure (PDFs made in Word, 2610.35685). title_page: title and
+    authors span both columns right above Figure 1 in the right column (2610.34626, 2610.39927)."""
     doc = pymupdf.open()
     page = doc.new_page(width=612, height=792)
     page.insert_text((72, 40), "Preprint. Under review.", fontsize=9)
     page.draw_line((72, 48), (540, 48))
     x0, x1 = (316, 540) if two_columns else (72, 540)
     dy = -156 if at_top else 0  # the panel label then sits ~10 pt below the header rule
-    if not at_top:
+    if word_lines:
+        for y, line in ((157, "and we used it to prepare the plotting code for the figures and to write analysis "
+                                "code for the evaluation"),
+                        (178, "statistics of all experiments in the sections on results and on the ablations "
+                              "(see the Acknowledgments"),
+                        (199, "section).")):
+            page.insert_text((x0, y), line, fontsize=9)
+    elif title_page:
+        page.insert_text((100, 185), "Entity Matching using Decision Models", fontsize=16)
+        page.insert_text((240, 205), "Ralph Peeters, University of Mannheim", fontsize=9)
+    elif not at_top:
         page.insert_textbox(pymupdf.Rect(x0, 70, x1, 200), PARAGRAPH, fontsize=9)
     if two_columns:
         page.insert_textbox(pymupdf.Rect(72, 70, 296, 600), PARAGRAPH * 3, fontsize=9)
@@ -72,6 +85,16 @@ def test_two_columns_take_only_the_captions_column():
 def test_a_figure_right_below_the_running_header_leaves_the_header_out():
     png, _ = figures.crop_figure_1(_pdf(at_top=True))
     assert png is not None and 165 < _height_pt(png) < 185
+
+
+def test_lines_of_a_paragraph_that_are_a_block_each_are_left_out():
+    png, _ = figures.crop_figure_1(_pdf(word_lines=True))
+    assert png is not None and 165 < _height_pt(png) < 185
+
+
+def test_title_and_authors_beside_the_column_are_left_out():
+    png, _ = figures.crop_figure_1(_pdf(two_columns=True, title_page=True))
+    assert png is not None and _width_pt(png) < 240 and 165 < _height_pt(png) < 185
 
 
 def test_hidden_latex_data_in_a_figure_is_not_taken_for_a_paragraph():

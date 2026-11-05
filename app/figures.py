@@ -77,11 +77,34 @@ def crop_figure_1(pdf: bytes) -> tuple[Optional[bytes], Optional[str]]:
             for r in page.get_image_rects(img[0]):
                 if beside_caption(r):
                     graphics.append(r)
+        # A caption of two or more lines is as wide as its column; a one-line caption may be centered and narrower
+        column_known = len(cap[4].strip().splitlines()) >= 2
+
+        stick_out = page.rect.width * 0.05
+
+        def is_body_text(r, text):
+            if len(text.split()) >= BODY_TEXT_WORDS:
+                return True
+            if not column_known or any(g.contains(r) for g in graphics):  # text in a box is the figure's
+                return False
+            # Sticks out of the column: title, authors or the other column's text (Figure 1 beside the abstract)
+            if r.x0 < cap_rect.x0 - stick_out or r.x1 > cap_rect.x1 + stick_out:
+                return True
+            # A line as wide as the column: one line of a paragraph (PDFs made in Word give every line its own block)
+            return len(text.split()) >= 5 and r.width >= 0.9 * cap_rect.width
+
         for b in blocks:
             r = pymupdf.Rect(b[:4])
             if b is cap or not beside_caption(r):
                 continue
-            (bounds if len(b[4].split()) >= BODY_TEXT_WORDS else labels).append(r)
+            (bounds if is_body_text(r, b[4]) else labels).append(r)
+        # The short last line of a paragraph: starts at the column's edge right below a paragraph line
+        if column_known:
+            for r in sorted(labels, key=lambda r: r.y0):
+                if (abs(r.x0 - cap_rect.x0) < 2 and not any(g.contains(r) for g in graphics)
+                        and any(0 <= r.y0 - p.y1 < 10 and abs(p.x0 - r.x0) < 2 for p in bounds)):
+                    labels.remove(r)
+                    bounds.append(r)
         # Grow upward from the caption while the next part touches what we have
         floor = max((r.y1 for r in bounds), default=page.rect.y0)
         parts = sorted((r for r in graphics + labels if r.y0 >= floor - 1), key=lambda r: -r.y1)
