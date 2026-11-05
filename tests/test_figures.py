@@ -20,13 +20,14 @@ CAPTION = "Figure 1: Overview of the method. The left panel shows the input, the
 
 
 def _pdf(two_columns=False, hidden_latex_data=False, figure=True, caption=CAPTION, at_top=False, word_lines=False,
-         title_page=False):
+         title_page=False, label_row=False):
     """A letter page: running header and rule, a paragraph, Figure 1 (panel label above a box with labels in it),
     its caption, another paragraph. In two_columns the figure and caption are in the right column, with a
     paragraph in the left column at the same height. at_top: no paragraph above, the figure starts right below
     the running header (as in CLIP, 2103.00020). word_lines: the paragraph above ends in three lines that are a
     block each, the last one short, close above the figure (PDFs made in Word, 2610.35685). title_page: title and
-    authors span both columns right above Figure 1 in the right column (2610.34626, 2610.39927)."""
+    authors span both columns right above Figure 1 in the right column (2610.34626, 2610.39927). label_row: a
+    second panel label at the right end of the row, so the row is one block as wide as the column (2610.35817)."""
     doc = pymupdf.open()
     page = doc.new_page(width=612, height=792)
     page.insert_text((72, 40), "Preprint. Under review.", fontsize=9)
@@ -49,6 +50,8 @@ def _pdf(two_columns=False, hidden_latex_data=False, figure=True, caption=CAPTIO
         page.insert_textbox(pymupdf.Rect(72, 70, 296, 600), PARAGRAPH * 3, fontsize=9)
     if figure:
         page.insert_text((x0 + 10, 222 + dy), "(a) Input", fontsize=9)  # panel label above the drawing
+        if label_row:
+            page.insert_text((x0 + 150, 222 + dy), "(b) Tested zero-shot on new objects and goals", fontsize=9)
         page.draw_rect(pymupdf.Rect(x0 + 10, 230 + dy, x1 - 10, 380 + dy), color=(0, 0, 0), fill=(0.8, 0.9, 1))
         page.insert_text((x0 + 30, 300 + dy), "encoder", fontsize=9)
         if hidden_latex_data:  # TikZ/latexit pictures carry base64 text inside the figure
@@ -89,6 +92,11 @@ def test_a_figure_right_below_the_running_header_leaves_the_header_out():
 
 def test_lines_of_a_paragraph_that_are_a_block_each_are_left_out():
     png, _ = figures.crop_figure_1(_pdf(word_lines=True))
+    assert png is not None and 165 < _height_pt(png) < 185
+
+
+def test_panel_labels_side_by_side_are_not_a_paragraph_line():
+    png, _ = figures.crop_figure_1(_pdf(label_row=True))
     assert png is not None and 165 < _height_pt(png) < 185
 
 

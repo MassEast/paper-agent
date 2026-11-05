@@ -90,8 +90,9 @@ def crop_figure_1(pdf: bytes) -> tuple[Optional[bytes], Optional[str]]:
             # Sticks out of the column: title, authors or the other column's text (Figure 1 beside the abstract)
             if r.x0 < cap_rect.x0 - stick_out or r.x1 > cap_rect.x1 + stick_out:
                 return True
-            # A line as wide as the column: one line of a paragraph (PDFs made in Word give every line its own block)
-            return len(text.split()) >= 5 and r.width >= 0.9 * cap_rect.width
+            # A single line as wide as the column: one line of a paragraph (PDFs made in Word give every line its
+            # own block). Labels side by side on one row make a block of several lines, so they don't count.
+            return len(text.strip().splitlines()) == 1 and len(text.split()) >= 5 and r.width >= 0.9 * cap_rect.width
 
         for b in blocks:
             r = pymupdf.Rect(b[:4])
