@@ -1148,6 +1148,14 @@ def _email_lines(text: str) -> str:
     return html.escape(text).replace("\n", "<br>")
 
 
+def _email_note_label(member, day: Optional[str]) -> str:
+    """"Justus  Sep 3, 2026" above a part of a note; notes from before 2026-11-04 have no day."""
+    name = f'<span style="font-weight:700;color:{member.color};">{html.escape(member.name)}</span>' if member else ""
+    date = datetime.strptime(day, "%Y-%m-%d").strftime("%b %-d, %Y") if day else ""
+    date = f'<span style="color:#6b7280;">{" " if name else ""}{date}</span>' if date else ""
+    return f'<p style="margin:0;font-size:12px;">{name}{date}</p>' if name or date else ""
+
+
 def _email_message_html(message: str, sender: Optional[str]) -> str:
     if not message:
         return ""
@@ -1251,10 +1259,9 @@ def notify_important_paper(
     notes_html = ""
     if note_parts:
         parts = "".join(
-            '<div style="margin:0 0 8px 0;">'
-            + (f'<p style="margin:0;font-size:12px;font-weight:700;color:{m.color};">{html.escape(m.name)}</p>' if m else "")
+            '<div style="margin:0 0 8px 0;">' + _email_note_label(m, day)
             + f'<p style="margin:0;font-size:13px;color:#374151;line-height:1.6;">{_email_lines(text)}</p></div>'
-            for m, text in note_parts
+            for m, day, text in note_parts
         )
         notes_html = (
             '<div style="margin-top:14px;border-top:1px solid #ddd6fe;padding-top:12px;">'

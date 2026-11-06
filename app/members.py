@@ -220,21 +220,21 @@ def runs(pp) -> list:
 
 
 def note_parts(pp) -> list:
-    """The note in reading order, split by who wrote it: [(member or None, text), ...]. No names outside
-    per-person projects."""
+    """The note in reading order, split by who wrote it and on which day: [(member or None, day or None, text), ...].
+    No names or days outside per-person projects."""
     if not pp.notes or not pp.notes.strip():
         return []
     if not pp.project.per_person:
-        return [(None, pp.notes.strip())]
+        return [(None, None, pp.notes.strip())]
     people = {m.id: m for m in members(pp.project)}
     parts = []
     for run in runs(pp):
-        m = people.get(run[0])
-        if parts and (parts[-1][0] is m or not run[1].strip()):  # a lone line break by someone else splits nothing
-            parts[-1][1] += run[1]
+        m, day = people.get(run[0]), run[2]
+        if parts and ((parts[-1][0] is m and parts[-1][1] == day) or not run[1].strip()):
+            parts[-1][2] += run[1]  # a lone line break by someone else splits nothing
         else:
-            parts.append([m, run[1]])
-    return [(m, text.strip()) for m, text in parts if text.strip()]
+            parts.append([m, day, run[1]])
+    return [(m, day, text.strip()) for m, day, text in parts if text.strip()]
 
 
 def merge_runs(runs_in: list) -> list:

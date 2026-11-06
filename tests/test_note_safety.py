@@ -124,8 +124,18 @@ def test_the_email_shows_each_persons_part_under_their_name_with_its_line_breaks
         [[ann, "first\nsecond"], [bea, " <b>agreed</b>"], [None, "old note"]])})
     html = _email(c, team)
     assert "Personal Notes" not in html and ">Notes</p>" in html
-    assert html.index(">Ann</p>") < html.index("first<br>second") < html.index(">Bea</p>") < html.index("&lt;b&gt;agreed")
+    assert html.index(">Ann</span>") < html.index("first<br>second") < html.index(">Bea</span>") < html.index("&lt;b&gt;agreed")
     assert "old note" in html
+
+
+def test_the_email_keeps_each_part_with_its_day(c, team):
+    """Me on Sep 3, Felix on Sep 4, me again on Sep 9: three parts, also when the same person writes on two days."""
+    ann, bea = team["people"]["Ann"], team["people"]["Bea"]
+    c.post(f"/paper/{ARXIV}/notes-runs", data={"project_id": team["id"], "runs": json.dumps(
+        [[ann, "one\n", "2026-09-03"], [bea, "two\n", "2026-09-04"], [ann, "three\n", "2026-09-09"], [ann, "four", "2026-09-10"]])})
+    html = _email(c, team)
+    days = ["Sep 3, 2026", "one", "Sep 4, 2026", "two", "Sep 9, 2026", "three", "Sep 10, 2026", "four"]
+    assert [html.index(d) for d in days] == sorted(html.index(d) for d in days)
 
 
 def test_outside_per_person_projects_a_note_has_no_names(app, c, team):
@@ -134,7 +144,7 @@ def test_outside_per_person_projects_a_note_has_no_names(app, c, team):
         db.session.commit()
     c.post(f"/paper/{ARXIV}/notes", data={"project_id": team["id"], "notes": "one\ntwo"})
     html = _email(c, team)
-    assert "one<br>two" in html and ">Ann</p>" not in html
+    assert "one<br>two" in html and ">Ann</span>" not in html
 
 
 def test_the_message_comes_first_with_the_senders_name(c, team):
