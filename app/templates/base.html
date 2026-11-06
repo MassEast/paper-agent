@@ -162,6 +162,7 @@
         @media (min-width: 1024px) {
             .inbox { grid-template-columns: 360px minmax(0, 1fr); }
             .inbox-side { position: sticky; top: 64px; height: calc(100vh - 80px); }
+            body:has(#offline-banner:not([hidden])) .inbox-side { top: 100px; height: calc(100vh - 116px); }
             #inbox-list { display: block; flex: 1; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background-color: var(--paper-2); }
             .inbox-keys { display: block; }
         }
@@ -234,8 +235,11 @@
     </style>
 </head>
 <body style="background-color: var(--paper-1); color: var(--ink-1); min-height: 100vh;">
+    <header style="position: sticky; top: 0; z-index: 40;">
+    <div id="offline-banner" role="status" hidden
+        style="padding: 8px 16px; text-align: center; font-size: 0.8rem; font-weight: 500; background-color: var(--error-bg); color: var(--error); border-bottom: 1px solid color-mix(in oklch, var(--error) 40%, transparent);"></div>
     {% block nav %}
-    <nav style="position: sticky; top: 0; z-index: 40; background-color: var(--paper-2); border-bottom: 1px solid var(--border-subtle);">
+    <nav style="background-color: var(--paper-2); border-bottom: 1px solid var(--border-subtle);">
         <div class="nav-inner" style="max-width: 1600px; margin: 0 auto; padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
             <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
                 <a href="/projects" style="font-size: 1rem; font-weight: 600; color: var(--accent); text-decoration: none; display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;">
@@ -283,9 +287,8 @@
         </div>
     </nav>
     {% endblock %}
+    </header>
 
-    <div id="offline-banner" role="status" hidden
-        style="position: fixed; top: 0; left: 0; right: 0; z-index: 60; padding: 8px 16px; text-align: center; font-size: 0.8rem; font-weight: 500; background-color: var(--error-bg); color: var(--error); border-bottom: 1px solid color-mix(in oklch, var(--error) 40%, transparent);"></div>
     <div id="toast-stack" aria-live="assertive"
         style="position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 70; display: flex; flex-direction: column; gap: 8px; width: max-content; max-width: calc(100vw - 32px);"></div>
 

@@ -86,7 +86,10 @@ def _notes_status(page, pid, arxiv_id):
 @pytest.mark.slow
 def test_offline_click_shows_toast_and_changes_nothing(app, page, seeded):
     page.context.set_offline(True)
-    assert page.locator("#offline-banner").is_visible()
+    banner = page.locator("#offline-banner")
+    assert banner.is_visible()
+    box, nav = banner.bounding_box(), page.locator("nav").bounding_box()
+    assert box["y"] + box["height"] <= nav["y"] + 1  # above the nav, not over it
 
     page.get_by_role("button", name="Move to My Collection").first.click()
 
