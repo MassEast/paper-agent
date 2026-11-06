@@ -3,7 +3,9 @@
 // Each run is drawn as a span in its author's color, and hovering it shows the name and the day it was
 // written (runs from before 2026-11-04 have no day). On every edit, the changed stretch (between the
 // unchanged start and the unchanged end) gets the person typing and today's date. Saved 1.2 s after the
-// last keystroke, and on leaving the field.
+// last keystroke, and on leaving the field. Like the plain notes (base.html), unsaved text is kept in
+// localStorage until the server has it, and goes out again once the connection is back. If the note
+// changed elsewhere meanwhile, what you wrote is added below the saved version.
 (function () {
     function people(el) {
         var raw = JSON.parse(el.parentElement.querySelector('.rich-notes-people').textContent);
@@ -98,21 +100,66 @@
     function status(el, text, ok) {
         var s = el.parentElement.querySelector('.rich-notes-status');
         s.textContent = text;
-        s.style.color = ok ? 'var(--success)' : 'var(--error)';
+        s.style.color = ok === null ? 'var(--ink-3)' : ok ? 'var(--success)' : 'var(--error)';
         s.style.display = text ? '' : 'none';
+    }
+
+    function plain(runs) { return runs.map(function (r) { return r[1]; }).join(''); }
+    function draftKey(el) { return 'rich-notes-draft:' + el.dataset.arxivId + ':' + el.dataset.projectId; }
+    function writeDraft(el) {
+        localStorage.setItem(draftKey(el), JSON.stringify({ base: el._base, runs: el._runs }));
+    }
+
+    // Puts what changed between base and mine below the note as it is on the server now
+    function mergeMine(el, base, mine, server) {
+        var old = base, now = plain(mine), p = 0, s = 0;
+        while (p < old.length && p < now.length && old[p] === now[p]) p++;
+        while (s < old.length - p && s < now.length - p && old[old.length - 1 - s] === now[now.length - 1 - s]) s++;
+        var added = now.slice(p, now.length - s), addedBy = authorsOf(mine).slice(p, now.length - s);
+        var saved = plain(server), gap = saved && added ? '\n\n' : '';
+        var me = [parseInt(el.dataset.me, 10), today()];
+        el._runs = runsOf(saved + gap + added, authorsOf(server).concat(gap ? [me, me] : [], addedBy));
+        el._base = saved;
+        el._notice = 'changed elsewhere too, your text is added below';
+        draw(el);
     }
 
     function save(el) {
         clearTimeout(el._timer);
-        var body = new URLSearchParams({ project_id: el.dataset.projectId, runs: JSON.stringify(el._runs) });
-        fetch('/paper/' + encodeURIComponent(el.dataset.arxivId) + '/notes-runs', { method: 'POST', body: body })
+        if (el._saving) return el._saving;
+        var sent = plain(el._runs), answered = false;
+        var body = new URLSearchParams({ project_id: el.dataset.projectId, runs: JSON.stringify(el._runs), base: el._base });
+        status(el, 'saving…', null);
+        el._saving = fetch('/paper/' + encodeURIComponent(el.dataset.arxivId) + '/notes-runs',
+            { method: 'POST', body: body, signal: AbortSignal.timeout(30000) })
             .then(function (r) {
+                answered = true;
+                rwNet.answered();
+                el._saving = null;
+                if (r.status === 409) {
+                    return r.json().then(function (d) {
+                        mergeMine(el, el._base, el._runs, d.runs);
+                        writeDraft(el);
+                        return save(el);
+                    });
+                }
                 if (!r.ok) throw new Error(r.status);
+                el._base = sent;
+                if (plain(el._runs) !== sent) return save(el);  // typed on while this was on its way
                 el._dirty = false;
+                localStorage.removeItem(draftKey(el));
+                if (el._notice) { status(el, el._notice, false); return; }
                 status(el, 'saved', true);
-                setTimeout(function () { if (!el._dirty) status(el, '', true); }, 1500);
+                setTimeout(function () { if (!el._dirty && !el._notice) status(el, '', true); }, 1500);
             })
-            .catch(function () { status(el, 'not saved, try again', false); });
+            .catch(function () {
+                el._saving = null;
+                writeDraft(el);
+                status(el, answered ? 'not saved, server error' : 'not saved, kept in this browser, will retry when online', false);
+                if (!answered) rwNet.failed();
+                rwNet.sync();
+            });
+        return el._saving;
     }
 
     function onInput(el) {
@@ -133,7 +180,9 @@
         draw(el);
         if (caret !== null) setCaret(el, caret);
         el._dirty = true;
-        status(el, '', true);
+        el._notice = null;
+        writeDraft(el);
+        status(el, 'saving…', null);
         clearTimeout(el._timer);
         el._timer = setTimeout(function () { save(el); }, 1200);
     }
@@ -141,8 +190,29 @@
     function init(el) {
         if (el._runs) return;
         el._runs = JSON.parse(el.dataset.runs || '[]');
+        el._base = plain(el._runs);
         el._people = people(el);
+        el._noteDirty = function () { return !!el._dirty; };
+        el._noteRefresh = function (d) {
+            if (plain(d.runs) !== el._base) { el._runs = d.runs; el._base = plain(d.runs); draw(el); }
+        };
+        el._flushNote = function () { return el._saving || (el._dirty ? save(el) : Promise.resolve()); };
+        var raw = localStorage.getItem(draftKey(el));
+        if (raw !== null) {
+            var draft = JSON.parse(raw);
+            if (plain(draft.runs) === el._base) localStorage.removeItem(draftKey(el));
+            else {
+                if (draft.base === el._base) el._runs = draft.runs;
+                else mergeMine(el, draft.base, draft.runs, el._runs);
+                el._dirty = true;
+                writeDraft(el);
+            }
+        }
         draw(el);
+        if (el._dirty) {
+            status(el, el._notice || 'not saved yet', false);
+            if (navigator.onLine) setTimeout(function () { save(el); }, 0);
+        }
         el.addEventListener('compositionstart', function () { el._composing = true; });
         el.addEventListener('compositionend', function () { el._composing = false; onInput(el); });
         el.addEventListener('input', function () { onInput(el); });
@@ -159,4 +229,7 @@
             return Array.prototype.some.call(document.querySelectorAll('.rich-notes'), function (el) { return el._dirty; });
         });
     }
+    window.addEventListener('rw:back', function () {
+        document.querySelectorAll('.rich-notes').forEach(function (el) { if (el._dirty) save(el); });
+    });
 })();

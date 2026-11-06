@@ -1144,14 +1144,33 @@ def send_notification(
     return False
 
 
+def _email_lines(text: str) -> str:
+    return html.escape(text).replace("\n", "<br>")
+
+
+def _email_message_html(message: str, sender: Optional[str]) -> str:
+    if not message:
+        return ""
+    label = f"{html.escape(sender)} writes" if sender else "Message"
+    return (
+        '<div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:0 0 16px 0;">'
+        f'<p style="margin:0 0 4px 0;font-size:12px;font-weight:700;color:#7c3aed;">{label}</p>'
+        f'<p style="margin:0;font-size:14px;color:#111827;line-height:1.6;">{_email_lines(message)}</p></div>'
+    )
+
+
 def notify_important_paper(
     paper, project_name: str, project_slug: str, figure_url: Optional[str] = None,
     figure_caption: Optional[str] = None,
-    project_emails: Optional[str] = None, notes: Optional[str] = None, project=None, flagged_by: Optional[str] = None
+    project_emails: Optional[str] = None, note_parts: Optional[list] = None, project=None,
+    flagged_by: Optional[str] = None, message: str = ""
 ):
     """Build and send the "paper flagged as important" email (single-paper card + notes). The title and the
     "Open in project" link go to the paper's card (?paper=<Paper.id>); in a per-person project everyone gets
     their own copy (_send_project_email) and the email says who flagged it.
+
+    note_parts: members.note_parts, each person's part under their name. message: what the sender added on
+    clicking Notify, shown first.
 
     Returns True if every copy was sent.
     """
@@ -1230,13 +1249,18 @@ def notify_important_paper(
         )
 
     notes_html = ""
-    if notes and notes.strip():
+    if note_parts:
+        parts = "".join(
+            '<div style="margin:0 0 8px 0;">'
+            + (f'<p style="margin:0;font-size:12px;font-weight:700;color:{m.color};">{html.escape(m.name)}</p>' if m else "")
+            + f'<p style="margin:0;font-size:13px;color:#374151;line-height:1.6;">{_email_lines(text)}</p></div>'
+            for m, text in note_parts
+        )
         notes_html = (
             '<div style="margin-top:14px;border-top:1px solid #ddd6fe;padding-top:12px;">'
             '<p style="margin:0 0 6px 0;font-size:11px;font-weight:700;color:#7c3aed;'
-            'text-transform:uppercase;letter-spacing:0.05em;">Personal Notes</p>'
-            f'<p style="margin:0;font-size:13px;color:#374151;line-height:1.6;">{html.escape(notes.strip())}</p>'
-            '</div>'
+            'text-transform:uppercase;letter-spacing:0.05em;">Notes</p>'
+            f'{parts}</div>'
         )
 
     paper_card = (
@@ -1275,7 +1299,7 @@ def notify_important_paper(
     content_html = (
         f'<p style="font-size:13px;color:#6b7280;margin:0 0 16px 0;">'
         f'Flagged{by} at {now_str} · in project {project_link}</p>'
-        + paper_card + figure_html + view_link
+        + _email_message_html(message, flagged_by) + paper_card + figure_html + view_link
     )
 
     subject = f"📄 Paper flagged: {paper.title[:60]}{'…' if len(paper.title) > 60 else ''}"

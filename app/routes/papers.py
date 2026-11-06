@@ -14,7 +14,7 @@ from app.auth import login_required
 from app.usage import counted
 from app.models import ChatMessage, Paper, ProjectPaper, Project
 from app import chat
-from app import figures, members, paper_lists
+from app import figures, members, note_locks, paper_lists
 from app.routes import papers_bp
 from app.utils import base_arxiv_id
 from app.crawl import (
@@ -31,6 +31,7 @@ from app.crawl import (
 from app.llm import LLMUnavailableError
 
 MULTI_TAGS = {"important", "to_read", "to_discuss"}
+NOTIFY_MESSAGE_MAX_CHARS = 2000  # maxlength in paper_card.html
 
 
 def _moved_response(project_id, dest):
@@ -176,11 +177,47 @@ def update_notes_runs(arxiv_id):
                and (len(r) == 2 or r[2] is None or (isinstance(r[2], str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", r[2])))
                for r in runs):
         return ("bad runs", 400)
+    if _note_is_stale("".join(r[1] for r in runs), pp):
+        return jsonify(runs=members.runs(pp)), 409
     runs = members.merge_runs(runs)
     pp.notes_runs = json.dumps(runs)
     pp.notes = "".join(r[1] for r in runs)
     db.session.commit()
     return ("", 204)
+
+
+def _same_note(a, b) -> bool:
+    # A textarea hands back \n for \r\n and drops a leading newline
+    return (a or "").replace("\r\n", "\n").strip() == (b or "").replace("\r\n", "\n").strip()
+
+
+def _note_is_stale(text, pp) -> bool:
+    """The save started from a note that was changed since. A resend of what is already saved (the answer to the
+    first try got lost) is fine."""
+    base = request.form.get("base")
+    return base is not None and not _same_note(base, pp.notes) and not _same_note(text, pp.notes)
+
+
+@papers_bp.route("/paper/<arxiv_id>/note-lock", methods=["POST"])
+@login_required
+def note_lock(arxiv_id):
+    """Claim, renew or (release=1) give back the note. Answers who else has it: by is null if nobody does."""
+    pp = _project_paper(arxiv_id)
+    client = request.form["client"]
+    if request.form.get("release"):
+        note_locks.release(pp.project_id, pp.paper_id, client)
+        return jsonify(by=None)
+    me = members.current(pp.project)
+    return jsonify(by=note_locks.claim(pp.project_id, pp.paper_id, client, me.name if me else ""))
+
+
+@papers_bp.route("/paper/<arxiv_id>/note-state")
+@login_required
+def note_state(arxiv_id):
+    """The open card asks every few seconds: is someone writing, and what does the note say now."""
+    pp = _project_paper(arxiv_id)
+    return jsonify(by=note_locks.holder(pp.project_id, pp.paper_id, request.args["client"]),
+                   notes=pp.notes or "", runs=members.runs(pp))
 
 
 def _chat_pp(arxiv_id):
@@ -297,6 +334,8 @@ def update_notes(arxiv_id):
         pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
         if pp:
             if "notes" in request.form:  # a resize sends only the height
+                if _note_is_stale(request.form["notes"], pp):
+                    return jsonify(notes=pp.notes or ""), 409
                 pp.notes = request.form["notes"]
             if notes_height:
                 pp.notes_height = notes_height
@@ -535,9 +574,10 @@ def notify_paper(arxiv_id):
                     figure_url=paper.figure_url,
                     figure_caption=paper.figure_caption,
                     project_emails=project.notification_emails,
-                    notes=pp.notes if pp else None,
+                    note_parts=members.note_parts(pp) if pp else [],
                     project=project,
                     flagged_by=getattr(members.current(project), "name", None),
+                    message=request.form.get("message", "").strip()[:NOTIFY_MESSAGE_MAX_CHARS],
                 )
                 if sent:
                     emails_used = project.notification_emails

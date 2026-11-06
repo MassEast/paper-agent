@@ -248,3 +248,28 @@ def test_generated_research_interest_over_the_limit_is_shown_not_saved(app, page
     assert page.locator("#generate-btn").is_enabled()
     with app.app_context():
         assert db.session.get(Project, seeded).research_interest == "original interest"
+
+
+@pytest.mark.slow
+def test_coming_back_online_does_not_overwrite_a_note_changed_meanwhile(app, page, seeded):
+    page.context.set_offline(True)
+    notes = _notes(page, seeded, COLL_ID)
+    notes.click()
+    notes.type("written here")
+    notes.blur()
+    page.wait_for_function(
+        "el => el.textContent.includes('not saved')", arg=_notes_status(page, seeded, COLL_ID).element_handle()
+    )
+    with app.app_context():
+        link = _link(app, seeded, COLL_ID)
+        db.session.get(ProjectPaper, link.id).notes = "written elsewhere"
+        db.session.commit()
+
+    page.context.set_offline(False)
+    page.evaluate("window.dispatchEvent(new Event('online'))")
+    page.wait_for_function(
+        "key => localStorage.getItem(key) === null", arg=f"notes-draft:{COLL_ID}:{seeded}", timeout=10_000
+    )
+    saved = _link(app, seeded, COLL_ID).notes
+    assert "written here" in saved and "written elsewhere" in saved
+    assert "edited elsewhere too" in _notes_status(page, seeded, COLL_ID).inner_text()

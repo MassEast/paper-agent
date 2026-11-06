@@ -285,9 +285,7 @@
     {% endblock %}
 
     <div id="offline-banner" role="status" hidden
-        style="position: fixed; top: 0; left: 0; right: 0; z-index: 60; padding: 8px 16px; text-align: center; font-size: 0.8rem; font-weight: 500; background-color: var(--error-bg); color: var(--error); border-bottom: 1px solid color-mix(in oklch, var(--error) 40%, transparent);">
-        You're offline — clicks and edits won't be saved until the connection is back. Notes you type are kept in this browser and saved automatically once you're online.
-    </div>
+        style="position: fixed; top: 0; left: 0; right: 0; z-index: 60; padding: 8px 16px; text-align: center; font-size: 0.8rem; font-weight: 500; background-color: var(--error-bg); color: var(--error); border-bottom: 1px solid color-mix(in oklch, var(--error) 40%, transparent);"></div>
     <div id="toast-stack" aria-live="assertive"
         style="position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 70; display: flex; flex-direction: column; gap: 8px; width: max-content; max-width: calc(100vw - 32px);"></div>
 
@@ -333,11 +331,48 @@
     // failed request leaves page and DB consistent — these handlers make the failure visible instead
     // of silent, and keep unsaved notes in localStorage until a save actually succeeds.
     (function () {
+        htmx.config.timeout = 30000;  // weak train wifi: say so instead of waiting forever
         var banner = document.getElementById('offline-banner');
-        function syncOnline() { banner.hidden = navigator.onLine; }
-        window.addEventListener('online', syncOnline);
-        window.addEventListener('offline', syncOnline);
-        syncOnline();
+        var down = false, probing = false, backTimer = null;
+        function pending() { return window.unsavedChecks.some(function (f) { return f(); }); }
+        function showBanner(text, ok) {
+            banner.textContent = text;
+            banner.style.backgroundColor = ok ? 'var(--success-bg)' : 'var(--error-bg)';
+            banner.style.color = ok ? 'var(--success-ink)' : 'var(--error)';
+            banner.hidden = false;
+        }
+        // The browser's own online flag stays true on wifi that passes nothing, so a failed request
+        // counts as down too, until a probe gets through.
+        function sync() {
+            if (!down) return;
+            clearTimeout(backTimer);
+            showBanner(pending()
+                ? 'You\'re offline. Your unsaved notes are kept in this browser. Keep this page open and they save by themselves once the connection is back.'
+                : 'You\'re offline. Moving or tagging papers won\'t work until the connection is back. Notes you write save by themselves once it is, as long as this page stays open.', false);
+        }
+        function back() {
+            down = false;
+            window.dispatchEvent(new Event('rw:back'));
+            showBanner(pending() ? 'Back online. Saving your notes…' : 'Back online.', true);
+            clearTimeout(backTimer);
+            backTimer = setTimeout(function () { banner.hidden = true; }, 3000);
+        }
+        function probe() {
+            if (probing || !down) return;
+            probing = true;
+            fetch('/static/tokens.css', { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(8000) })
+                .then(function () { probing = false; if (down) back(); })
+                .catch(function () { probing = false; setTimeout(probe, 5000); });
+        }
+        window.rwNet = {
+            failed: function () { down = true; sync(); probe(); },
+            answered: function () { if (down) back(); },
+            sync: sync
+        };
+        window.addEventListener('online', probe);
+        window.addEventListener('offline', rwNet.failed);
+        if (!navigator.onLine) rwNet.failed();
+        document.addEventListener('input', sync);
 
         window.showToast = function (msg) {
             var t = document.createElement('div');
@@ -350,9 +385,11 @@
 
         function isNotes(elt) { return elt.matches && elt.matches('textarea[data-arxiv-id]'); }
         function failMsg(detail, reason) {
-            return detail.requestConfig.verb === 'get'
-                ? reason + ' — couldn\'t load. Try again once you\'re back online.'
-                : reason + ' — that was NOT saved. Try again once you\'re back online.';
+            if (detail.requestConfig.verb === 'get') return reason + ' — couldn\'t load. Try again once you\'re back online.';
+            if (detail.xhr.status === 0 && navigator.onLine) {  // it may have arrived, only the answer got lost
+                return reason + ' — this may not have saved. Reload to check once the connection is back.';
+            }
+            return reason + ' — that was NOT saved. Try again once you\'re back online.';
         }
         // Notes have their own inline indicator + retry; everything else gets a toast.
         // A chat answer's poll (every 700 ms) would flood the screen while offline; the banner says it
@@ -361,7 +398,12 @@
             return elt.classList && (elt.classList.contains('chat-poll') || elt.classList.contains('enrich-status'));
         }
         document.body.addEventListener('htmx:sendError', function (e) {
+            rwNet.failed();
             if (!isNotes(e.detail.elt) && !isChatPoll(e.detail.elt)) showToast(failMsg(e.detail, 'No connection'));
+        });
+        document.body.addEventListener('htmx:timeout', function (e) {
+            rwNet.failed();
+            if (!isNotes(e.detail.elt) && !isChatPoll(e.detail.elt)) showToast(failMsg(e.detail, 'No answer from the server'));
         });
         document.body.addEventListener('htmx:responseError', function (e) {
             if (!isNotes(e.detail.elt)) showToast(failMsg(e.detail, 'Server error ' + e.detail.xhr.status));
@@ -373,6 +415,7 @@
         });
         document.body.addEventListener('htmx:afterRequest', function (e) {
             if (e.detail.elt.tagName === 'BUTTON') e.detail.elt.disabled = false;
+            if (e.detail.xhr && e.detail.xhr.status) rwNet.answered();
         });
 
         // --- Notes drafts: written on every keystroke, removed only once the server confirmed the
@@ -393,10 +436,11 @@
         function conflictText(mine, theirs) {
             return '<<<<<<< this browser (not saved before)\n' + mine + '\n=======\n' + theirs + '\n>>>>>>> saved version\n';
         }
+        var CONFLICT = 'conflict — edited elsewhere too, both versions kept';
         function setNotesStatus(t, text, ok) {
             var s = document.getElementById('notes-saved-' + noteId(t));
             s.textContent = text;
-            s.style.color = ok ? 'var(--success)' : 'var(--error)';
+            s.style.color = ok === null ? 'var(--ink-3)' : ok ? 'var(--success)' : 'var(--error)';
             s.style.display = text ? '' : 'none';
         }
         function pendingNotes() {
@@ -404,21 +448,38 @@
                 return localStorage.getItem(draftKey(t)) !== null;
             });
         }
+        // Every save says which note it started from, so the server refuses it if that note changed (409)
+        document.body.addEventListener('htmx:configRequest', function (e) {
+            if (isNotes(e.detail.elt)) e.detail.parameters.base = e.detail.elt._notesBase;
+        });
         window.notesAfterRequest = function (e) {
-            var t = e.detail.elt;
+            var t = e.detail.elt, status = e.detail.xhr.status;
             if (e.detail.successful) {
                 t._notesBase = e.detail.requestConfig.parameters.notes;
                 if (t.value === t._notesBase) localStorage.removeItem(draftKey(t));
                 else writeDraft(t);
+                if (t._conflict) { setNotesStatus(t, CONFLICT, false); return; }
                 setNotesStatus(t, 'saved', true);
-                setTimeout(function () { if (localStorage.getItem(draftKey(t)) === null) setNotesStatus(t, '', true); }, 1500);
+                setTimeout(function () { if (localStorage.getItem(draftKey(t)) === null && !t._conflict) setNotesStatus(t, '', true); }, 1500);
+            } else if (status === 409) {
+                var server = JSON.parse(e.detail.xhr.responseText).notes;
+                t.value = conflictText(t.value, server);
+                t._notesBase = server;
+                t._conflict = true;
+                writeDraft(t);
+                setNotesStatus(t, CONFLICT, false);
+                htmx.trigger(t, 'notes-retry');
             } else {
                 writeDraft(t);
-                setNotesStatus(t, navigator.onLine ? 'not saved — server error' : 'not saved — will retry when online', false);
+                setNotesStatus(t, status ? 'not saved — server error' : 'not saved — kept in this browser, will retry when online', false);
+                rwNet.sync();
             }
         };
         document.addEventListener('input', function (e) {
-            if (isNotes(e.target)) writeDraft(e.target);
+            if (!isNotes(e.target)) return;
+            e.target._conflict = false;
+            writeDraft(e.target);
+            setNotesStatus(e.target, 'saving…', null);
         });
         // Fires for every notes textarea htmx initialises: page load, swaps, and htmx.process().
         document.body.addEventListener('htmx:afterProcessNode', function (e) {
@@ -426,6 +487,18 @@
             if (!isNotes(t)) return;
             var server = t.value;
             t._notesBase = server;
+            t._noteDirty = function () { return localStorage.getItem(draftKey(t)) !== null; };
+            t._noteRefresh = function (d) {
+                var now = d.notes.replace(/\r\n/g, '\n');
+                if (now !== t.value) { t.value = now; t._notesBase = now; }
+            };
+            t._flushNote = function () {
+                if (!t._noteDirty()) return Promise.resolve();
+                return new Promise(function (done) {
+                    t.addEventListener('htmx:afterRequest', done, { once: true });
+                    htmx.trigger(t, 'notes-retry');
+                });
+            };
             var draft = readDraft(t);
             if (draft === null) return;
             if (draft.text === server) { localStorage.removeItem(draftKey(t)); return; }
@@ -435,14 +508,21 @@
             } else {
                 // Changed here (unsaved) and elsewhere (saved): keep both, like a git merge conflict.
                 t.value = conflictText(draft.text, server);
-                setNotesStatus(t, 'conflict — edited elsewhere too, both versions kept', false);
+                t._conflict = true;
+                setNotesStatus(t, CONFLICT, false);
             }
             writeDraft(t);
             if (navigator.onLine) setTimeout(function () { htmx.trigger(t, 'notes-retry'); }, 0);
         });
-        window.addEventListener('online', function () {
+        window.addEventListener('rw:back', function () {
             pendingNotes().forEach(function (t) { htmx.trigger(t, 'notes-retry'); });
         });
+        // Whatever is unsaved in a card goes out first, e.g. before Notify reads the note
+        window.flushNotes = function (card) {
+            return Promise.all(Array.prototype.map.call(card.querySelectorAll('textarea[data-arxiv-id], .rich-notes'), function (el) {
+                return el._flushNote();
+            }));
+        };
         unsavedChecks.push(function () { return pendingNotes().length > 0; });
         window.addEventListener('beforeunload', function (e) {
             if (window.unsavedChecks.some(function (f) { return f(); })) e.preventDefault();
@@ -527,5 +607,7 @@
     })();
     </script>
     <script src="/static/rich_notes.js"></script>
+    <script src="/static/note_lock.js"></script>
+    <script src="/static/notify.js"></script>
 </body>
 </html>
