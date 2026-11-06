@@ -132,9 +132,9 @@ def test_the_email_keeps_each_part_with_its_day(c, team):
     """Me on Sep 3, Felix on Sep 4, me again on Sep 9: three parts, also when the same person writes on two days."""
     ann, bea = team["people"]["Ann"], team["people"]["Bea"]
     c.post(f"/paper/{ARXIV}/notes-runs", data={"project_id": team["id"], "runs": json.dumps(
-        [[ann, "one\n", "2026-09-03"], [bea, "two\n", "2026-09-04"], [ann, "three\n", "2026-09-09"], [ann, "four", "2026-09-10"]])})
+        [[ann, "part-a\n", "2026-09-03"], [bea, "part-b\n", "2026-09-04"], [ann, "part-c\n", "2026-09-09"], [ann, "part-d", "2026-09-10"]])})
     html = _email(c, team)
-    days = ["Sep 3, 2026", "one", "Sep 4, 2026", "two", "Sep 9, 2026", "three", "Sep 10, 2026", "four"]
+    days = ["Sep 3, 2026", "part-a", "Sep 4, 2026", "part-b", "Sep 9, 2026", "part-c", "Sep 10, 2026", "part-d"]
     assert [html.index(d) for d in days] == sorted(html.index(d) for d in days)
 
 
