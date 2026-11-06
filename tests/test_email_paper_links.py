@@ -129,6 +129,11 @@ def _flag(project=None, flagged_by=None, emails="a@example.org"):
     return send
 
 
+def test_the_subject_says_who_flagged_the_paper():
+    assert _flag(flagged_by="Justus").call_args.args[0] == "📄 Justus flagged paper: Flagged One"
+    assert _flag().call_args.args[0] == "📄 Paper flagged: Flagged One"
+
+
 def test_the_flagged_paper_email_links_to_the_card():
     html = _flag().call_args.kwargs["content_html"]
     assert html.count("/projects/proj?paper=7") == 2  # the title and "Open in project"

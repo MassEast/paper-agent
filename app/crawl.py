@@ -1309,7 +1309,8 @@ def notify_important_paper(
         + _email_message_html(message, flagged_by) + paper_card + figure_html + view_link
     )
 
-    subject = f"📄 Paper flagged: {paper.title[:60]}{'…' if len(paper.title) > 60 else ''}"
+    flagged = f"{flagged_by} flagged paper" if flagged_by else "Paper flagged"
+    subject = f"📄 {flagged}: {paper.title[:60]}{'…' if len(paper.title) > 60 else ''}"
     return _send_project_email(project, subject, "", content_html, dashboard_url, dashboard_url, project_emails)
 
 
