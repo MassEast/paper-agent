@@ -20,14 +20,15 @@ CAPTION = "Figure 1: Overview of the method. The left panel shows the input, the
 
 
 def _pdf(two_columns=False, hidden_latex_data=False, figure=True, caption=CAPTION, at_top=False, word_lines=False,
-         title_page=False, label_row=False):
+         title_page=False, label_row=False, caption_font="helv"):
     """A letter page: running header and rule, a paragraph, Figure 1 (panel label above a box with labels in it),
     its caption, another paragraph. In two_columns the figure and caption are in the right column, with a
     paragraph in the left column at the same height. at_top: no paragraph above, the figure starts right below
     the running header (as in CLIP, 2103.00020). word_lines: the paragraph above ends in three lines that are a
     block each, the last one short, close above the figure (PDFs made in Word, 2610.35685). title_page: title and
     authors span both columns right above Figure 1 in the right column (2610.34626, 2610.39927). label_row: a
-    second panel label at the right end of the row, so the row is one block as wide as the column (2610.35817)."""
+    second panel label at the right end of the row, so the row is one block as wide as the column (2610.35817).
+    caption_font: "hebo" sets the caption in bold."""
     doc = pymupdf.open()
     page = doc.new_page(width=612, height=792)
     page.insert_text((72, 40), "Preprint. Under review.", fontsize=9)
@@ -59,7 +60,7 @@ def _pdf(two_columns=False, hidden_latex_data=False, figure=True, caption=CAPTIO
                                 fontsize=4)
     else:
         page.insert_text((x0 + 10, 300), "just a label", fontsize=9)
-    page.insert_textbox(pymupdf.Rect(x0, 395 + dy, x1, 440 + dy), caption, fontsize=9)
+    page.insert_textbox(pymupdf.Rect(x0, 395 + dy, x1, 440 + dy), caption, fontsize=9, fontname=caption_font)
     page.insert_textbox(pymupdf.Rect(x0, 450, x1, 600), PARAGRAPH, fontsize=9)
     return doc.tobytes()
 
@@ -108,6 +109,14 @@ def test_title_and_authors_beside_the_column_are_left_out():
 def test_hidden_latex_data_in_a_figure_is_not_taken_for_a_paragraph():
     png, _ = figures.crop_figure_1(_pdf(hidden_latex_data=True))
     assert png is not None and _height_pt(png) > 165
+
+
+def test_a_bold_caption_needs_no_colon_but_a_plain_sentence_is_no_caption():
+    # "Figure 1 SLA unifies…" in bold (2611.08373); body text can start the same way ("Figure 1 contrasts…")
+    bare = "Figure 1 Overview of the method with the input on the left and the output on the right side."
+    png, caption = figures.crop_figure_1(_pdf(caption=bare, caption_font="hebo"))
+    assert png is not None and caption.startswith("Figure 1 Overview")
+    assert figures.crop_figure_1(_pdf(caption=bare)) == (None, None)
 
 
 def test_no_figure_1_caption_or_only_text_above_it_gives_none():

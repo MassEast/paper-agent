@@ -24,6 +24,9 @@ HEADER_FRAC = 0.08     # the top strip of a page holds the running header and it
 MARGIN_PT = 4
 CAPTION_MAX_CHARS = 1200
 _CAPTION_RE = re.compile(r"\s*(?:Figure|Fig\.?)\s*1\s*[:.|]")
+# Some templates put no colon after the number ("Figure 1 SLA unifies…", 2611.08373); there the bold label marks the
+# caption, as body text can start a block the same way ("Figure 1 contrasts…", 2611.08091)
+_BARE_CAPTION_RE = re.compile(r"\s*(?:Figure|Fig\.?)\s*1\s+[A-Z]")
 
 
 def figures_dir() -> str:
@@ -52,12 +55,26 @@ def _clean_caption(text: str) -> str:
     return text
 
 
+def _starts_bold(page, block) -> bool:
+    """Whether the text block (from get_text("blocks")) begins with a bold span. The block numbers of "blocks" and
+    "dict" differ (images count in "dict"), so the block is found by its position."""
+    for b in page.get_text("dict")["blocks"]:
+        if b["type"] == 0 and abs(b["bbox"][0] - block[0]) < 1 and abs(b["bbox"][1] - block[1]) < 1:
+            span = b["lines"][0]["spans"][0]
+            return bool(span["flags"] & 16) or "bold" in span["font"].lower()
+    return False
+
+
+def _is_caption(page, block) -> bool:
+    return bool(_CAPTION_RE.match(block[4])) or (bool(_BARE_CAPTION_RE.match(block[4])) and _starts_bold(page, block))
+
+
 def crop_figure_1(pdf: bytes) -> tuple[Optional[bytes], Optional[str]]:
     """(PNG, caption) of Figure 1, or (None, None) if there is no "Figure 1" caption with a figure above it."""
     doc = pymupdf.open(stream=pdf, filetype="pdf")
     for page in doc:
         blocks = page.get_text("blocks")
-        cap = next((b for b in blocks if _CAPTION_RE.match(b[4])), None)
+        cap = next((b for b in blocks if _is_caption(page, b)), None)
         if cap is None:
             continue
         cap_rect = pymupdf.Rect(cap[:4])
