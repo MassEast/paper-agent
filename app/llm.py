@@ -151,7 +151,8 @@ def _llm(
 
     A completion cut off by max_tokens is retried at once with double the budget (up to
     MAX_TOKENS_CEILING): a reasoning model sometimes reasons past the cap, and a same-budget retry at low
-    temperature reproduces the identical cut-off (2026-10-08 log: 4x the same 18,357 chars).
+    temperature reproduces the identical cut-off (2026-10-08 log: 4x the same 18,357 chars). Cut off at the
+    ceiling, it moves on to the next model.
 
     Returns (response_text, model_used, elapsed_ms, usage_dict). Raises LLMUnavailableError
     if every model/attempt combination fails.
@@ -198,6 +199,13 @@ def _llm(
                         last_err = ValueError(f"completion cut off at max_tokens {budget}")
                         budget = min(budget * 2, MAX_TOKENS_CEILING)
                         continue
+                    if finish_reason == "length":
+                        # Cut off at the ceiling: retrying the same request loops the same way (2026-11-11,
+                        # 3 more 16k loops on one affiliation prompt, ~10 min), so try the next model
+                        _log.warning("[LLM] hit the max_tokens ceiling %d (raw %d chars, model %s), next model",
+                                     budget, len(raw), model)
+                        last_err = ValueError(f"completion cut off at the max_tokens ceiling {budget}")
+                        break
                     if not stripped:
                         # Model returned only a <think> block with no actual output
                         _log.warning("[LLM] empty after strip (raw %d chars, model %s): %s", len(raw), model, raw[:200])

@@ -47,8 +47,18 @@ def test_budget_stops_at_ceiling():
     responses = [_response("<think>loop", "length") for _ in range(10)]
     with patch.object(llm, "MODELS", ["only-model"]), pytest.raises(llm.LLMUnavailableError):
         _run(responses, sent)
-    # doublings count against the model's 5 attempts; the last one runs at the ceiling
+    # one try at the ceiling, then the model is given up on
     assert sent == [1024, 2048, 4096, 8192, 16384]
+
+
+def test_cutoff_at_the_ceiling_goes_to_the_next_model_at_once():
+    # 2026-11-11: an affiliation prompt looped to 16k three more times on the first model
+    sent = []
+    responses = [_response("<think>loop", "length") for _ in range(5)] + [_response('["Inria"]', "stop")]
+    with patch.object(llm, "MODELS", ["big", "medium"]):
+        (text, model, *_), _ = _run(responses, sent)
+    assert (text, model) == ('["Inria"]', "medium")
+    assert sent == [1024, 2048, 4096, 8192, 16384, 1024]
 
 
 @pytest.mark.slow
