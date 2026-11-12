@@ -403,3 +403,15 @@ def test_typing_in_a_note_shows_name_and_day_on_hover(live_server, browser_sessi
         runs = [members.runs(pp) for pp in pps if pp.notes]
         assert runs == [[[team["people"]["Justus"], "Nice idea.", date.today().isoformat()]]]
     context.close()
+
+
+def test_moving_to_my_collection_sets_no_tag(client, team, app):
+    """Since 2026-11-12 no automatic "to read": the paper opens in My Collection and its tags are set there."""
+    pid = team["id"]
+    _post(_as(client, team, "Justus"), "/paper/2611.00000/tag", project_id=pid, tag="related")
+    with app.app_context():
+        from app.models import ProjectMember
+        pp = ProjectPaper.query.filter_by(project_id=pid, paper_id=team["papers"][0]).first()
+        assert pp.manual_tag == "related" and pp.collected_at is not None
+        assert members.tags_for(pp, db.session.get(ProjectMember, team["people"]["Justus"])) == []
+        assert pp.tags_list == []

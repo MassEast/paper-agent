@@ -315,7 +315,7 @@ def test_a_title_list_that_does_not_fill_its_box_loads_more_by_itself(live_serve
 def test_a_collected_paper_is_shown_in_my_collection_and_new_papers_goes_on_after_it(live_server, browser_session,
                                                                                      big_project):
     """C (or the button) on a New Papers card: My Collection opens with that paper shown (its tags can be set
-    right away, "to read" is on); back in New Papers the paper that came after it is shown."""
+    right away; none is set by itself); back in New Papers the paper that came after it is shown."""
     browser, state = browser_session
     context = browser.new_context(storage_state=state, viewport={"width": 1440, "height": 900})
     pg = context.new_page()
@@ -328,7 +328,7 @@ def test_a_collected_paper_is_shown_in_my_collection_and_new_papers_goes_on_afte
         pg.wait_for_function("() => document.getElementById('paper-list').dataset.tab === 'col'")
         assert visible("curated-list").startswith("paper-card-2602-00002-")
         card = pg.locator("#curated-list > .paper-card:visible").first
-        assert "to read" in card.locator(".card-actions").inner_text().lower()
+        assert "to read" in card.locator(".card-actions").inner_text().lower()  # its tag buttons are there to set
         pg.locator(".paper-tab[data-tab='new']").click()
         assert visible("new-papers-list").startswith("paper-card-2602-00003-")
     finally:

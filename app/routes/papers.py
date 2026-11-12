@@ -113,7 +113,8 @@ def figure_file(name):
 @papers_bp.route("/paper/<arxiv_id>/tag", methods=["POST"])
 @login_required
 def tag_paper(arxiv_id):
-    """tag: one of MULTI_TAGS (toggle; collects the paper), "related" (Move to My Collection, tagged to read)
+    """tag: one of MULTI_TAGS (toggle; collects the paper), "related" (Move to My Collection, no tag: since 2026-11-12 the paper is
+    shown there so its tags can be set)
     or "" (Move to New Papers). Tags are per person in per_person projects."""
     pp = _project_paper(arxiv_id)
     tag = request.form.get("tag")
@@ -125,8 +126,6 @@ def tag_paper(arxiv_id):
             _collect(pp)
         elif tag == "related":
             _collect(pp)
-            if "to_read" not in tags:
-                tags = tags + ["to_read"]
         elif tag == "":
             pp.manual_tag = None
             pp.collected_at = None
