@@ -788,3 +788,43 @@ def test_prompt_leaves_out_keywords_and_notes_when_there_are_none(c, app, chat_p
     _idle(chat_pp["pp"])
     system = model.calls[0][0]["content"]
     assert "Search keywords" not in system and "notes on this paper" not in system
+
+
+@pytest.mark.slow
+def test_a_long_answer_stops_scrolling_once_the_question_is_at_the_top(live_server, browser_session, chat_pp,
+                                                                        monkeypatch, full_text):
+    """While an answer streams, the log follows it only until the question reaches the top, then stays, so the
+    answer can be read from its start; a reader who scrolls is left alone; the next question is followed again."""
+    browser, state = browser_session
+    long = "\n\n".join(f"Paragraph {i} of a long answer." for i in range(60))
+    model = FakeModel(["", "Start of the answer.", FakeModel.WAIT, long, FakeModel.WAIT, long + "\n\nThe end."],
+                      ["Short."])
+    monkeypatch.setattr(chat, "_llm_stream", model)
+    context = browser.new_context(storage_state=state)
+    pg = context.new_page()
+    try:
+        pg.goto(f"{live_server}/projects/chat-proj?paper={chat_pp['paper']}")
+        card = pg.locator(f'[id^="paper-card-{ARXIV.replace(".", "-")}-"]')
+        card.get_by_role("button", name="Ask about this paper").click()
+        pg.wait_for_function("() => !!(document.querySelector('.chat-form') || {})['htmx-internal-data']")
+        card.locator(".chat-input").fill("What is the main result?")
+        card.locator(".chat-input").press("Enter")
+        pg.wait_for_selector("text=Start of the answer.")
+        model.release()
+        pg.wait_for_selector("text=Paragraph 59 of a long answer.")
+        q_top = """() => { const log = document.querySelector('.chat-log'), qs = log.querySelectorAll('.chat-user');
+            return qs[qs.length - 1].getBoundingClientRect().top - log.getBoundingClientRect().top; }"""
+        at_bottom = "() => { const l = document.querySelector('.chat-log'); return l.scrollHeight - l.scrollTop - l.clientHeight < 5; }"
+        assert 0 <= pg.evaluate(q_top) <= 20 and not pg.evaluate(at_bottom)  # the question on top, not the end
+        pg.locator(".chat-log").evaluate("l => { l.scrollTop += 120; }")  # the reader reads on
+        reading = pg.locator(".chat-log").evaluate("l => l.scrollTop")
+        model.release()
+        pg.wait_for_selector("text=The end.")
+        assert abs(pg.locator(".chat-log").evaluate("l => l.scrollTop") - reading) < 5  # left where they are
+        pg.wait_for_function("() => !!(document.querySelector('.chat-form') || {})['htmx-internal-data']")
+        card.locator(".chat-input").fill("And briefly?")
+        card.locator(".chat-input").press("Enter")
+        pg.wait_for_function("() => document.querySelector('.chat-log').innerText.trim().endsWith('Short.')")
+        pg.wait_for_function(at_bottom)  # the new short exchange is shown  # the new short exchange is shown
+    finally:
+        context.close()

@@ -625,8 +625,10 @@
     </script>
     <script>
     // Paper chat (partials/chat_panel.html). One page-wide timer animates every "Thinking..." so the
-    // dots keep going while the polled message is swapped out under them; each chat log stays scrolled
-    // to the newest message unless the reader scrolled up in it.
+    // dots keep going while the polled message is swapped out under them. While an answer comes in, the log
+    // scrolls down only until the question is at its top (a long question: its last half and the answer's first
+    // half), then stays, so the answer can be read from its start while it is still written; the reader scrolls
+    // on. A reader who scrolled elsewhere is left there until they send the next question.
     (function () {
         var n = 0;
         setInterval(function () {
@@ -635,15 +637,54 @@
         }, 400);
         document.addEventListener('scroll', function (e) {
             var log = e.target;
-            if (log.classList && log.classList.contains('chat-log')) {
-                log.dataset.away = log.scrollHeight - log.scrollTop - log.clientHeight > 40 ? '1' : '';
-            }
+            if (!log.classList || !log.classList.contains('chat-log')) return;
+            if (log._stuck !== undefined && Math.abs(log.scrollTop - log._stuck) > 40) log.dataset.away = '1';
         }, true);
+        // How far down the log goes for the exchange that is on: the last question at the top
+        function stopAt(log) {
+            var qs = log.querySelectorAll('.chat-user:not(.chat-queued)'), q = qs[qs.length - 1];
+            var bottom = log.scrollHeight - log.clientHeight;
+            if (!q) return bottom;
+            var top = q.getBoundingClientRect().top - log.getBoundingClientRect().top + log.scrollTop - 8;
+            var limit = q.offsetHeight > log.clientHeight / 2 ? top + 8 + q.offsetHeight - log.clientHeight / 2 : top;
+            return Math.min(bottom, Math.max(0, limit));
+        }
         function stick() {
             document.querySelectorAll('.chat-log').forEach(function (log) {
-                if (!log.dataset.away) log.scrollTop = log.scrollHeight;
+                if (log.dataset.away) return;
+                var to = stopAt(log);
+                if (log.scrollTop < to) log.scrollTop = to;  // only down, never back up
+                log._stuck = log.scrollTop;
             });
         }
+        window.chatStick = stick;
+        // The log is redrawn when an answer ends: it keeps where it was scrolled to (and whether the reader moved)
+        var kept = {};
+        document.body.addEventListener('htmx:beforeSwap', function (e) {
+            var t = e.detail.target;
+            if (!t || !t.querySelectorAll) return;
+            var logs = t.classList.contains('chat-log') ? [t] : t.querySelectorAll('.chat-log');
+            Array.prototype.forEach.call(logs, function (log) {
+                if (log.id && !(log.id in kept)) kept[log.id] = { top: log.scrollTop, away: log.dataset.away, stuck: log._stuck };
+            });
+        });
+        document.body.addEventListener('htmx:afterSwap', function () {
+            Object.keys(kept).forEach(function (id) {
+                var log = document.getElementById(id), k = kept[id];
+                delete kept[id];
+                if (!log || k.fresh) return;
+                log.scrollTop = k.top;
+                log.dataset.away = k.away || '';
+                log._stuck = k.stuck;
+            });
+        });
+        // A new question: follow it again, wherever the reader had scrolled to
+        document.body.addEventListener('htmx:beforeRequest', function (e) {
+            var form = e.detail.elt;
+            if (!form.classList || !form.classList.contains('chat-form')) return;
+            var log = form.closest('.chat-panel') && form.closest('.chat-panel').querySelector('.chat-log');
+            if (log) { log.dataset.away = ''; delete log._stuck; kept[log.id] = { fresh: true }; }
+        });
         // Math in answers: the server marks it up as .math (TeX as text); KaTeX draws it. Without
         // KaTeX (CDN blocked) the TeX simply stays readable as text.
         function math() {
