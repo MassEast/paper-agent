@@ -44,6 +44,9 @@ class Project(db.Model):
         return []
 
 
+_ARXIV_REF_RE = re.compile(r"\d{4}\.\d{4,5}(v\d+)?|[a-z-]+(\.[A-Z]{2})?/\d{7}(v\d+)?")
+
+
 class Paper(db.Model):
     __tablename__ = "papers"
 
@@ -127,6 +130,23 @@ class Paper(db.Model):
     def is_arxiv(self) -> bool:
         """False for web papers added directly (arxiv_id starts with 'web:')."""
         return bool(self.arxiv_id) and not self.arxiv_id.startswith("web:")
+
+    @property
+    def link_ref(self) -> str:
+        """How links name this paper (/projects/<slug>?paper=<ref>): its arXiv id, which says which paper it is;
+        the row id for a paper not on arXiv (its "web:..." id is long). Since 2026-11-12; before, always the row id."""
+        return self.arxiv_id if self.is_arxiv else str(self.id)
+
+    @staticmethod
+    def by_ref(ref):
+        """The paper a link names: digits are the row id (links from before 2026-11-12, papers not on arXiv),
+        anything else an arXiv id (a version suffix is ignored). None if there is no such paper."""
+        ref = (ref or "").strip()
+        if ref.isdigit():
+            return db.session.get(Paper, int(ref))
+        if not _ARXIV_REF_RE.fullmatch(ref):
+            return None
+        return Paper.query.filter_by(arxiv_id=re.sub(r"v\d+$", "", ref)).first()
 
     @property
     def authors_list(self):

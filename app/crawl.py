@@ -26,7 +26,7 @@ from app import arxiv_meta, resources
 from app.usage import counted, counts, current_tokens
 from app.biorxiv import search_biorxiv, biorxiv_paper_id, fetch_versions as biorxiv_versions, PDF_URL as BIORXIV_PDF_URL
 from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id, \
-    _is_biorxiv, _biorxiv_gap, fetch_biorxiv_figure, doi_from_url, nightly_running
+    _is_biorxiv, _biorxiv_gap, fetch_biorxiv_figure, doi_from_url, nightly_running, FULL_TEXT_CHARS
 
 API_KEY = os.environ.get("LLM_API_KEY")
 SCHOLAR_API_KEY = os.environ.get("SCHOLAR_API_KEY")
@@ -1229,7 +1229,7 @@ def notify_important_paper(
     flagged_by: Optional[str] = None, message: str = ""
 ):
     """Build and send the "paper flagged as important" email (single-paper card + notes). The title and the
-    "Open in project" link go to the paper's card (?paper=<Paper.id>); in a per-person project everyone gets
+    "Open in project" link go to the paper's card (?paper=<Paper.link_ref>); in a per-person project everyone gets
     their own copy (_send_project_email) and the email says who flagged it.
 
     note_parts: members.note_parts, each person's part under their name. message: what the sender added on
@@ -1391,7 +1391,7 @@ def _first_paper(top_papers):
 
 def _email_card_url(dashboard_url: str, paper) -> str:
     """The project page with this paper shown first in whichever section it is in now."""
-    return f"{dashboard_url}?paper={paper.id}"
+    return f"{dashboard_url}?paper={paper.link_ref}"
 
 
 def _email_others_html(papers: list, dashboard_url: str) -> str:
@@ -1448,7 +1448,7 @@ def notify_crawl_complete(
     """Build and send the crawl-complete summary email (stats table + featured paper card).
     tokens_used: what the crawl cost, all passes together (shown with a cost estimate, so people see it).
     added_papers: every Paper this crawl added; the ones besides the featured paper are listed in a table.
-    Paper titles link to the paper's card in the project (?paper=<Paper.id>, see paper_lists.focus_status).
+    Paper titles link to the paper's card in the project (?paper=<Paper.link_ref>, see paper_lists.focus_status).
 
     Returns the bool from send_notification (True = sent).
     """
@@ -2675,11 +2675,11 @@ def _screen_paper_deep(
         ref_text=ref_text,
         title=title,
         abstract=abstract,
-        paper_content=paper_content[:150000],
+        paper_content=paper_content[:FULL_TEXT_CHARS],
     )
 
     result, model, elapsed, usage = _llm_json(
-        [{"role": "user", "content": deep_prompt}], temperature=0.3, max_tokens=4096
+        [{"role": "user", "content": deep_prompt}], temperature=0.3, max_tokens=4096, first_model_only=True
     )
     tokens_used = int(usage.get("total_tokens", 0))
 
@@ -2781,12 +2781,12 @@ def extract_main_contributions(
 
     prompt = prompts.MAIN_CONTRIBUTIONS.format(
         title=title,
-        content=(content[:100000] if content else abstract),
+        content=(content[:FULL_TEXT_CHARS] if content else abstract),
     )
 
     try:
         result, model, elapsed, usage = _llm_json(
-            [{"role": "user", "content": prompt}], temperature=0.2, max_tokens=4096
+            [{"role": "user", "content": prompt}], temperature=0.2, max_tokens=4096, first_model_only=bool(content)
         )
         if isinstance(result, dict):
             contributions = result.get("main_contributions", [])
@@ -2818,12 +2818,12 @@ def generate_summary_with_full_content(
     prompt = prompts.SUMMARY_WITH_FULL_CONTENT.format(
         title=title,
         abstract=abstract,
-        content=(content[:150000] if content else abstract),
+        content=(content[:FULL_TEXT_CHARS] if content else abstract),
     )
 
     try:
         result, model, elapsed, usage = _llm_json(
-            [{"role": "user", "content": prompt}], temperature=0.3, max_tokens=4096
+            [{"role": "user", "content": prompt}], temperature=0.3, max_tokens=4096, first_model_only=bool(content)
         )
         if isinstance(result, dict) and isinstance(result.get("summary"), list):
             result["summary"] = " ".join(result["summary"])
@@ -3469,13 +3469,14 @@ def run_crawl(
 def generate_relevance_reason(title: str, abstract: str, research_interest: str, text: str | None = None) -> str:
     """One sentence on why a paper matters for a research interest — for papers that reach a
     project without being screened (copied/moved from another project, or added by hand). Screened papers get
-    theirs from the deep relevance check instead. Reads the full text like that check (same cut-off) when there is
+    theirs from the deep relevance check instead. Reads the full text like that check (utils.FULL_TEXT_CHARS, the large model only) when there is
     one. "" if the LLM answer can't be parsed."""
     prompt = prompts.RELEVANCE_REASON.format(
         research_interest=research_interest, title=title, abstract=abstract or "",
-        content=(text or "")[:150000] or "(no full text: judge from the abstract)",
+        content=(text or "")[:FULL_TEXT_CHARS] or "(no full text: judge from the abstract)",
     )
-    result, _, _, _ = _llm_json([{"role": "user", "content": prompt}], temperature=0.3, max_tokens=4096)
+    result, _, _, _ = _llm_json([{"role": "user", "content": prompt}], temperature=0.3, max_tokens=4096,
+                                first_model_only=bool(text))
     if not isinstance(result, dict):
         _log.warning("[relevance-reason] unparseable answer for %r: %r", title[:80], result)
         return ""

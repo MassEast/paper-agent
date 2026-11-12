@@ -36,9 +36,18 @@ def list_state(values) -> dict:
         "col_group": values.get("col_group") == "1",
         "col_tags": [t for t in (values.get("col_tags") or "").split(",") if t in TAGS],
         "search": (values.get("search") or "").strip(),
-        # A paper opened from the email (?paper=<Paper.id>): shown first in whichever section it is in
-        "focus": int(values["paper"]) if (values.get("paper") or "").isdigit() else None,
+        # A paper opened from a link (?paper=<arXiv id or Paper.id>, Paper.by_ref): shown first in whichever section
+        "focus": _focus(values.get("paper")),
     }
+
+
+def _focus(ref):
+    """The Paper.id a link names; -1 for a link to a paper that doesn't exist (the page says it is gone)."""
+    from app.models import Paper
+    if not ref:
+        return None
+    paper = Paper.by_ref(ref)
+    return paper.id if paper else -1
 
 
 def added_key(pp):

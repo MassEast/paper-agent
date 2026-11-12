@@ -179,8 +179,8 @@ def test_connections_link_to_the_cards_in_this_project(c, card):
     html = _card(_page(c, card), "2611.10012")
     side = html[html.index('<aside class="card-side">'):html.index("</aside>")]
     assert "Connections" in side
-    assert f'Found because it cites <a href="/projects/{SLUG}?paper={seed.id}"' in side
-    assert f'Also cites <a href="/projects/{SLUG}?paper={cited.id}"' in side and "from My Collection" in side
+    assert f'Found because it cites <a href="/projects/{SLUG}?paper=2401.20001"' in side
+    assert f'Also cites <a href="/projects/{SLUG}?paper=2401.20002"' in side and "from My Collection" in side
     assert "Nora B also wrote" in side
 
 
@@ -229,7 +229,7 @@ def test_the_share_button_next_to_the_title_links_to_this_card(c, card):
     p, _ = card["add"]("2611.40001")
     html = _card(_page(c, card), "2611.40001")
     title_to_authors = html[html.index("Paper 2611.40001"):html.index('class="card-authors"')]
-    assert f'data-share="/projects/{SLUG}?paper={p.id}"' in title_to_authors
+    assert f'data-share="/projects/{SLUG}?paper=2611.40001"' in title_to_authors
     assert "#icon-share" in title_to_authors
 
 
@@ -250,6 +250,7 @@ def test_share_copies_the_link_and_the_link_opens_the_card(live_server, browser_
     context = browser.new_context(storage_state=state, permissions=["clipboard-read", "clipboard-write"])
     pg = context.new_page()
     try:
+        pid = "2611.40003"  # links name a paper by its arXiv id
         pg.goto(f"{live_server}/projects/share-proj?paper={pid}")
         pg.locator(f'button.card-share[data-share$="?paper={pid}"]').click()
         pg.get_by_text("Link copied").wait_for()

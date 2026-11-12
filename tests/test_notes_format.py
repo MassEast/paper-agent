@@ -55,6 +55,8 @@ def test_email_html_shows_a_paper_of_this_app_by_its_title(app, paper, monkeypat
         missing = note_format.to_html("https://agent.example.org/projects/x?paper=999999")
     assert out == f'i added it here too (see <a href="{url}" style="color:#7c3aed;">“Parallel Loop Transformer”</a>)'
     assert "Parallel Loop" not in other_host and "Parallel Loop" not in missing
+    with app.app_context():  # links name a paper by its arXiv id since 2026-11-12
+        assert "“Parallel Loop Transformer”" in note_format.to_html("https://agent.example.org/projects/x?paper=2611.30001")
 
 
 def test_url_trimming_keeps_brackets_the_link_opened():
@@ -66,8 +68,9 @@ def test_paper_titles_endpoint(client, paper):
     assert client.get("/papers/titles?ids=1").status_code in (302, 401)
     with client.session_transaction() as sess:
         sess["logged_in"] = True
-    d = client.get(f"/papers/titles?ids={paper['paper']},abc,999999").get_json()
-    assert d == {str(paper["paper"]): "Parallel Loop Transformer"}
+    d = client.get(f"/papers/titles?ids={paper['paper']},abc,999999,2611.30001,2611.30001v2,2601.99999").get_json()
+    assert d == {str(paper["paper"]): "Parallel Loop Transformer", "2611.30001": "Parallel Loop Transformer",
+                 "2611.30001v2": "Parallel Loop Transformer"}  # the old number or the arXiv id
     assert client.get("/papers/titles").get_json() == {}
 
 
@@ -119,7 +122,7 @@ def test_plain_notes_show_formatted_and_edit_as_text(live_server, browser_sessio
         card = pg.locator(f'[data-pp-card="{paper["pp"]}"]')
         ta = card.locator("textarea[data-arxiv-id]")
         ta.click()
-        link = f"{live_server}/projects/{SLUG}?paper={paper['paper']}"
+        link = f"{live_server}/projects/{SLUG}?paper=2611.30001"  # the paper's arXiv id
         ta.fill(f"see {link} and this is key")
         # select "key" and make it bold with the keyboard
         ta.evaluate("t => { const i = t.value.indexOf('key'); t.setSelectionRange(i, i + 3); }")
@@ -206,7 +209,7 @@ def test_the_notify_email_shows_notes_and_the_message_formatted(app, paper, monk
     from unittest.mock import patch
     from app import crawl
     monkeypatch.setenv("SERVER_URL", "https://agent.example.org")
-    flagged = SimpleNamespace(id=7, title="Flagged One", authors_list=[], year=2026, citation_count=0, page_count=0,
+    flagged = SimpleNamespace(id=7, link_ref="2611.00007", title="Flagged One", authors_list=[], year=2026, citation_count=0, page_count=0,
                               institutions_list=[], summary=None, landing_url="https://arxiv.org/abs/2611.00007")
     link = f"https://agent.example.org/projects/llm-anatomy?paper={paper['paper']}"
     with app.app_context(), patch("app.crawl.send_notification", return_value=True) as send:

@@ -306,11 +306,11 @@ def chat_remove_queued(msg_id):
 @papers_bp.route("/papers/titles")
 @login_required
 def paper_titles():
-    """{paper id: title} for the paper links in notes, which show a paper of this app by its title
-    (notes_format.js). At most 50 ids per request."""
-    ids = [int(i) for i in request.args.get("ids", "").split(",") if i.strip().isdigit()][:50]
-    rows = Paper.query.with_entities(Paper.id, Paper.title).filter(Paper.id.in_(ids)).all() if ids else []
-    return jsonify({str(pid): title for pid, title in rows})
+    """{ref: title} for the paper links in notes, which show a paper of this app by its title (notes_format.js);
+    a ref is an arXiv id or a paper id (Paper.by_ref). At most 50 per request."""
+    refs = [r.strip() for r in request.args.get("ids", "").split(",") if r.strip()][:50]
+    found = {r: Paper.by_ref(r) for r in refs}
+    return jsonify({r: p.title for r, p in found.items() if p})
 
 
 @papers_bp.route("/project-paper/<int:pp_id>/card")

@@ -31,7 +31,7 @@ from app import db, prompts
 from app.llm import MAX_TOKENS_CEILING, MODELS, LLMUnavailableError, _llm_stream
 from app.models import ChatMessage, PaperText, ProjectPaper
 from app.usage import counted
-from app.utils import MIN_TEXT_CHARS, _is_biorxiv, fetch_biorxiv_full_text, fetch_paper_full_text, fetch_pdf_text
+from app.utils import FULL_TEXT_CHARS, MIN_TEXT_CHARS, _is_biorxiv, fetch_biorxiv_full_text, fetch_paper_full_text, fetch_pdf_text
 
 _log = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ CONTEXT_LIMIT = int(os.environ.get("CHAT_CONTEXT_TOKENS", 196000))
 # whole rest of the context (answer_budget): a hard question once made the model think through 16k tokens and
 # stop before writing anything (2026-11-04).
 MAX_ANSWER_TOKENS = MAX_TOKENS_CEILING
-MAX_PAPER_CHARS = 150_000  # ~40k tokens, the same cap the deep relevance check uses
+MAX_PAPER_CHARS = FULL_TEXT_CHARS  # ~100k tokens, the same cap the deep relevance check uses (references left out)
 MAX_QUESTION_CHARS = 20_000
 
 # Label on the chat and the tooltip explaining it

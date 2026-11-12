@@ -24,8 +24,8 @@
         try {
             var u = new URL(url);
             if (u.host !== window.location.host || !/^\/projects\/[\w-]+\/?$/.test(u.pathname)) return null;
-            var id = u.searchParams.get('paper');
-            return id && /^\d+$/.test(id) ? id : null;
+            var id = u.searchParams.get('paper');  // an arXiv id, or a paper id (older links, papers not on arXiv)
+            return id && /^(\d+|\d{4}\.\d{4,5}(v\d+)?|[a-z-]+(\.[A-Z]{2})?\/\d{7}(v\d+)?)$/.test(id) ? id : null;
         } catch (e) { return null; }
     }
 
@@ -34,7 +34,7 @@
         var missing = ids.filter(function (id) { return !(id in titles); });
         if (!missing.length) return;
         missing.forEach(function (id) { titles[id] = null; });
-        fetch('/papers/titles?ids=' + missing.join(','))
+        fetch('/papers/titles?ids=' + missing.map(encodeURIComponent).join(','))
             .then(function (r) { return r.ok ? r.json() : {}; })
             .then(function (d) {
                 missing.forEach(function (id) { titles[id] = d[id] || ''; });

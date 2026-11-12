@@ -238,12 +238,14 @@ def test_added_paper_fills_in_without_a_reload(live_server, browser_session, app
 
 
 def test_the_why_line_reads_the_full_text(app, added):
-    """Like the crawl's deep check: the full text goes to the model, cut where that check cuts it."""
-    long_text = "Section on attention heads. " * 8000  # over the cut-off
+    """Like the crawl's deep check: the full text goes to the large model only, cut where that check cuts it."""
+    from app.utils import FULL_TEXT_CHARS
+    long_text = "Section on attention heads. " * (FULL_TEXT_CHARS // 20)  # over the cut-off
     with app.app_context(), patch("app.crawl._llm_json", return_value=({"reason": "R"}, "m", 1, {})) as llm:
         assert crawl.generate_relevance_reason("T", "A", "attention", long_text) == "R"
         prompt = llm.call_args.args[0][0]["content"]
-        assert "Section on attention heads." in prompt and len(prompt) < 150000 + 2000
+        assert "Section on attention heads." in prompt and len(prompt) < FULL_TEXT_CHARS + 2000
+        assert llm.call_args.kwargs["first_model_only"] is True
         crawl.generate_relevance_reason("T", "A", "attention", None)
         assert "(no full text: judge from the abstract)" in llm.call_args.args[0][0]["content"]
 

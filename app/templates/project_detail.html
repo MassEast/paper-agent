@@ -1757,7 +1757,7 @@
             // or a shared link opens it. Without as=: a shared link must not make the visitor someone else.
             const u = new URL(location.href), shown = cs[c.idx];
             u.searchParams.delete('as');
-            if (shown && shown.dataset.paperId) u.searchParams.set('paper', shown.dataset.paperId);
+            if (shown && shown.dataset.paperRef) u.searchParams.set('paper', shown.dataset.paperRef);
             else u.searchParams.delete('paper');
             if (u.href !== location.href) history.replaceState(null, '', u);
             sessionStorage.setItem('rw-shown-paper-url', u.href);
@@ -1846,8 +1846,31 @@
             sx = null;
             if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(sname, dx < 0 ? 1 : -1);
         }, { passive: true });
+        // A paper moved to My Collection from New Papers: show it there, so its tags can be set right away. New
+        // Papers keeps its place (the next paper), so going back to it carries on where one was.
+        let collected = null;
+        document.addEventListener('htmx:beforeRequest', function (e) {
+            const btn = e.detail.elt;
+            if (btn.dataset && btn.dataset.act === 'keep' && tab() === 'new') {
+                const card = btn.closest('.paper-card');
+                collected = card && card.dataset.paperId;
+            }
+        });
+        function showCollected() {
+            if (!collected) return;
+            const list = document.getElementById(carousels.col.list);
+            const i = cards(list).findIndex(card => card.dataset.paperId === collected);
+            if (i < 0) return;
+            collected = null;
+            list.dataset.carouselInit = '1';
+            carousels.col.idx = i;
+            showPaperTab('col');
+        }
+        document.addEventListener('htmx:afterRequest', function (e) {
+            if (!e.detail.successful && e.detail.elt.dataset && e.detail.elt.dataset.act === 'keep') collected = null;
+        });
         document.addEventListener('htmx:afterSwap', show);  // before settle, so a fresh page never flashes
-        document.addEventListener('htmx:afterSettle', show);
+        document.addEventListener('htmx:afterSettle', function () { show(); showCollected(); });
         document.addEventListener('DOMContentLoaded', show);
     })();
 </script>

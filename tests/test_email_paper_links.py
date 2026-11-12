@@ -1,4 +1,5 @@
-"""Paper titles in the crawl email open the paper's card on the project page (?paper=<Paper.id>), wherever
+"""Paper titles in the crawl email open the paper's card on the project page (?paper=<arXiv id>, Paper.link_ref;
+older links with the Paper.id keep working), wherever
 the paper is by then: still in New Papers, collected by someone, or trashed. The email also lists every
 other paper the crawl added (since 2026-11-02)."""
 
@@ -15,7 +16,7 @@ from app.paper_lists import PAGE_SIZE
 
 
 def _paper(i, **kw):
-    return SimpleNamespace(id=i, title=f"Paper {i}", institutions_list=kw.get("insts", []), year=2026,
+    return SimpleNamespace(id=i, link_ref=f"2611.{i:05d}", title=f"Paper {i}", institutions_list=kw.get("insts", []), year=2026,
                            published_date=kw.get("pub"), citation_count=kw.get("cites", 0))
 
 
@@ -30,12 +31,12 @@ def test_featured_title_and_the_other_added_papers_link_to_their_cards():
     featured = _paper(1)
     other = _paper(2, insts=["EPFL", "MIT", "CMU"], pub=date(2026, 10, 30), cites=3)
     html, text = _send(featured, [featured, other])
-    assert html.count("/projects/proj?paper=1") == 1  # the featured title, not repeated in the table
+    assert html.count("/projects/proj?paper=2611.00001") == 1  # the featured title, not repeated in the table
     assert "Also added (1)" in html
-    assert "/projects/proj?paper=2" in html and "EPFL, MIT et al." in html
+    assert "/projects/proj?paper=2611.00002" in html and "EPFL, MIT et al." in html
     assert "Oct 30, 2026" in html and "3 citations" in html
     assert "arxiv.org/abs/" in html  # the arXiv link stays
-    assert "- Paper 2: http" in text and "?paper=2" in text
+    assert "- Paper 2: http" in text and "?paper=2611.00002" in text
 
 
 def test_a_single_added_paper_has_no_table_and_a_long_list_is_cut():
@@ -114,14 +115,23 @@ def test_a_collected_or_trashed_paper_says_where_it_went(c, focus_project):
     assert re.search(r'data-pp-card="\d+"', html)  # Trash shows full cards (inbox layout)
 
 
+def test_links_name_papers_by_arxiv_id_and_old_links_by_number_still_work(c, focus_project):
+    _, slug, ids = focus_project
+    for ref in ("2610.90012", "2610.90012v3", str(ids["new12"])):  # the arXiv id (any version) or the old number
+        html = c.get(f"/projects/{slug}?paper={ref}").get_data(as_text=True)
+        assert "still in New Papers, shown first below" in html and _new_titles(html)[0] == "New 12"
+    assert f'data-paper-ref="2610.90012"' in html
+
+
 def test_a_paper_not_in_the_project_and_a_page_without_one(c, focus_project):
     _, slug, _ = focus_project
     assert "no longer in this project" in c.get(f"/projects/{slug}?paper=999999").get_data(as_text=True)
+    assert "no longer in this project" in c.get(f"/projects/{slug}?paper=2601.99999").get_data(as_text=True)
     assert "paper-focus-note" not in c.get(f"/projects/{slug}").get_data(as_text=True)
 
 
 def _flag(project=None, flagged_by=None, emails="a@example.org"):
-    paper = SimpleNamespace(id=7, title="Flagged One", authors_list=[], year=2026, citation_count=0, page_count=0,
+    paper = SimpleNamespace(id=7, link_ref="2611.00007", title="Flagged One", authors_list=[], year=2026, citation_count=0, page_count=0,
                             institutions_list=[], summary=None, landing_url="https://arxiv.org/abs/2611.00007")
     with patch("app.crawl.send_notification", return_value=True) as send:
         assert crawl.notify_important_paper(paper, "P", "proj", project_emails=emails, project=project,
@@ -136,7 +146,7 @@ def test_the_subject_says_who_flagged_the_paper():
 
 def test_the_flagged_paper_email_links_to_the_card():
     html = _flag().call_args.kwargs["content_html"]
-    assert html.count("/projects/proj?paper=7") == 2  # the title and "Open in project"
+    assert html.count("/projects/proj?paper=2611.00007") == 2  # the title and "Open in project"
     assert "arxiv.org/abs/2611.00007" in html  # the arXiv link stays
     assert "Flagged at" in html
 
@@ -157,7 +167,7 @@ def test_a_flagged_paper_in_a_per_person_project_goes_to_everyone_with_their_own
     sent = {c.kwargs["project_emails"]: c.kwargs["content_html"] for c in send.call_args_list}
     assert set(sent) == {"a@example.org", "b@example.org"}
     for email, html in sent.items():
-        assert f"/projects/proj?as={ids[email]}&paper=7" in html
+        assert f"/projects/proj?as={ids[email]}&paper=2611.00007" in html
     assert "Flagged by A at" in sent["b@example.org"]
 
 
@@ -170,16 +180,17 @@ def test_every_card_carries_its_paper_id_for_the_address_bar(c, focus_project):
 @pytest.mark.slow
 def test_the_address_bar_names_the_shown_card_so_reload_and_shared_links_open_it(live_server, browser_session,
                                                                                 focus_project):
-    """Since 2026-11-04: picking a card writes ?paper=<Paper.id> (the emails' link) into the address bar."""
+    """Since 2026-11-04: picking a card writes ?paper=<its link ref> (the emails' link) into the address bar."""
     _, slug, ids = focus_project
+    ref = {"new0": "2610.90000", "new2": "2610.90002", "col": "2610.80015"}.get  # the fixture's arXiv ids
     browser, state = browser_session
     context = browser.new_context(storage_state=state)
     page = context.new_page()
     page.goto(f"{live_server}/projects/{slug}?as=1")
     page.wait_for_function("window.htmx !== undefined")
-    assert f"paper={ids['new0']}" in page.url and "as=" not in page.url  # the first card; never someone's as=
+    assert f"paper={ref('new0')}" in page.url and "as=" not in page.url  # the first card; never someone's as=
     page.locator("#inbox-list .inbox-item").nth(2).click()
-    assert page.url.endswith(f"?paper={ids['new2']}")
+    assert page.url.endswith(f"?paper={ref('new2')}")
     page.reload()
     page.wait_for_function("window.htmx !== undefined")
     shown = page.locator("#new-papers-list > .paper-card:visible")
@@ -190,5 +201,5 @@ def test_the_address_bar_names_the_shown_card_so_reload_and_shared_links_open_it
     assert other.locator("#paper-focus-note").count() == 1
     other.close()
     page.evaluate("showPaperTab('col')")
-    assert page.url.endswith(f"?paper={ids['col']}")
+    assert page.url.endswith(f"?paper={ref('col')}")
     context.close()

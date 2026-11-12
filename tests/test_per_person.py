@@ -244,7 +244,7 @@ def test_everyone_gets_their_own_email_with_their_own_links(team, app):
     to = [c.kwargs["project_emails"] for c in send.call_args_list]
     assert to == ["justus.westerhoff@example.org", "FelixMaria.Doe@example.org"]
     fe_html = send.call_args_list[1].kwargs["content_html"]
-    assert f"/projects/{SLUG}?as={team['people']['Felix']}&paper={team['papers'][0]}" in fe_html
+    assert f"/projects/{SLUG}?as={team['people']['Felix']}&paper=2611.00000" in fe_html
     assert f'/projects/{SLUG}?as={team["people"]["Felix"]}"' in fe_html  # "View and tag papers"
 
 

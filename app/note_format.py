@@ -20,20 +20,19 @@ def _trim_url(url: str) -> str:
     return url
 
 
-def _paper_id(url: str) -> int | None:
-    """The paper id of a link to a paper of this app (SERVER_URL's host, /projects/<slug>?paper=<id>)."""
+def _paper_ref(url: str) -> str | None:
+    """What a link to a paper of this app names (SERVER_URL's host, /projects/<slug>?paper=<ref>, Paper.by_ref)."""
     u, server = urlparse(url), urlparse(os.environ.get("SERVER_URL", "http://localhost:5001"))
     if u.netloc != server.netloc or not re.fullmatch(r"/projects/[\w-]+/?", u.path):
         return None
-    pid = parse_qs(u.query).get("paper", [""])[0]
-    return int(pid) if pid.isdigit() else None
+    return parse_qs(u.query).get("paper", [""])[0] or None
 
 
 def _link(url: str) -> str:
     from app import db
     from app.models import Paper
-    pid = _paper_id(url)
-    paper = db.session.get(Paper, pid) if pid else None
+    ref = _paper_ref(url)
+    paper = Paper.by_ref(ref) if ref else None
     text = f"“{paper.title}”" if paper else url
     return f'<a href="{html.escape(url)}" style="{_LINK_STYLE}">{html.escape(text)}</a>'
 

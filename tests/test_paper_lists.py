@@ -240,8 +240,9 @@ def test_inbox_title_list_and_keys_on_a_laptop(live_server, browser_session, big
     pg.keyboard.press("k")
     assert shown().startswith("paper-card-2602-00002-")
 
-    pg.keyboard.press("c")  # to My Collection: the next paper takes its place
-    pg.wait_for_function("() => !document.querySelector('#new-papers-list [id^=\"paper-card-2602-00002-\"]')")
+    pg.keyboard.press("c")  # to My Collection, which opens with it; in New Papers the next paper takes its place
+    pg.wait_for_function("() => document.getElementById('paper-list').dataset.tab === 'col'")
+    pg.locator(".paper-tab[data-tab='new']").click()
     assert shown().startswith("paper-card-2602-00003-") and pg.locator("#new-count").inner_text() == f"{N_NEW - 1}"
     pg.keyboard.press("x")  # trash
     pg.wait_for_function("() => !document.querySelector('#new-papers-list [id^=\"paper-card-2602-00003-\"]')")
@@ -306,5 +307,29 @@ def test_a_title_list_that_does_not_fill_its_box_loads_more_by_itself(live_serve
         if more.count():
             more.click()
             pg.wait_for_function(f"() => document.querySelectorAll('#inbox-list .inbox-item').length > {n}")
+    finally:
+        context.close()
+
+
+@pytest.mark.slow
+def test_a_collected_paper_is_shown_in_my_collection_and_new_papers_goes_on_after_it(live_server, browser_session,
+                                                                                     big_project):
+    """C (or the button) on a New Papers card: My Collection opens with that paper shown (its tags can be set
+    right away, "to read" is on); back in New Papers the paper that came after it is shown."""
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state, viewport={"width": 1440, "height": 900})
+    pg = context.new_page()
+    try:
+        pg.goto(f"{live_server}/projects/pl-proj")
+        visible = lambda lst: pg.locator(f"#{lst} > .paper-card:visible").first.get_attribute("id")
+        pg.locator("#inbox-list .inbox-item").nth(2).click()
+        assert visible("new-papers-list").startswith("paper-card-2602-00002-")
+        pg.keyboard.press("c")
+        pg.wait_for_function("() => document.getElementById('paper-list').dataset.tab === 'col'")
+        assert visible("curated-list").startswith("paper-card-2602-00002-")
+        card = pg.locator("#curated-list > .paper-card:visible").first
+        assert "to read" in card.locator(".card-actions").inner_text().lower()
+        pg.locator(".paper-tab[data-tab='new']").click()
+        assert visible("new-papers-list").startswith("paper-card-2602-00003-")
     finally:
         context.close()

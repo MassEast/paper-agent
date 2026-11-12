@@ -140,7 +140,7 @@ def _clean_messages(messages: list[dict]) -> list[dict]:
 
 
 def _llm(
-    messages: list[dict], temperature: float = 0.9, max_tokens: int = 4096
+    messages: list[dict], temperature: float = 0.9, max_tokens: int = 4096, first_model_only: bool = False
 ) -> tuple[str, str, int, dict]:
     """Single entry point for all LLM calls — an OpenAI-compatible chat-completions request.
 
@@ -154,6 +154,9 @@ def _llm(
     temperature reproduces the identical cut-off (2026-10-08 log: 4x the same 18,357 chars). Cut off at the
     ceiling, it moves on to the next model.
 
+    first_model_only: only the first model of the cascade, for a prompt with a paper's full text (the others have
+    too small a context for it; a failure then waits for the next run instead of a weaker answer).
+
     Returns (response_text, model_used, elapsed_ms, usage_dict). Raises LLMUnavailableError
     if every model/attempt combination fails.
     """
@@ -161,7 +164,7 @@ def _llm(
     last_err = None
     messages = _clean_messages(messages)
 
-    for model in MODELS:
+    for model in (MODELS[:1] if first_model_only else MODELS):
         budget = max_tokens
         for attempt in range(5):
             try:
@@ -236,13 +239,14 @@ def _llm(
 
 
 def _llm_json(
-    messages: list[dict], temperature: float = 0.3, max_tokens: int = 4096
+    messages: list[dict], temperature: float = 0.3, max_tokens: int = 4096, first_model_only: bool = False
 ) -> tuple[dict, str, int, dict]:
     """Like _llm, but parses the response as JSON — strips ```json fences first, then falls
     back to regex-extracting an embedded [...] or {...} if the model wrapped the JSON in
     prose. Returns {} (not an exception) if no valid JSON could be extracted at all —
     callers must check for that rather than assume a populated dict."""
-    content, model, elapsed, usage = _llm(messages, temperature=temperature, max_tokens=max_tokens)
+    content, model, elapsed, usage = _llm(messages, temperature=temperature, max_tokens=max_tokens,
+                                          first_model_only=first_model_only)
     content = content.strip()
 
     if "```json" in content:
@@ -322,7 +326,8 @@ def _visible_answer(raw: str) -> str:
     return raw
 
 
-def _llm_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int = MAX_TOKENS_CEILING):
+def _llm_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int = MAX_TOKENS_CEILING,
+                first_model_only: bool = False):
     """Streaming variant of _llm for the paper chat. Yields the visible answer so far (a growing string,
     empty while the model is still thinking), a ("retry", next model, attempt) tuple before each retry
     (so the chat can say the model isn't answering instead of "Thinking..."), and finally a dict
@@ -333,7 +338,7 @@ def _llm_stream(messages: list[dict], temperature: float = 0.3, max_tokens: int 
     as too long (400) is not retried on the same model."""
     last_err = None
     messages = _clean_messages(messages)
-    for model in MODELS:
+    for model in (MODELS[:1] if first_model_only else MODELS):
         for attempt in range(3):
             if last_err is not None:
                 yield ("retry", model, attempt + 1)

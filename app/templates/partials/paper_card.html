@@ -4,7 +4,7 @@
 {% set show_curate = _sec == 'new' %}
 {% set show_restore = _sec == 'trash' %}
 {% set _mytags = my_tags(pp) %}
-<div class="paper-card" data-pp-card="{{ pp.id }}" data-paper-id="{{ pp.paper.id }}"
+<div class="paper-card" data-pp-card="{{ pp.id }}" data-paper-id="{{ pp.paper.id }}" data-paper-ref="{{ pp.paper.link_ref }}"
     id="paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
     {# "Date added" sort key: in My Collection, when it was collected (older links have no collected_at) #}
     {% set _sort_added = (pp.collected_at if pp.manual_tag and pp.collected_at else pp.added_at) %}
@@ -38,7 +38,7 @@
             </a>
             {#- A link to this card in this project (opens the project with this paper shown) #}
             <button type="button" class="card-share focus-ring" onclick="shareCard(this)"
-                data-share="/projects/{{ project.slug }}?paper={{ pp.paper.id }}" data-title="{{ pp.paper.title }}"
+                data-share="/projects/{{ project.slug }}?paper={{ pp.paper.link_ref }}" data-title="{{ pp.paper.title }}"
                 aria-label="Share a link to this paper" data-tip="Copy a link to this paper (opens this card for anyone with access)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-share"></use></svg>
             </button>
@@ -289,7 +289,7 @@
         {% if _conn.found_via or _conn.also_cites or _conn.shared_authors or _conn.other_projects %}
         <p class="card-label">Connections</p>
         <ul class="card-conn">
-            {% macro plink(p) %}{% if p.id is defined %}<a href="/projects/{{ project.slug }}?paper={{ p.id }}" data-tip="{{ p.title }}">{{ p.title | truncate(60) }}</a>{% else %}<span data-tip="{{ p.title }}">{{ p.title | truncate(60) }}</span>{% endif %}{% endmacro %}
+            {% macro plink(p) %}{% if p.id is defined %}<a href="/projects/{{ project.slug }}?paper={{ p.link_ref }}" data-tip="{{ p.title }}">{{ p.title | truncate(60) }}</a>{% else %}<span data-tip="{{ p.title }}">{{ p.title | truncate(60) }}</span>{% endif %}{% endmacro %}
             {% macro plist(ps) %}{% for p in ps[:3] %}{{ plink(p) }}{% if not loop.last %}; {% endif %}{% endfor %}{% if ps|length > 3 %} <span data-tip="{% for p in ps[3:] %}{{ p.title }}{% if not loop.last %}; {% endif %}{% endfor %}">(+{{ ps|length - 3 }})</span>{% endif %}{% endmacro %}
             {% if _conn.found_via %}<li>Found because it cites {{ plist(_conn.found_via) }}</li>{% endif %}
             {% if _conn.also_cites %}<li>{% if _conn.found_via %}Also cites{% else %}Cites{% endif %} {{ plist(_conn.also_cites) }} from My Collection</li>{% endif %}
@@ -299,7 +299,7 @@
             {% for ns, ps in _conn.shared_authors[:3] %}{{ authors_line(ns, ps) }}{% endfor %}
             {% if _conn.shared_authors|length > 3 %}<li><details class="conn-more"><summary>{{ _conn.shared_authors|length - 3 }} more shared authors</summary>
                 <ul class="card-conn">{% for ns, ps in _conn.shared_authors[3:] %}{{ authors_line(ns, ps) }}{% endfor %}</ul></details></li>{% endif %}
-            {% for proj, sec in _conn.other_projects %}<li>Also in <a href="/projects/{{ proj.slug }}?paper={{ pp.paper.id }}">{{ proj.name }}</a> ({{ sec }})</li>{% endfor %}
+            {% for proj, sec in _conn.other_projects %}<li>Also in <a href="/projects/{{ proj.slug }}?paper={{ pp.paper.link_ref }}">{{ proj.name }}</a> ({{ sec }})</li>{% endfor %}
         </ul>
         {% endif %}
     </aside>

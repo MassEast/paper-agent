@@ -174,6 +174,47 @@ def fetch_arxiv_title(arxiv_id: str) -> str | None:
 
 
 MIN_TEXT_CHARS = 2000  # anything shorter is an error page or a stub, not the paper
+# What the model reads of a paper (screening, summary, contributions, why-line, chat), after the reference list is
+# left out: ~100k tokens, so the large model (196k context) has room for the rest of the prompt and the answer.
+# Before 2026-11-12 the text was cut at 80,000 characters with the references in it: about half of all papers
+# (median 20 pages on prod) were read only in part.
+FULL_TEXT_CHARS = 400_000
+_REF_HEADING_RE = re.compile(r"\b(References|REFERENCES|Bibliography|BIBLIOGRAPHY)\b")
+_YEAR_RE = re.compile(r"\b(19[5-9]\d|20[0-4]\d)\b")
+REFS_YEARS_PER_1000 = 2.5  # a reference list has a year every few hundred characters; prose rarely does
+REFS_END_GAP = 1500  # this long without a year after one: the reference list is over (an appendix follows)
+# An appendix heading ("Appendix A Details of ...", "Appendix B.1 Setup"); not a back-link in an arXiv HTML reference
+# ("Appendix E .", "Appendix B , §7")
+_APPENDIX_HEADING_RE = re.compile(r"\bAppendix\s+[A-Z](?:\.\d+)*\s+[A-Z][a-z]")
+
+
+def _years_per_1000(text: str) -> float:
+    return 1000 * len(_YEAR_RE.findall(text)) / max(len(text), 1)
+
+
+def drop_references(text: str) -> str:
+    """The paper without its reference list, which the model doesn't need. It starts at the first References
+    heading in the last 70% of the text (one in the table of contents comes earlier) that is followed by what
+    looks like references (a year every few hundred characters). It ends at an appendix heading, or where the years
+    stop for REFS_END_GAP characters, whichever comes first: what follows (the appendix) stays, as does everything
+    before (the conclusion, also on the same page). When nothing looks like a reference list, nothing is cut."""
+    for m in _REF_HEADING_RE.finditer(text):
+        start = m.start()
+        if start < 0.3 * len(text) or _years_per_1000(text[start:start + 3000]) < REFS_YEARS_PER_1000:
+            continue
+        years = [y.end() for y in _YEAR_RE.finditer(text, start)]
+        end = len(text)
+        for a, b in zip(years, years[1:] + [len(text)]):
+            if b - a > REFS_END_GAP:
+                stop = text.find(". ", a, a + 300)  # finish the last entry: up to its next full stop
+                end = stop + 2 if stop >= 0 else a
+                break
+        heading = _APPENDIX_HEADING_RE.search(text, start + 200, end)  # an appendix that cites a lot has years too
+        if heading:
+            end = heading.start()
+        return text[:start] + " [References left out] " + text[end:]
+    return text
+    return text
 
 # arXiv's own HTML has nearly every paper from the day it is announced; ar5iv converts with a lag of
 # weeks and, until then, redirects to the abstract page (which once passed for the full text)
@@ -209,7 +250,7 @@ def _html_to_text(html: str) -> str:
     return html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))).strip()
 
 
-def fetch_paper_full_text(arxiv_id: str, max_chars: int = 80000) -> str | None:
+def fetch_paper_full_text(arxiv_id: str, max_chars: int = FULL_TEXT_CHARS) -> str | None:
     """The paper's text from its HTML version, or None if there is none (yet)."""
     for url in FULL_TEXT_HTML_URLS:
         url = url.format(arxiv_id)
@@ -224,7 +265,7 @@ def fetch_paper_full_text(arxiv_id: str, max_chars: int = 80000) -> str | None:
             continue
         text = _html_to_text(r.text)
         if len(text) >= MIN_TEXT_CHARS:
-            return text[:max_chars]
+            return drop_references(text)[:max_chars]
     return None
 
 
@@ -291,11 +332,11 @@ def fetch_biorxiv_page(pdf_url: str) -> str | None:
     return page
 
 
-def fetch_biorxiv_full_text(pdf_url: str, max_chars: int = 80000) -> str | None:
+def fetch_biorxiv_full_text(pdf_url: str, max_chars: int = FULL_TEXT_CHARS) -> str | None:
     """A bioRxiv paper's text from its HTML version, or None while there is none (then the PDF is read)."""
     page = fetch_biorxiv_page(pdf_url)
     text = _biorxiv_html_to_text(page) if page else ""
-    return text[:max_chars] if len(text) >= MIN_TEXT_CHARS else None
+    return drop_references(text)[:max_chars] if len(text) >= MIN_TEXT_CHARS else None
 
 
 _BIORXIV_F1 = re.compile(r'<div id="F1"[^>]*>.*?<a href="(https://www\.biorxiv\.org/[^"?]+/F1\.large\.jpg)', re.S)
@@ -337,7 +378,7 @@ def _pdf_page_links(page, text: str) -> str:
     return "".join(f" ({u})" for u in out)
 
 
-def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
+def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = FULL_TEXT_CHARS) -> str | None:
     """Text extracted from a PDF, or None if it can't be downloaded or read. arxiv=True waits for
     the arXiv rate limit."""
     from pypdf import PdfReader
@@ -372,7 +413,7 @@ def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
         print(f"unreadable PDF at {url}: {e}")
         return None
     text = re.sub(r"\s+", " ", text).strip()
-    return text[:max_chars] if len(text) >= MIN_TEXT_CHARS else None
+    return drop_references(text)[:max_chars] if len(text) >= MIN_TEXT_CHARS else None
 
 
 def fetch_paper_figure(arxiv_id: str) -> str | None:
