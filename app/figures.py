@@ -126,7 +126,8 @@ def crop_figure_1(pdf: bytes) -> tuple[Optional[bytes], Optional[str]]:
         # Grow upward from the caption while the next part touches what we have
         floor = max((r.y1 for r in bounds), default=page.rect.y0)
         parts = sorted((r for r in graphics + labels if r.y0 >= floor - 1), key=lambda r: -r.y1)
-        if not parts or cap_rect.y0 - parts[0].y1 > GAP_PT * 2:
+        # the space between figure and caption: 31 pt in 2610.40350 (a \vspace); a paragraph in between bounds it anyway
+        if not parts or cap_rect.y0 - parts[0].y1 > GAP_PT * 3:
             return None, None
         area = pymupdf.Rect(parts[0])
         for r in parts[1:]:

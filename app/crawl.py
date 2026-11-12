@@ -22,6 +22,7 @@ from app.models import ChatMessage, Project, Paper, PaperSummary, ProjectPaper, 
     estimated_cost_eur
 from app.llm import _llm, _llm_json, LLMUnavailableError, MODELS as LLM_MODELS
 import app.prompts as prompts
+from app import arxiv_meta, resources
 from app.usage import counted, counts, current_tokens
 from app.biorxiv import search_biorxiv, biorxiv_paper_id, fetch_versions as biorxiv_versions, PDF_URL as BIORXIV_PDF_URL
 from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_external_url, USER_AGENT, base_arxiv_id, \
@@ -202,6 +203,21 @@ def _end_steps(paper_id: int, by: str) -> None:
         _enriching.pop(paper_id, None)
 
 
+def _add_relevance_reason(project_id: int, paper, by: str) -> None:
+    """The card's "why it's relevant" line for a paper added by hand (crawled papers get theirs from the deep
+    check). Needs the abstract and a research interest; a failure only leaves the line out."""
+    project = db.session.get(Project, project_id)
+    pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
+    if not pp or pp.relevance_reason or not paper.abstract or not (project.research_interest or "").strip():
+        return
+    _set_step(paper.id, by, "Writing why it matters for this project")
+    try:
+        pp.relevance_reason = generate_relevance_reason(paper.title, paper.abstract, project.research_interest) or None
+        db.session.commit()
+    except Exception as e:
+        _log.warning("[%s-add] why-relevant line failed for paper %s: %s", by, paper.id, e)
+
+
 def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, app) -> None:
     """Background thread: fully enrich a paper that was just added directly to My Collection.
 
@@ -237,6 +253,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                             paper.categories = json.dumps(r.categories)
                             paper.source = "manual"
                             paper.doi = paper.doi or r.doi or None  # the journal version's, when the authors gave one
+                            arxiv_meta.apply(paper, arxiv_meta.from_result(r))
                             db.session.commit()
                             _log.info("[collection-add] arXiv metadata fetched for %s: %s", arxiv_id, r.title)
                 except Exception as e:
@@ -280,11 +297,13 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
             # --- Step 5: LLM summary + contributions ---
             _set_step(paper_id, "arxiv", "Writing the AI summary and main contributions")
             db.session.refresh(paper)
+            full_text, text_tried = None, False  # read once, for the summary and the links below
             if paper.summary:
                 _log.info("[collection-add] summary already exists for %s, skipping", arxiv_id)
             else:
                 try:
-                    paper_content = get_paper_content(arxiv_id) or paper.abstract or ""
+                    full_text, text_tried = get_paper_content(arxiv_id), True
+                    paper_content = full_text or paper.abstract or ""
                     summary_data, summary_model, summary_elapsed, summary_tokens = generate_summary_with_full_content(
                         title=paper.title,
                         abstract=paper.abstract or "",
@@ -317,6 +336,23 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                     _log.info("[collection-add] summary generated for %s", arxiv_id)
                 except Exception as e:
                     _log.warning("[collection-add] summary failed for %s: %s", arxiv_id, e)
+
+            # --- Step 5a: why it's relevant for this project ---
+            _add_relevance_reason(project_id, paper, "arxiv")
+
+            # --- Step 5b: code, project page, corresponding authors, venue (app/resources.py) ---
+            if paper.resources_checked_at is None:
+                _set_step(paper_id, "arxiv", "Looking for code, project page and contact emails")
+                try:
+                    if not text_tried:
+                        full_text = get_paper_content(arxiv_id)
+                    if full_text:  # else the nightly backfill tries again
+                        resources.apply(paper, resources.extract_for(paper, full_text)[0])
+                        db.session.commit()
+                except LLMUnavailableError:
+                    raise
+                except Exception as e:
+                    _log.warning("[collection-add] links/emails failed for %s: %s", arxiv_id, e)
 
             # --- Step 6: Institutions (Scholar batch) ---
             _set_step(paper_id, "arxiv", "Finding the authors' institutions")
@@ -490,6 +526,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
                 if upgrade_biorxiv_paper(paper):
                     paper.enrich_complete = 1
                     db.session.commit()
+                    _add_relevance_reason(project_id, paper, "web")
                     return
 
             # Step 3b: download the actual PDF (if we found a direct link) for institutions +
@@ -536,6 +573,8 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
                     _log.info("[web-add] summary generated for web paper %s", url)
                 except Exception as e:
                     _log.warning("[web-add] summary failed for %s: %s", url, e)
+
+            _add_relevance_reason(project_id, paper, "web")
 
             # Web papers can't be further enriched from arXiv — mark complete
             try:
@@ -912,8 +951,11 @@ def _html_figure(arxiv_id: str) -> tuple[Optional[str], Optional[str]]:
             # arXiv HTML (latexml) sometimes places the <img> in a sibling <div> immediately
             # before the <figure> tag rather than inside it. We handle both layouts:
             # (a) img inside <figure>...</figure>, (b) img in the ~1000 chars before <figure>.
-            for fig_m in re.finditer(r'<figure[^>]*>(.*?)</figure>', content, re.IGNORECASE | re.DOTALL):
-                block = fig_m.group(1)
+            for fig_m in re.finditer(r'<figure([^>]*)>(.*?)</figure>', content, re.IGNORECASE | re.DOTALL):
+                block = fig_m.group(2)
+                # a table is no figure: an image in one is a logo or an icon (2610.40350: a model's logo in Table 1)
+                if 'ltx_table' in fig_m.group(1) or re.search(r'<figcaption[^>]*>\s*(?:<[^>]+>\s*)*Table\b', block):
+                    continue
                 img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', block, re.IGNORECASE)
                 if not img_match:
                     # Check content immediately preceding this figure tag for an adjacent img
@@ -1145,7 +1187,9 @@ def send_notification(
 
 
 def _email_lines(text: str) -> str:
-    return html.escape(text).replace("\n", "<br>")
+    """A note or message for an email: escaped, newlines as <br>, links clickable, **bold** (app/note_format.py)."""
+    from app.note_format import to_html
+    return to_html(text)
 
 
 def _email_note_label(member, day: Optional[str]) -> str:
@@ -1821,6 +1865,7 @@ def _fetch_arxiv_window(keywords: list[str], d_from: date, d_to: date, max_resul
                             "year": pub_date.year,
                             "categories": [cat for cat in result.categories],
                             "doi": result.doi or None,  # the journal version's, when the authors gave one
+                            "arxiv_meta": arxiv_meta.from_result(result),
                         }
                     )
                 break  # success — don't retry
@@ -3156,6 +3201,14 @@ def run_crawl(
                         paper_content=paper_content,
                         abstract=pd["abstract"],
                     )
+                    # Code / project page / corresponding authors / venue from the text read above; without the
+                    # full text the nightly backfill tries later (resources_checked_at stays empty)
+                    found, res_tokens = (None, 0)
+                    if paper_content:
+                        _meta = pd.get("arxiv_meta") or {}
+                        found, res_tokens = resources.extract(pd["title"], pd["authors"], paper_content,
+                                                              pd["abstract"], _meta.get("arxiv_comment"),
+                                                              _meta.get("journal_ref"))
                     return {
                         "relevant": True,
                         "paper_data": pd,
@@ -3168,7 +3221,8 @@ def run_crawl(
                         "model": sum_model,
                         "total_elapsed": sum_elapsed + contrib_time,
                         "contributions": contributions,
-                        "tokens": rel_tokens + sum_tokens + contrib_tokens,
+                        "resources": found,
+                        "tokens": rel_tokens + sum_tokens + contrib_tokens + res_tokens,
                         "summary_tokens": sum_tokens + contrib_tokens,  # the card shows what the summary cost
                         "why": why,
                         "screen_source": screen_source,
@@ -3265,6 +3319,10 @@ def run_crawl(
                     if result["citation_count"] is not None:
                         paper.citation_count = result["citation_count"]
                         paper.citation_fetched_at = datetime.utcnow()
+                    if pd.get("arxiv_meta"):
+                        arxiv_meta.apply(paper, pd["arxiv_meta"])
+                    if result.get("resources") is not None:
+                        resources.apply(paper, result["resources"])
 
                     _sd = result["summary_data"] if isinstance(result["summary_data"], dict) else {}
                     summary = PaperSummary(
@@ -3398,7 +3456,7 @@ def run_crawl(
 
 def generate_relevance_reason(title: str, abstract: str, research_interest: str) -> str:
     """One sentence on why a paper matters for a research interest — for papers that reach a
-    project without being screened (copied/moved from another project). Screened papers get
+    project without being screened (copied/moved from another project, or added by hand). Screened papers get
     theirs from the deep relevance check instead. "" if the LLM answer can't be parsed."""
     prompt = prompts.RELEVANCE_REASON.format(
         research_interest=research_interest, title=title, abstract=abstract or ""
@@ -3950,7 +4008,45 @@ def backfill_missing_paper_metadata() -> int:
 
     updated += redo_pdf_figures()
 
+    # --- Passes 6-8: the card's version/venue, links/emails and "also cites" (redesign 2026-11-12) ---
+    updated += arxiv_meta.refresh()
+    updated += backfill_resources()
+    from app import connections
+    updated += connections.fetch_references()
+
     return updated
+
+
+RESOURCES_PER_RUN = int(os.environ.get("RESOURCES_PER_RUN", "30"))  # 4 runs a night
+
+
+def backfill_resources(limit: int = RESOURCES_PER_RUN) -> int:
+    """Nightly backfill Pass 7: code, project page, corresponding authors and venue (app/resources.py) for papers
+    someone can see that were never read for them (older papers, ones without full text when added, and ones with a
+    new arXiv version). Uses the text the paper chat keeps if there is one, else fetches it; without any full text
+    only the abstract and arXiv comment are read. Each paper once (until a new version). Returns how many got any."""
+    from app.models import PaperText
+    in_use = db.session.query(ProjectPaper.paper_id).filter(ProjectPaper.trashed_at.is_(None))
+    todo = (Paper.query.filter(Paper.resources_checked_at.is_(None), Paper.id.in_(in_use))
+            .order_by(Paper.id.desc()).limit(limit).all())
+    if todo:
+        _log.info("[backfill] links/emails/venue for %d paper(s) (capped at %d/run)", len(todo), limit)
+    got = 0
+    for paper in todo:
+        cached = PaperText.query.filter_by(paper_id=paper.id).first()
+        text = cached.text if cached else get_paper_content(paper.arxiv_id, paper.pdf_url)
+        try:
+            found, _ = resources.extract_for(paper, text)
+        except LLMUnavailableError as e:  # the model is down: stop here, the next run goes on
+            _log.error("[backfill] links/emails/venue stopped, LLM unavailable: %s", e)
+            break
+        resources.apply(paper, found)
+        db.session.commit()
+        hit = [k for k in ("code_url", "project_url", "venue") if found[k]] + (["emails"] if found["corresponding"] else [])
+        got += bool(hit)
+        _log.info("[backfill] %s: %s%s", paper.arxiv_id, ", ".join(hit) or "nothing found",
+                  "" if text else " (no full text)")
+    return got
 
 
 def redo_pdf_figures() -> int:
@@ -3978,4 +4074,16 @@ def redo_pdf_figures() -> int:
         db.session.commit()
         _log.info("[backfill] %s: %s", paper.arxiv_id, "Figure 1 from the PDF" if figure_url else "kept the old figure")
 
+    # An image out of a table taken from the arXiv HTML (before 2026-11-12, e.g. a model's logo in 2610.40350's
+    # Table 1): the PDF once more, else no figure. Either way the paper leaves this query.
+    tables = Paper.query.filter(
+        Paper.figure_caption.like("Table%"), ~Paper.figure_url.like(figures.URL_PREFIX + "%"), Paper.id.in_(in_use),
+    ).order_by(Paper.id.desc()).limit(FIGURE_REDO_PER_RUN).all()
+    for paper in tables:
+        figure_url, caption = figures.pdf_figure(paper.arxiv_id)
+        paper.figure_url, paper.figure_caption = figure_url, caption
+        updated += bool(figure_url)
+        db.session.commit()
+        _log.info("[backfill] %s: a table image was its figure: %s", paper.arxiv_id,
+                  "Figure 1 from the PDF" if figure_url else "dropped")
     return updated

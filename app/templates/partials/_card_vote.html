@@ -1,0 +1,20 @@
+{# Per-person projects: this person's vote (stars) and everyone's average, in the card header. Part of
+   paper_card.html (expects pp, project, _me). #}
+{% set _aid = pp.paper.arxiv_id %}
+{% set _mystate = my_state(pp) %}
+{% set _myvote = _mystate.vote if _mystate else none %}
+{% set _avg = average_vote(pp) %}
+<div class="card-vote">
+    <span class="card-label" style="margin: 0;">Rate it</span>
+    <span class="vote-stars" style="display: inline-flex; align-items: center; gap: 1px;" data-tip="Your vote: how good you find this paper (everyone sees it). Click your vote again to take it back.">
+        {% for v in range(1, 6) %}
+        <button type="button" class="focus-ring vote-star" aria-label="Vote {{ v }} of 5"
+            hx-post="/paper/{{ _aid }}/vote" hx-vals='{"project_id": {{ project.id }}, "vote": {{ v }}}'
+            hx-target="closest .paper-card" hx-swap="outerHTML"
+            style="background: none; border: none; padding: 0 1px; cursor: pointer; font-size: 1rem; line-height: 1; color: {{ _me.color if _myvote and v <= _myvote else 'var(--ink-4)' }};">{{ '★' if _myvote and v <= _myvote else '☆' }}</button>
+        {% endfor %}
+    </span>
+    {% if _avg is not none %}
+    <span data-tip="Average of everyone's votes" style="font-variant-numeric: tabular-nums;">⌀ {{ '%.1f' | format(_avg) }} ({{ paper_votes(pp) | length }})</span>
+    {% endif %}
+</div>

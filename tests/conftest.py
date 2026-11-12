@@ -146,3 +146,24 @@ FAKE_PAPER = {
 def _no_arxiv_pdf_download(monkeypatch):
     """No test downloads a PDF for its Figure 1 (get_paper_figure, nightly backfill Pass 5); tests of it patch in a PDF."""
     monkeypatch.setattr("app.figures._download_pdf", lambda arxiv_id: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_card_data_passes(monkeypatch):
+    """The nightly backfill's passes for the card (arXiv version/comment, links/emails/venue, references) would ask
+    arXiv, Semantic Scholar and the model: off in every test; their own tests call the real functions
+    (REAL_CARD_PASSES)."""
+    monkeypatch.setattr("app.arxiv_meta.refresh", lambda *a, **k: 0)
+    monkeypatch.setattr("app.crawl.backfill_resources", lambda *a, **k: 0)
+    monkeypatch.setattr("app.connections.fetch_references", lambda *a, **k: 0)
+    # a paper added by hand gets its why-relevant line from the model; tests/test_enrich_status.py uses the real one
+    monkeypatch.setattr("app.crawl._add_relevance_reason", lambda *a, **k: None)
+
+
+import app.arxiv_meta as _arxiv_meta_mod  # noqa: E402
+import app.connections as _connections_mod  # noqa: E402
+import app.crawl as _crawl_mod  # noqa: E402
+
+REAL_CARD_PASSES = {"arxiv_meta.refresh": _arxiv_meta_mod.refresh, "crawl.backfill_resources": _crawl_mod.backfill_resources,
+                    "connections.fetch_references": _connections_mod.fetch_references,
+                    "crawl._add_relevance_reason": _crawl_mod._add_relevance_reason}

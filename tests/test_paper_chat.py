@@ -496,7 +496,7 @@ def test_clear_mid_answer_stops_it_and_a_new_chat_works(c, app, chat_pp, monkeyp
     _wait(model.waiting.is_set, "model to think")
     _ask(c, chat_pp, "Queued old question")
     html = c.post(f"/paper/{ARXIV}/chat/clear", data={"project_id": chat_pp["project"]}).data.decode()
-    assert "Ask about this paper" in html and _msgs(app, chat_pp["pp"]) == []
+    assert '<div class="chat-panel">' not in html and _msgs(app, chat_pp["pp"]) == []  # the slot is empty again
     _ask(c, chat_pp, "Fresh question")  # queued behind the stopping worker, then answered
     model.release()
     _idle(chat_pp["pp"])
@@ -560,7 +560,7 @@ def test_full_context_blocks_the_question_instead_of_dropping_turns(c, app, chat
     assert len(_msgs(app, chat_pp["pp"])) == 2
 
     html = c.post(f"/paper/{ARXIV}/chat/clear", data={"project_id": chat_pp["project"]}).data.decode()
-    assert "Ask about this paper" in html and _msgs(app, chat_pp["pp"]) == []
+    assert '<div class="chat-panel">' not in html and _msgs(app, chat_pp["pp"]) == []  # the slot is empty again
 
 
 def test_queued_question_that_no_longer_fits_gets_an_error_not_a_dropped_turn(c, app, chat_pp, monkeypatch, full_text):
@@ -649,7 +649,7 @@ def test_chat_in_the_browser_queue_stop_and_drafts(live_server, browser_session,
     monkeypatch.setattr(chat, "_llm_stream", model)
     context = browser.new_context(storage_state=state)
     pg = context.new_page()
-    pg.goto(f"{live_server}/projects/chat-proj")
+    pg.goto(f"{live_server}/projects/chat-proj?paper={chat_pp['paper']}")  # its card first: both were added at once
     card_sel = f'[id^="paper-card-{ARXIV.replace(".", "-")}-"]'
     card = pg.locator(card_sel)
     card.get_by_role("button", name="Ask about this paper").click()

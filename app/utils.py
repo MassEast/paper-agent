@@ -180,11 +180,33 @@ MIN_TEXT_CHARS = 2000  # anything shorter is an error page or a stub, not the pa
 FULL_TEXT_HTML_URLS = ("https://arxiv.org/html/{}", "https://ar5iv.labs.arxiv.org/html/{}")
 
 
+_LINK_SKIP_HOSTS = ("arxiv.org", "doi.org", "creativecommons.org", "latexml", "nist.gov")
+
+
+def _show_link_target(m: re.Match) -> str:
+    """An <a href> whose text hides where it goes ("Code", "Project page", an icon) keeps its URL in the text, as
+    "Code (https://github.com/...)", so the paper's own links can be found in the text (app/resources.py). Not
+    for the bibliography's links (ltx_bib_external) or arXiv/DOI links, which are no use there."""
+    attrs, inner = m.group(1), m.group(2)
+    href = re.search(r'href="(https?://[^"]+)"', attrs)
+    if not href or "ltx_bib_external" in attrs:
+        return m.group(0)
+    url = html_lib.unescape(href.group(1))
+    host = (urlparse(url).hostname or "").lower()
+    if any(h in host for h in _LINK_SKIP_HOSTS):
+        return m.group(0)
+    text = re.sub(r"<[^>]+>", " ", inner)
+    if re.sub(r"^https?://(www\.)?", "", url).rstrip("/") in text:
+        return m.group(0)
+    return f"<a{attrs}>{inner}</a> ({url})"
+
+
 def _html_to_text(html: str) -> str:
     article = re.search(r"<article\b.*</article>", html, flags=re.DOTALL | re.IGNORECASE)
     html = article.group(0) if article else html  # the paper only, not the site's menus
     html = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()
+    html = re.sub(r"<a\b([^>]*)>(.*?)</a>", _show_link_target, html, flags=re.DOTALL | re.IGNORECASE)
+    return html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))).strip()
 
 
 def fetch_paper_full_text(arxiv_id: str, max_chars: int = 80000) -> str | None:
@@ -295,6 +317,26 @@ def fetch_biorxiv_figure(pdf_url: str) -> tuple[Optional[str], Optional[str]]:
     return biorxiv_figure(fetch_biorxiv_page(pdf_url))
 
 
+PDF_LINK_PAGES = 3  # the paper's own links (code, project page) are on its first pages
+
+
+def _pdf_page_links(page, text: str) -> str:
+    """The web links of a PDF page whose URL isn't in its text (a "Code" or icon link), as " (url)" each, so
+    app/resources.py can find them, like _show_link_target for the HTML version."""
+    out = []
+    for annot in page.get("/Annots") or []:
+        a = annot.get_object()
+        uri = (a.get("/A") or {}).get("/URI") if a.get("/Subtype") == "/Link" else None
+        if not isinstance(uri, str) or not uri.startswith(("http://", "https://")):
+            continue
+        host = (urlparse(uri).hostname or "").lower()
+        if any(h in host for h in _LINK_SKIP_HOSTS) or re.sub(r"^https?://(www\.)?", "", uri).rstrip("/") in text \
+                or uri in out:
+            continue
+        out.append(uri)
+    return "".join(f" ({u})" for u in out)
+
+
 def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
     """Text extracted from a PDF, or None if it can't be downloaded or read. arxiv=True waits for
     the arXiv rate limit."""
@@ -323,7 +365,9 @@ def fetch_pdf_text(url: str, arxiv: bool, max_chars: int = 80000) -> str | None:
         return None
     try:
         reader = PdfReader(io.BytesIO(r.content), strict=False)
-        text = " ".join(page.extract_text() or "" for page in reader.pages)
+        pages = [page.extract_text() or "" for page in reader.pages]
+        text = " ".join(t + (_pdf_page_links(page, t) if i < PDF_LINK_PAGES else "")
+                        for i, (page, t) in enumerate(zip(reader.pages, pages)))
     except PdfReadError as e:  # a broken PDF: the caller falls back to the abstract
         print(f"unreadable PDF at {url}: {e}")
         return None

@@ -78,6 +78,22 @@ class Paper(db.Model):
     web_enrich_last_attempt_at = db.Column(db.DateTime)
     # Failed tries of the nightly full-text re-read (refresh_from_full_text) to get this paper's full text
     full_text_attempts = db.Column(db.Integer, default=0)
+    # From the paper itself (app/resources.py): its own code repository and project page, the corresponding
+    # authors [{"name", "email"}] (name as in authors), the venue it says it appeared at
+    code_url = db.Column(db.Text)
+    project_url = db.Column(db.Text)
+    corresponding_authors = db.Column(db.Text)
+    venue = db.Column(db.Text)
+    resources_checked_at = db.Column(db.DateTime)  # when that was read (None: not yet, or again after a new version)
+    # From the arXiv API (app/arxiv_meta.py): latest version, when it came out, the authors' comment, journal ref
+    arxiv_version = db.Column(db.Integer)
+    arxiv_updated = db.Column(db.Date)
+    arxiv_comment = db.Column(db.Text)
+    journal_ref = db.Column(db.Text)
+    arxiv_meta_at = db.Column(db.DateTime)
+    # The paper's references from Semantic Scholar (PaperReference), for the card's "also cites"
+    references_fetched_at = db.Column(db.DateTime)
+    references_attempted_at = db.Column(db.DateTime)
 
     summary = db.relationship("PaperSummary", back_populates="paper", uselist=False)
     project_links = db.relationship("ProjectPaper", back_populates="paper")
@@ -122,6 +138,15 @@ class Paper(db.Model):
         return []
 
     @property
+    def corresponding_list(self) -> list[dict]:
+        return json.loads(self.corresponding_authors) if self.corresponding_authors else []
+
+    @property
+    def corresponding_emails(self) -> dict[str, str]:
+        """Author name -> email, for the mailto links on the card."""
+        return {c["name"]: c["email"] for c in self.corresponding_list}
+
+    @property
     def institutions_list(self):
         if self.institutions:
             try:
@@ -152,6 +177,17 @@ class PaperSummary(db.Model):
     content_source = db.Column(db.Text)
 
     paper = db.relationship("Paper", back_populates="summary")
+
+
+class PaperReference(db.Model):
+    """One paper a paper cites, as a key that can be matched against papers in the DB: "arxiv:<id>",
+    "doi:<doi, lower case>" or "s2:<Semantic Scholar paperId>" (one row per key). From Semantic Scholar,
+    app/connections.py."""
+    __tablename__ = "paper_references"
+
+    id = db.Column(db.Integer, primary_key=True)
+    paper_id = db.Column(db.Integer, db.ForeignKey("papers.id"), nullable=False)
+    ref_key = db.Column(db.Text, nullable=False)
 
 
 class PaperText(db.Model):

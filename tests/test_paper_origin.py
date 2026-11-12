@@ -48,7 +48,7 @@ def _paper(arxiv_id, source):
 
 def _date_line(html, arxiv_id):
     card = html.split(f'id="paper-card-{arxiv_id.replace(".", "-").replace(":", "-")}-')[1]
-    m = re.search(r'data-tip="([^"]*)">\s*<svg[^>]*>\s*<use href="/static/icons.svg#icon-calendar"></use>\s*</svg>\s*([^<]*)<', card)
+    m = re.search(r'<dt>Added</dt><dd>\s*<span data-tip="([^"]*)">\s*([^<]*)<', card)
     return re.sub(r"\s+", " ", m.group(2)).strip(), m.group(1)
 
 

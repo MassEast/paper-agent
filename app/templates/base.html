@@ -200,6 +200,49 @@
         .card-menu-item:hover { background-color: var(--paper-3); color: var(--ink-1); }
         .card-menu-note { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; margin-top: 4px; border-top: 1px solid var(--border-subtle); font-size: 0.7rem; color: var(--ink-4); }
         .card-label { margin: 0 0 4px 2px; }
+        /* Paper card (mockup G2, 2026-11-12): header, then reading column | fact sidebar; under 720px of card width the
+           sidebar goes below the text and the actions and notes below that */
+        .paper-card { container-type: inline-size; container-name: card; }
+        .card-head { display: flex; align-items: flex-start; gap: 12px 20px; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border-subtle); }
+        .card-head-main { flex: 1; min-width: 0; }
+        .card-head-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; max-width: 46%; }
+        .card-authors { font-size: 0.78rem; color: var(--ink-3); margin-top: 6px; line-height: 1.45; }
+        .card-author-mail { color: var(--ink-2); text-decoration: underline dotted; text-underline-offset: 2px; display: inline-flex; align-items: center; gap: 3px; }
+        .card-author-mail:hover { color: var(--accent); }
+        .card-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .card-badges:empty { display: none; }
+        .card-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+        .card-link { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 9999px; font-size: 0.75rem;
+            color: var(--ink-2); background-color: var(--paper-3); border: 1px solid var(--border-default); text-decoration: none; white-space: nowrap; }
+        .card-link:hover { border-color: var(--border-strong); color: var(--ink-1); }
+        .card-vote { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--ink-3); }
+        .card-grid { display: grid; grid-template-columns: minmax(0, 1fr) 270px; grid-template-areas: "main side" "bottom side"; gap: 0 20px; align-items: start; }
+        .card-main { grid-area: main; min-width: 0; }
+        .card-side { grid-area: side; min-width: 0; background-color: var(--paper-3); border-radius: var(--radius-md); padding: 12px 14px; font-size: 0.75rem; color: var(--ink-2); }
+        .card-bottom { grid-area: bottom; min-width: 0; }
+        .card-side .card-label + * { margin-top: 2px; }
+        .card-side > * + .card-label, .card-side > .card-fig + .card-label { margin-top: 14px; }
+        .card-facts { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 4px 8px; margin: 0; align-items: baseline; }
+        .card-facts dt { color: var(--ink-4); }
+        .card-facts dd { margin: 0; overflow-wrap: anywhere; }
+        .card-fig { display: block; width: 100%; margin-top: 14px; padding: 6px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);
+            background-color: var(--paper-2); cursor: zoom-in; text-align: left; }
+        .card-fig img { display: block; width: 100%; max-height: 220px; object-fit: contain; background: #fff; border-radius: 4px; }
+        .card-fig span { display: block; margin-top: 5px; font-size: 0.7rem; color: var(--ink-3); }
+        .card-conn { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; line-height: 1.4; }
+        .card-conn a { color: var(--accent); text-decoration: none; }
+        .card-conn a:hover { text-decoration: underline; }
+        .card-contrib { margin-bottom: 12px; }
+        .card-contrib ul { margin: 2px 0 0; padding-left: 18px; list-style: disc; font-size: 0.8rem; color: var(--ink-2); line-height: 1.5; }
+        .card-act-ask { color: var(--ink-2); background-color: var(--paper-3); border: 1px solid var(--border-default); font-weight: 500; }
+        .card-act-ask:hover { border-color: var(--border-strong); }
+        @container card (max-width: 720px) {
+            .card-head { flex-direction: column; }
+            .card-head-side { align-items: flex-start; max-width: none; }
+            .card-links { justify-content: flex-start; }
+            .card-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main" "side" "bottom"; }
+            .card-side { margin-bottom: 14px; }
+        }
         .drawer-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.55); }
         .drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 61; width: min(560px, 100vw); display: flex; flex-direction: column;
             background-color: var(--paper-1); border-left: 1px solid var(--border-default); box-shadow: -12px 0 32px rgba(0,0,0,0.4); }
@@ -227,6 +270,17 @@
         }
         /* Empty shared notes (per-person projects, rich_notes.js) */
         .rich-notes:empty::before { content: attr(data-placeholder); color: var(--ink-4); pointer-events: none; }
+        /* Notes shown formatted while not edited (notes_format.js): links, paper links as titles, **bold** */
+        .note-view { width: 100%; min-height: 2.5rem; white-space: pre-wrap; word-break: break-word; background-color: var(--paper-3); border-radius: var(--radius-md);
+            padding: 8px 12px; font-size: 0.75rem; line-height: 1.5; color: var(--ink-1); cursor: text; }
+        .note-view[hidden] { display: none; }
+        .note-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
+        .note-paper-link { word-break: normal; font-style: italic; text-decoration-style: dotted; }
+        .notes-head { display: flex; align-items: center; gap: 6px; margin: 0 0 4px 2px; }
+        .notes-head .card-label { margin: 0; line-height: 1; }
+        .note-bold-btn { width: 16px; height: 16px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);
+            border: 1px solid var(--border-default); background: var(--paper-3); color: var(--ink-3); font-size: 0.62rem; font-weight: 800; cursor: pointer; line-height: 1; }
+        .note-bold-btn:hover { color: var(--ink-1); border-color: var(--border-strong); }
         .tab-empty { text-align: center; padding: 28px 0; color: var(--ink-4); font-size: 0.875rem; }
         /* Theme switch: shows the sun in dark mode (click for light) and the moon in light mode */
         :root[data-theme="light"] .theme-icon-sun, :root:not([data-theme="light"]) .theme-icon-moon { display: none; }
@@ -442,6 +496,9 @@
         var CONFLICT = 'conflict — edited elsewhere too, both versions kept';
         function setNotesStatus(t, text, ok) {
             var s = document.getElementById('notes-saved-' + noteId(t));
+            // Only when it changes: Chrome starts a new undo step after any DOM change, so rewriting "saving…"
+            // on every keystroke made Ctrl/⌘+Z undo one letter at a time
+            if (s.textContent === text && s.style.display === (text ? '' : 'none')) return;
             s.textContent = text;
             s.style.color = ok === null ? 'var(--ink-3)' : ok ? 'var(--success)' : 'var(--error)';
             s.style.display = text ? '' : 'none';
@@ -482,7 +539,11 @@
             if (!isNotes(e.target)) return;
             e.target._conflict = false;
             writeDraft(e.target);
-            setNotesStatus(e.target, 'saving…', null);
+        });
+        // "saving…" once the save starts (after the pause), not on every keystroke: Chrome ends its undo step at any
+        // change to the page, so a label changing mid-typing split what Ctrl/⌘+Z takes back
+        document.body.addEventListener('htmx:beforeRequest', function (e) {
+            if (isNotes(e.detail.elt)) setNotesStatus(e.detail.elt, 'saving…', null);
         });
         // Fires for every notes textarea htmx initialises: page load, swaps, and htmx.process().
         document.body.addEventListener('htmx:afterProcessNode', function (e) {
@@ -490,10 +551,11 @@
             if (!isNotes(t)) return;
             var server = t.value;
             t._notesBase = server;
+            setTimeout(function () { noteFormat.attach(t); }, 0);  // the formatted view, once a draft is restored below
             t._noteDirty = function () { return localStorage.getItem(draftKey(t)) !== null; };
             t._noteRefresh = function (d) {
                 var now = d.notes.replace(/\r\n/g, '\n');
-                if (now !== t.value) { t.value = now; t._notesBase = now; }
+                if (now !== t.value) { t.value = now; t._notesBase = now; noteFormat.refresh(t); }
             };
             t._flushNote = function () {
                 if (!t._noteDirty()) return Promise.resolve();
@@ -609,6 +671,7 @@
         });
     })();
     </script>
+    <script src="/static/notes_format.js"></script>
     <script src="/static/rich_notes.js"></script>
     <script src="/static/note_lock.js"></script>
     <script src="/static/notify.js"></script>

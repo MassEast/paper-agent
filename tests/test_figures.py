@@ -20,7 +20,7 @@ CAPTION = "Figure 1: Overview of the method. The left panel shows the input, the
 
 
 def _pdf(two_columns=False, hidden_latex_data=False, figure=True, caption=CAPTION, at_top=False, word_lines=False,
-         title_page=False, label_row=False, caption_font="helv"):
+         title_page=False, label_row=False, caption_font="helv", caption_gap=0):
     """A letter page: running header and rule, a paragraph, Figure 1 (panel label above a box with labels in it),
     its caption, another paragraph. In two_columns the figure and caption are in the right column, with a
     paragraph in the left column at the same height. at_top: no paragraph above, the figure starts right below
@@ -28,7 +28,8 @@ def _pdf(two_columns=False, hidden_latex_data=False, figure=True, caption=CAPTIO
     block each, the last one short, close above the figure (PDFs made in Word, 2610.35685). title_page: title and
     authors span both columns right above Figure 1 in the right column (2610.34626, 2610.39927). label_row: a
     second panel label at the right end of the row, so the row is one block as wide as the column (2610.35817).
-    caption_font: "hebo" sets the caption in bold."""
+    caption_font: "hebo" sets the caption in bold. caption_gap: extra space between figure and caption (a \\vspace,
+    2610.40350)."""
     doc = pymupdf.open()
     page = doc.new_page(width=612, height=792)
     page.insert_text((72, 40), "Preprint. Under review.", fontsize=9)
@@ -60,7 +61,8 @@ def _pdf(two_columns=False, hidden_latex_data=False, figure=True, caption=CAPTIO
                                 fontsize=4)
     else:
         page.insert_text((x0 + 10, 300), "just a label", fontsize=9)
-    page.insert_textbox(pymupdf.Rect(x0, 395 + dy, x1, 440 + dy), caption, fontsize=9, fontname=caption_font)
+    page.insert_textbox(pymupdf.Rect(x0, 395 + dy + caption_gap, x1, 440 + dy + caption_gap), caption, fontsize=9,
+                        fontname=caption_font)
     page.insert_textbox(pymupdf.Rect(x0, 450, x1, 600), PARAGRAPH, fontsize=9)
     return doc.tobytes()
 
@@ -79,6 +81,29 @@ def test_figure_1_is_the_drawing_with_its_labels_between_the_paragraph_and_the_c
     # From the panel label (top ~213) to the box's bottom (380), plus a margin: not the header, not the paragraphs
     assert 165 < _height_pt(png) < 185
     assert caption == "Figure 1: Overview of the method. The left panel shows the input, the right panel the output."
+
+
+def test_white_space_between_figure_and_caption_is_allowed():
+    png, _ = figures.crop_figure_1(_pdf(caption_gap=18))  # ~31 pt from the drawing to the caption
+    assert png is not None and 165 < _height_pt(png) < 185
+
+
+def test_html_fallback_skips_tables():
+    """2610.40350: Figure 1 had no image in the arXiv HTML, and a model's logo in Table 1 was taken for it."""
+    from types import SimpleNamespace
+    html = ('<figure id="S1.F1" class="ltx_figure"><svg></svg><figcaption>Figure 1: Overview.</figcaption></figure>'
+            '<figure id="S4.T1" class="ltx_table"><figcaption><span>Table 1: </span>Main results.</figcaption>'
+            '<table><tr><td><img src="figures/claude.png"></td></tr></table></figure>'
+            '<figure id="S5.F3" class="ltx_figure"><img src="x3.png"><figcaption>Figure 3: Ablation.</figcaption></figure>')
+
+    class Http:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url): return SimpleNamespace(status_code=200, text=html, url="https://arxiv.org/html/2610.40350v1")
+
+    with patch.object(crawl, "_http_client", lambda **k: Http()), patch.object(crawl, "_ArxivLockCtx"):
+        url, caption = crawl._html_figure("2610.40350")
+    assert url == "https://arxiv.org/html/2610.40350v1/x3.png" and caption == "Figure 3: Ablation."
 
 
 def test_two_columns_take_only_the_captions_column():
@@ -173,6 +198,39 @@ def test_nightly_backfill_redoes_older_figures_once_and_skips_trashed_papers(app
             assert papers["2609.00002"].figure_pdf_tried_at is not None
             assert papers["2609.00003"].figure_pdf_tried_at is None  # only in Trash: not fetched
             assert crawl.redo_pdf_figures() == 0  # each paper tried once
+        finally:
+            ProjectPaper.query.filter_by(project_id=project.id).delete()
+            Paper.query.filter(Paper.id.in_([p.id for p in papers.values()])).delete()
+            db.session.delete(project)
+            db.session.commit()
+
+
+def test_nightly_backfill_replaces_a_table_image_once(app, monkeypatch):
+    """A table's image taken for Figure 1 (2610.40350): cut from the PDF if it can be, else dropped; then left alone."""
+    monkeypatch.setattr(figures, "_download_pdf",
+                        lambda arxiv_id: _pdf(caption_gap=18) if arxiv_id == "2609.00011" else _pdf(caption="Figure 3: x."))
+    tried = datetime(2026, 11, 5)
+    with app.app_context():
+        project = Project(name="Fig Tables", slug="fig-tables")
+        db.session.add(project)
+        db.session.flush()
+        papers = {}
+        for aid in ("2609.00011", "2609.00012"):
+            p = Paper(arxiv_id=aid, title=aid, source="arxiv", figure_url="https://arxiv.org/html/x/claude.png",
+                      figure_caption="Table 1: Main results.", figure_pdf_tried_at=tried)
+            db.session.add(p)
+            db.session.flush()
+            papers[aid] = p
+            db.session.add(ProjectPaper(project_id=project.id, paper_id=p.id))
+        db.session.commit()
+        try:
+            assert crawl.redo_pdf_figures() == 1
+            assert papers["2609.00011"].figure_url == "/figures/2609.00011.png"
+            assert papers["2609.00011"].figure_caption.startswith("Figure 1:")
+            assert papers["2609.00012"].figure_url is None and papers["2609.00012"].figure_caption is None
+            downloads = []
+            monkeypatch.setattr(figures, "_download_pdf", lambda arxiv_id: downloads.append(arxiv_id))
+            assert crawl.redo_pdf_figures() == 0 and downloads == []
         finally:
             ProjectPaper.query.filter_by(project_id=project.id).delete()
             Paper.query.filter(Paper.id.in_([p.id for p in papers.values()])).delete()

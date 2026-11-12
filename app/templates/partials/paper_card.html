@@ -25,133 +25,35 @@
         <span class="enrich-spinner" aria-hidden="true"></span>{{ _step }}<span class="thinking-dots"></span>
     </div>
     {% endif %}
-    <div class="flex flex-col sm:flex-row items-start gap-2 sm:gap-4 mb-3">
-        <div class="flex-1 min-w-0">
+    {# Layout (2026-11-12, mockup G2): the header across the card (title, authors, badges | links, vote), then the
+       reading column and the fact sidebar side by side; below a narrow card width the sidebar goes under the text
+       (container query in base.html). #}
+    <div class="card-head">
+        <div class="card-head-main">
             <a href="{{ pp.paper.landing_url or '#' }}" target="_blank"
                 style="font-size: 1rem; font-weight: 600; color: var(--ink-1); line-height: 1.35; display: block; text-decoration: none;"
                 onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--ink-1)'">
                 {{ pp.paper.title }}
             </a>
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-0.5 mt-1.5"
-                style="font-size: 0.75rem; color: var(--ink-3);">
-                {% set authors = pp.paper.authors_list %}
-                {% set n = authors|length %}
-                {% if n <= 4 %}
-                    <span>{{ authors|join(', ') }}</span>
-                {% else %}
-                    <span>{{ authors[:3]|join(', ') }} <span style="color:var(--ink-4);" data-tip="{{ authors[3:-1]|join(', ') }}">… (+{{ n - 4 }}) …</span> {{ authors[-1] }}</span>
-                {% endif %}
-                {% if pp.paper.published_date %}<span>{{ pp.paper.published_date.strftime('%b %Y') }}</span>{% elif pp.paper.year %}<span>{{ pp.paper.year }}</span>{% endif %}
-                {% if pp.paper.is_arxiv or pp.paper.citation_fetched_at is not none %}
-                {% set _cid = pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') %}
-                <span id="cit-disp-{{ _cid }}-{{ project.id }}" data-arxiv-id="{{ pp.paper.arxiv_id }}"
-                      style="display:inline-flex;align-items:center;gap:3px;">
-                    <span class="cit-text">{% if pp.paper.citation_fetched_at is not none %}{{ pp.paper.citation_count }} citation{{ 's' if pp.paper.citation_count != 1 else '' }} (as of {{ pp.paper.citation_fetched_at.strftime('%b %Y') }}){% else %}? citations{% endif %}</span>
-                    <button aria-label="Edit citation count" data-tip="Edit citation count"
-                            onclick="openCitEdit('{{ _cid }}',{{ project.id }},{{ pp.paper.citation_count or 0 }})"
-                            style="background:none;border:none;padding:0 0 0 2px;cursor:pointer;color:var(--ink-4);opacity:0.5;display:inline-flex;align-items:center;"
-                            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">
-                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                    </button>
-                </span>
-                <span id="cit-edit-{{ _cid }}-{{ project.id }}" style="display:none;align-items:center;gap:4px;">
-                    <input type="number" min="0" id="cit-inp-{{ _cid }}-{{ project.id }}"
-                           style="width:60px;font-size:0.7rem;border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:1px 4px;background:var(--paper-3);color:var(--ink-1);outline:none;"
-                           onkeydown="if(event.key==='Enter')saveCit('{{ _cid }}',{{ project.id }});else if(event.key==='Escape')closeCitEdit('{{ _cid }}',{{ project.id }})"/>
-                    <button onclick="saveCit('{{ _cid }}',{{ project.id }})"
-                            style="font-size:0.65rem;padding:1px 5px;border-radius:var(--radius-sm);background:var(--accent);color:#fff;border:none;cursor:pointer;">✓</button>
-                    <button onclick="closeCitEdit('{{ _cid }}',{{ project.id }})"
-                            style="font-size:0.65rem;padding:1px 5px;border-radius:var(--radius-sm);background:transparent;color:var(--ink-3);border:1px solid var(--border-default);cursor:pointer;">✕</button>
-                </span>
-                {% endif %}
-                {% if pp.paper.page_count %}<span>{{ pp.paper.page_count }} pages</span>{% endif %}
-                {% set insts = pp.paper.institutions_list %}
-                {% if insts %}
-                <span style="color:var(--ink-4);" data-tip="{{ insts|join(', ') }}">{{ insts[:2]|join(', ') }}{% if insts|length > 2 %} +{{ insts|length - 2 }}{% endif %}</span>
-                {% endif %}
+            {# Authors: up to 4 by name (the first 3 and the last), plus every corresponding author, who is a mailto link #}
+            {% set authors = pp.paper.authors_list %}
+            {% set _mails = pp.paper.corresponding_emails %}
+            {% set _n = authors|length %}
+            <div class="card-authors">
+                {%- set ns = namespace(prev=-1) -%}
+                {%- for a in authors -%}
+                {%- set i = loop.index0 -%}
+                {%- if _n <= 4 or i < 3 or loop.last or a in _mails -%}
+                {%- if i > ns.prev + 1 %} <span style="color: var(--ink-4);" data-tip="{{ authors[ns.prev + 1:i] | join(', ') }}">… (+{{ i - ns.prev - 1 }}) …</span> {% elif ns.prev >= 0 %}, {% endif -%}
+                {%- if a in _mails -%}
+                <a class="card-author-mail" href="mailto:{{ _mails[a] }}" data-tip="Corresponding author: {{ _mails[a] }}">{{ a }}<svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-mail"></use></svg></a>
+                {%- else -%}{{ a }}{%- endif -%}
+                {%- set ns.prev = i -%}
+                {%- endif -%}
+                {%- endfor -%}
             </div>
-        </div>
-
-        <div class="flex flex-wrap gap-1.5 shrink-0">
-            {% if not show_curate and not show_restore %}
-            {# My Collection: toggle tag buttons (highlighted when active) + move back #}
-            {% set _tags = _mytags %}
-            <button
-                style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
-                    {% if 'important' in _tags %}border: 1px solid color-mix(in oklch, var(--tag-important-ink) 40%, transparent); color: var(--tag-important-ink); background-color: var(--tag-important-bg);
-                    {% else %}border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3);{% endif %}"
-                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
-                hx-vals='{"project_id": {{ project.id }}, "tag": "important"}'
-                hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" hx-swap="outerHTML">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <use href="/static/icons.svg#icon-star"></use>
-                </svg>
-                Important
-            </button>
-            <button
-                style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
-                    {% if 'to_read' in _tags %}border: 1px solid color-mix(in oklch, var(--tag-read-ink) 40%, transparent); color: var(--tag-read-ink); background-color: var(--tag-read-bg);
-                    {% else %}border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3);{% endif %}"
-                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
-                hx-vals='{"project_id": {{ project.id }}, "tag": "to_read"}'
-                hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" hx-swap="outerHTML">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <use href="/static/icons.svg#icon-book"></use>
-                </svg>
-                To Read
-            </button>
-            <button
-                style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
-                    {% if 'to_discuss' in _tags %}border: 1px solid color-mix(in oklch, var(--tag-discuss-ink) 40%, transparent); color: var(--tag-discuss-ink); background-color: var(--tag-discuss-bg);
-                    {% else %}border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3);{% endif %}"
-                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
-                hx-vals='{"project_id": {{ project.id }}, "tag": "to_discuss"}'
-                hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" hx-swap="outerHTML">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <use href="/static/icons.svg#icon-message-circle"></use>
-                </svg>
-                Discuss
-            </button>
-            <button
-                style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; color: var(--ink-3); background-color: var(--paper-3); border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; gap: 6px; outline: none;"
-                hx-post="/paper/{{ pp.paper.arxiv_id }}/tag" hx-vals='{"project_id": {{ project.id }}, "tag": ""}'
-                hx-target="closest .paper-card" hx-swap="outerHTML">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <use href="/static/icons.svg#icon-corner-up-left"></use>
-                </svg>
-                Move to New Papers
-            </button>
-            {% endif %}
-        </div>
-    </div>
-
-    {% if _me %}{% include "partials/_card_people.html" %}{% endif %}
-
-    {% if pp.relevance_reason %}
-    <div class="mb-3 border-l-2 relevance-reason" style="border-color: var(--warning); padding-left: 12px;">
-        <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Why it's relevant for this project
-            {%- if pp.screen_source == "abstract" %}
-            <span class="summary-src summary-src-warn" data-tip="No full text could be fetched when this paper was screened, so the relevance check read only the abstract. While the paper is in New Papers, the nightly crawl tries the full text again and moves it to Trash if it turns out not to be relevant.">⚠ from abstract only</span>
-            {%- elif pp.screen_source == "full_text" %}
-            <span class="summary-src" data-tip="The relevance check read the paper's full text (arXiv HTML or PDF).">from full text</span>
-            {%- endif %}</p>
-        <p class="text-sm" style="color: var(--ink-2); line-height: 1.5;">{{ pp.relevance_reason }}</p>
-    </div>
-    {% endif %}
-
-    {% if pp.paper.summary %}
-    <div class="mb-3 border-l-2" style="border-color: var(--accent); padding-left: 12px;">
-        {% set src = pp.paper.summary.content_source %}
-        <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">AI Summary
-            {%- if src == "abstract" %}
-            <span class="summary-src summary-src-warn" data-tip="No full text could be fetched when this summary was made (neither an arXiv HTML version nor a readable PDF, or a web page without readable text), so the summary, the badges and the main contributions come from the abstract alone. Regenerate tries the full text again.">⚠ from abstract only</span>
-            {%- elif src == "full_text" %}
-            <span class="summary-src" data-tip="The summary, the badges and the main contributions were made from the paper's full text (arXiv HTML version, or the PDF if there is none).">from full text</span>
-            {%- elif src == "web_page" %}
-            <span class="summary-src" data-tip="This paper was added from a web page; the summary, the badges and the main contributions were made from that page's text, not from a PDF.">from the web page</span>
-            {%- endif %}</p>
-        <p class="text-sm" style="color: var(--ink-2); line-height: 1.5;">{{ pp.paper.summary.summary_text }}</p>
-        <div class="flex flex-wrap gap-2 mt-3">
+            {% if pp.paper.summary %}
+            <div class="card-badges">
             {% if pp.paper.summary.introduces_dataset %}
             <span
                 style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; background-color: var(--badge-dataset-bg); color: var(--ink-2); font-size: 0.75rem; border-radius: 9999px;">
@@ -197,25 +99,69 @@
                 Benchmark
             </span>
             {% endif %}
+            </div>
+            {% endif %}
         </div>
+        <div class="card-head-side">
+            <div class="card-links">
+                {% if pp.paper.is_arxiv %}
+                <a class="card-link" href="https://arxiv.org/abs/{{ pp.paper.arxiv_id }}" target="_blank">arXiv</a>
+                <a class="card-link" href="https://arxiv.org/pdf/{{ pp.paper.arxiv_id }}.pdf" target="_blank">PDF</a>
+                {% elif pp.paper.landing_url %}
+                <a class="card-link" href="{{ pp.paper.landing_url }}" target="_blank" data-tip="{{ pp.paper.landing_url }}">Source ↗</a>
+                {% if pp.paper.pdf_link %}<a class="card-link" href="{{ pp.paper.pdf_link }}" target="_blank" data-tip="{{ pp.paper.pdf_link }}">PDF</a>{% endif %}
+                {% endif %}
+                {% if pp.paper.project_url %}
+                <a class="card-link" href="{{ pp.paper.project_url }}" target="_blank" rel="noopener" data-tip="{{ pp.paper.project_url }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-home"></use></svg>Project page</a>
+                {% endif %}
+                {% if pp.paper.code_url %}
+                <a class="card-link" href="{{ pp.paper.code_url }}" target="_blank" rel="noopener" data-tip="{{ pp.paper.code_url }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-code"></use></svg>Code</a>
+                {% endif %}
+            </div>
+            {% if _me %}{% include "partials/_card_vote.html" %}{% endif %}
+        </div>
+    </div>
+
+    <div class="card-grid">
+    <div class="card-main">
+    {% if _me %}{% include "partials/_card_people.html" %}{% endif %}
+
+    {% if pp.relevance_reason %}
+    <div class="mb-3 border-l-2 relevance-reason" style="border-color: var(--warning); padding-left: 12px;">
+        <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Why it's relevant for this project
+            {%- if pp.screen_source == "abstract" %}
+            <span class="summary-src summary-src-warn" data-tip="No full text could be fetched when this paper was screened, so the relevance check read only the abstract. While the paper is in New Papers, the nightly crawl tries the full text again and moves it to Trash if it turns out not to be relevant.">⚠ from abstract only</span>
+            {%- elif pp.screen_source == "full_text" %}
+            <span class="summary-src" data-tip="The relevance check read the paper's full text (arXiv HTML or PDF).">from full text</span>
+            {%- endif %}</p>
+        <p class="text-sm" style="color: var(--ink-2); line-height: 1.5;">{{ pp.relevance_reason }}</p>
+    </div>
+    {% endif %}
+
+    {% if pp.paper.summary %}
+    <div class="mb-3 border-l-2" style="border-color: var(--accent); padding-left: 12px;">
+        {% set src = pp.paper.summary.content_source %}
+        <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">AI Summary
+            {%- if src == "abstract" %}
+            <span class="summary-src summary-src-warn" data-tip="No full text could be fetched when this summary was made (neither an arXiv HTML version nor a readable PDF, or a web page without readable text), so the summary, the badges and the main contributions come from the abstract alone. Regenerate tries the full text again.">⚠ from abstract only</span>
+            {%- elif src == "full_text" %}
+            <span class="summary-src" data-tip="The summary, the badges and the main contributions were made from the paper's full text (arXiv HTML version, or the PDF if there is none).">from full text</span>
+            {%- elif src == "web_page" %}
+            <span class="summary-src" data-tip="This paper was added from a web page; the summary, the badges and the main contributions were made from that page's text, not from a PDF.">from the web page</span>
+            {%- endif %}</p>
+        <p class="text-sm" style="color: var(--ink-2); line-height: 1.5;">{{ pp.paper.summary.summary_text }}</p>
     </div>
     {% endif %}
 
     {% if pp.paper.summary and pp.paper.summary.main_contributions %}
-    <details class="mb-3"
-        style="background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
-        <summary
-            style="padding: 8px 12px; font-size: 0.75rem; color: var(--accent); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; outline: none; list-style: none;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <use href="/static/icons.svg#icon-target"></use>
-            </svg>
-            Main Contributions ({{ pp.paper.summary.main_contributions.split('\n')|length }})
-        </summary>
-        <div style="padding: 0 12px 12px;">
-            <p style="font-size: 0.75rem; color: var(--ink-2); line-height: 1.5; white-space: pre-line;">{{
-                pp.paper.summary.main_contributions }}</p>
-        </div>
-    </details>
+    <div class="card-contrib">
+        <p class="card-label">Main contributions</p>
+        <ul>
+            {% for line in pp.paper.summary.main_contributions.split('\n') if line.strip() %}
+            <li>{{ line.strip().lstrip('-•* ').strip() }}</li>
+            {% endfor %}
+        </ul>
+    </div>
     {% endif %}
 
     {% if pp.paper.abstract and (pp.paper.is_arxiv or pp.paper.source in ('biorxiv', 'journal')) %}
@@ -233,41 +179,9 @@
     </details>
     {% endif %}
 
-    {# Links and how the paper came in #}
-    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs mb-3" style="color: var(--ink-3);">
-        {% if pp.paper.is_arxiv %}
-        <a href="https://arxiv.org/abs/{{ pp.paper.arxiv_id }}" target="_blank" style="color: var(--ink-3);">arXiv</a>
-        <a href="https://arxiv.org/pdf/{{ pp.paper.arxiv_id }}.pdf" target="_blank" style="color: var(--ink-3);">PDF</a>
-        {% elif pp.paper.landing_url %}
-        <a href="{{ pp.paper.landing_url }}" target="_blank" style="color: var(--ink-3);" data-tip="{{ pp.paper.landing_url }}">Source ↗</a>
-        {% if pp.paper.pdf_link %}<a href="{{ pp.paper.pdf_link }}" target="_blank" style="color: var(--ink-3);" data-tip="{{ pp.paper.pdf_link }}">PDF</a>{% endif %}
-        {% endif %}
-        {% if pp.paper.figure_url %}
-        <span style="color: var(--accent); display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer;"
-              data-figure-url="{{ pp.paper.figure_url }}"
-              data-figure-caption="{{ pp.paper.figure_caption or '' }}"
-              onclick="openFigureLightbox(this.dataset.figureUrl, this.dataset.figureCaption || null)">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <use href="/static/icons.svg#icon-image"></use>
-            </svg>
-            Figure
-        </span>
-        {% endif %}
-        {% if pp.added_at or pp.collected_at %}
-        {# How the paper came into this project (ProjectPaper.origin) and when it was collected; a paper added
-           straight into My Collection (by hand, copied, moved) doesn't repeat the same day as "Collected" #}
-        {% set _src = pp.origin_project %}
-        {% set _show_collected = pp.collected_at and not (pp.origin in ('manual', 'copied', 'moved') and pp.added_at
-                                                          and pp.added_at.date() == pp.collected_at.date()) %}
-        <span class="text-xs" style="color: var(--ink-4); display: inline-flex; align-items: center; gap: 6px;"
-            data-tip="{% if pp.origin == 'crawl' %}Put into New Papers by a crawl (nightly or Find Papers) on {{ pp.added_at.strftime('%b %-d, %Y') }}.{% if pp.found_via %} {{ pp.found_via_tip() }}{% endif %}{% elif pp.origin == 'manual' %}Added by hand (pasted link) on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.origin in ('copied', 'moved') %}{{ pp.origin | capitalize }} here from the project {{ _src.name if _src else '(deleted)' }} on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.added_at %}Added to this project {{ pp.added_at.strftime('%b %-d, %Y') }} (how is not known: it came in before this was recorded){% endif %}{% if _show_collected %} | Moved to My Collection {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <use href="/static/icons.svg#icon-calendar"></use>
-            </svg>
-            {% if pp.added_at %}{% if pp.origin == 'crawl' and pp.found_via %}Found via {{ pp.found_via_text() }},{% elif pp.origin == 'crawl' %}Found by crawl{% elif pp.origin == 'manual' %}Added by hand{% elif pp.origin in ('copied', 'moved') %}{{ pp.origin | capitalize }} from {{ _src.name if _src else 'another project' }}{% else %}Added{% endif %} {{ pp.added_at.strftime('%b %-d, %Y') }}{% endif %}{% if _show_collected %}{% if pp.added_at %} | {% endif %}Collected {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}
-        </span>
-        {% endif %}
-        {% if not pp.paper.is_arxiv and pp.paper.web_enrich_attempts and pp.paper.web_enrich_attempts >= max_web_enrich_attempts and (not pp.paper.page_count or not pp.paper.institutions_list) %}
+    {% if not pp.paper.is_arxiv and pp.paper.web_enrich_attempts and pp.paper.web_enrich_attempts >= max_web_enrich_attempts and (not pp.paper.page_count or not pp.paper.institutions_list) %}
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs mb-3">
+        
         <span style="color: var(--error); font-size: 0.75rem;"
             data-tip="Page count / institutions could not be fetched from this paper's PDF after {{ pp.paper.web_enrich_attempts }} attempt{{ 's' if pp.paper.web_enrich_attempts != 1 else '' }}{% if pp.paper.web_enrich_last_attempt_at %} (last tried {{ pp.paper.web_enrich_last_attempt_at.strftime('%b %-d, %Y') }}){% endif %} — either the domain isn't on the open-access allowlist, or the fetch failed (403, dead link, etc).">
             PDF metadata failed ({{ pp.paper.web_enrich_attempts }}/{{ max_web_enrich_attempts }} attempts)
@@ -299,11 +213,143 @@
             data-tip="Reset attempt counter and retry PDF metadata fetch in the background — reload the page in a moment to see the result">
             Retry
         </button>
-        {% endif %}
+    </div>
+    {% endif %}
     </div>
 
-    {# Action bar: the two triage actions (with their keys), the rest in the ⋯ menu #}
+    <aside class="card-side">
+        <p class="card-label">Paper</p>
+        <dl class="card-facts">
+            {% if pp.paper.published_date or pp.paper.year %}
+            <dt>Published</dt><dd>{{ pp.paper.published_date.strftime('%b %-d, %Y') if pp.paper.published_date else pp.paper.year }}</dd>
+            {% endif %}
+            {% if pp.paper.arxiv_version %}
+            <dt>Version</dt><dd data-tip="The latest version on arXiv{% if pp.paper.arxiv_version > 1 %}: the authors revised the paper; the summary may be from an earlier version (Regenerate reads the latest){% endif %}">v{{ pp.paper.arxiv_version }}{% if pp.paper.arxiv_version > 1 and pp.paper.arxiv_updated %}, {{ pp.paper.arxiv_updated.strftime('%b %-d, %Y') }}{% endif %}</dd>
+            {% endif %}
+            {% if pp.paper.venue %}
+            <dt>Venue</dt><dd data-tip="Where the paper says it was accepted or published{% if pp.paper.arxiv_comment %} (arXiv comment: {{ pp.paper.arxiv_comment }}){% endif %}">{{ pp.paper.venue }}</dd>
+            {% endif %}
+            {% if pp.paper.page_count %}
+            <dt>Length</dt><dd>{{ pp.paper.page_count }} pages</dd>
+            {% endif %}
+            {% if pp.paper.is_arxiv or pp.paper.citation_fetched_at is not none %}
+            <dt>Citations</dt><dd>
+            {% set _cid = pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') %}
+            <span id="cit-disp-{{ _cid }}-{{ project.id }}" data-arxiv-id="{{ pp.paper.arxiv_id }}"
+                  style="display:inline-flex;align-items:center;gap:3px;">
+                <span class="cit-text">{% if pp.paper.citation_fetched_at is not none %}{{ pp.paper.citation_count }} citation{{ 's' if pp.paper.citation_count != 1 else '' }} (as of {{ pp.paper.citation_fetched_at.strftime('%b %Y') }}){% else %}? citations{% endif %}</span>
+                <button aria-label="Edit citation count" data-tip="Edit citation count"
+                        onclick="openCitEdit('{{ _cid }}',{{ project.id }},{{ pp.paper.citation_count or 0 }})"
+                        style="background:none;border:none;padding:0 0 0 2px;cursor:pointer;color:var(--ink-4);opacity:0.5;display:inline-flex;align-items:center;"
+                        onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+            </span>
+            <span id="cit-edit-{{ _cid }}-{{ project.id }}" style="display:none;align-items:center;gap:4px;">
+                <input type="number" min="0" id="cit-inp-{{ _cid }}-{{ project.id }}"
+                       style="width:60px;font-size:0.7rem;border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:1px 4px;background:var(--paper-3);color:var(--ink-1);outline:none;"
+                       onkeydown="if(event.key==='Enter')saveCit('{{ _cid }}',{{ project.id }});else if(event.key==='Escape')closeCitEdit('{{ _cid }}',{{ project.id }})"/>
+                <button onclick="saveCit('{{ _cid }}',{{ project.id }})"
+                        style="font-size:0.65rem;padding:1px 5px;border-radius:var(--radius-sm);background:var(--accent);color:#fff;border:none;cursor:pointer;">✓</button>
+                <button onclick="closeCitEdit('{{ _cid }}',{{ project.id }})"
+                        style="font-size:0.65rem;padding:1px 5px;border-radius:var(--radius-sm);background:transparent;color:var(--ink-3);border:1px solid var(--border-default);cursor:pointer;">✕</button>
+            </span>
+            
+            </dd>
+            {% endif %}
+            {% set insts = pp.paper.institutions_list %}
+            {% if insts %}
+            <dt>From</dt><dd>{{ insts | join(', ') }}</dd>
+            {% endif %}
+            {% if pp.added_at or pp.collected_at %}
+            <dt>Added</dt><dd>
+    {# How the paper came into this project (ProjectPaper.origin) and when it was collected; a paper added
+       straight into My Collection (by hand, copied, moved) doesn't repeat the same day as "Collected" #}
+    {% set _src = pp.origin_project %}
+    {% set _show_collected = pp.collected_at and not (pp.origin in ('manual', 'copied', 'moved') and pp.added_at
+                                                      and pp.added_at.date() == pp.collected_at.date()) %}
+    <span data-tip="{% if pp.origin == 'crawl' %}Put into New Papers by a crawl (nightly or Find Papers) on {{ pp.added_at.strftime('%b %-d, %Y') }}.{% if pp.found_via %} {{ pp.found_via_tip() }}{% endif %}{% elif pp.origin == 'manual' %}Added by hand (pasted link) on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.origin in ('copied', 'moved') %}{{ pp.origin | capitalize }} here from the project {{ _src.name if _src else '(deleted)' }} on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.added_at %}Added to this project {{ pp.added_at.strftime('%b %-d, %Y') }} (how is not known: it came in before this was recorded){% endif %}{% if _show_collected %} | Moved to My Collection {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}">
+        {% if pp.added_at %}{% if pp.origin == 'crawl' and pp.found_via %}Found via {{ pp.found_via_text() }},{% elif pp.origin == 'crawl' %}Found by crawl{% elif pp.origin == 'manual' %}Added by hand{% elif pp.origin in ('copied', 'moved') %}{{ pp.origin | capitalize }} from {{ _src.name if _src else 'another project' }}{% else %}Added{% endif %} {{ pp.added_at.strftime('%b %-d, %Y') }}{% endif %}{% if _show_collected %}{% if pp.added_at %} | {% endif %}Collected {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}
+    </span>
+            </dd>
+            {% endif %}
+        </dl>
+        {% if pp.paper.figure_url %}
+        <button type="button" class="card-fig focus-ring" data-figure-url="{{ pp.paper.figure_url }}"
+            data-figure-caption="{{ pp.paper.figure_caption or '' }}"
+            onclick="openFigureLightbox(this.dataset.figureUrl, this.dataset.figureCaption || null)"
+            data-tip="{{ (pp.paper.figure_caption or 'Figure 1') | truncate(300) }}">
+            <img src="{{ pp.paper.figure_url }}" alt="Figure 1 of the paper" loading="lazy">
+            <span>Figure 1 (click to enlarge)</span>
+        </button>
+        {% endif %}
+        {% set _conn = card_connections(pp) %}
+        {% if _conn.found_via or _conn.also_cites or _conn.shared_authors or _conn.other_projects %}
+        <p class="card-label">Connections</p>
+        <ul class="card-conn">
+            {% macro plink(p) %}{% if p.id is defined %}<a href="/projects/{{ project.slug }}?paper={{ p.id }}" data-tip="{{ p.title }}">{{ p.title | truncate(60) }}</a>{% else %}<span data-tip="{{ p.title }}">{{ p.title | truncate(60) }}</span>{% endif %}{% endmacro %}
+            {% macro plist(ps) %}{% for p in ps[:3] %}{{ plink(p) }}{% if not loop.last %}; {% endif %}{% endfor %}{% if ps|length > 3 %} <span data-tip="{% for p in ps[3:] %}{{ p.title }}{% if not loop.last %}; {% endif %}{% endfor %}">(+{{ ps|length - 3 }})</span>{% endif %}{% endmacro %}
+            {% if _conn.found_via %}<li>Found because it cites {{ plist(_conn.found_via) }}</li>{% endif %}
+            {% if _conn.also_cites %}<li>{% if _conn.found_via %}Also cites{% else %}Cites{% endif %} {{ plist(_conn.also_cites) }} from My Collection</li>{% endif %}
+            {% for name, ps in _conn.shared_authors[:3] %}<li>{{ name }} also wrote {{ plist(ps) }}</li>{% endfor %}
+            {% if _conn.shared_authors|length > 3 %}<li><span data-tip="{% for name, ps in _conn.shared_authors[3:] %}{{ name }}{% if not loop.last %}, {% endif %}{% endfor %}">+{{ _conn.shared_authors|length - 3 }} more authors of My Collection papers</span></li>{% endif %}
+            {% for proj, sec in _conn.other_projects %}<li>Also in <a href="/projects/{{ proj.slug }}?paper={{ pp.paper.id }}">{{ proj.name }}</a> ({{ sec }})</li>{% endfor %}
+        </ul>
+        {% endif %}
+    </aside>
+
+    <div class="card-bottom">
+    {# Action bar: the triage actions (with their keys) or My Collection's tags, Ask, the rest in the ⋯ menu #}
     <div class="card-actions">
+                {% if not show_curate and not show_restore %}
+                {# My Collection: toggle tag buttons (highlighted when active) + move back #}
+                {% set _tags = _mytags %}
+                <button
+                    style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
+                        {% if 'important' in _tags %}border: 1px solid color-mix(in oklch, var(--tag-important-ink) 40%, transparent); color: var(--tag-important-ink); background-color: var(--tag-important-bg);
+                        {% else %}border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3);{% endif %}"
+                    hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
+                    hx-vals='{"project_id": {{ project.id }}, "tag": "important"}'
+                    hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" hx-swap="outerHTML">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <use href="/static/icons.svg#icon-star"></use>
+                    </svg>
+                    Important
+                </button>
+                <button
+                    style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
+                        {% if 'to_read' in _tags %}border: 1px solid color-mix(in oklch, var(--tag-read-ink) 40%, transparent); color: var(--tag-read-ink); background-color: var(--tag-read-bg);
+                        {% else %}border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3);{% endif %}"
+                    hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
+                    hx-vals='{"project_id": {{ project.id }}, "tag": "to_read"}'
+                    hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" hx-swap="outerHTML">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <use href="/static/icons.svg#icon-book"></use>
+                    </svg>
+                    To Read
+                </button>
+                <button
+                    style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
+                        {% if 'to_discuss' in _tags %}border: 1px solid color-mix(in oklch, var(--tag-discuss-ink) 40%, transparent); color: var(--tag-discuss-ink); background-color: var(--tag-discuss-bg);
+                        {% else %}border: 1px solid var(--border-default); color: var(--ink-3); background-color: var(--paper-3);{% endif %}"
+                    hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
+                    hx-vals='{"project_id": {{ project.id }}, "tag": "to_discuss"}'
+                    hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}" hx-swap="outerHTML">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <use href="/static/icons.svg#icon-message-circle"></use>
+                    </svg>
+                    Discuss
+                </button>
+                <button
+                    style="height: 32px; padding: 0 10px; border-radius: var(--radius-md); font-size: 0.75rem; color: var(--ink-3); background-color: var(--paper-3); border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; gap: 6px; outline: none;"
+                    hx-post="/paper/{{ pp.paper.arxiv_id }}/tag" hx-vals='{"project_id": {{ project.id }}, "tag": ""}'
+                    hx-target="closest .paper-card" hx-swap="outerHTML">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <use href="/static/icons.svg#icon-corner-up-left"></use>
+                    </svg>
+                    Move to New Papers
+                </button>
+                {% endif %}
         {% if show_curate %}
         <button class="focus-ring card-act card-act-keep" data-act="keep"
             hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
@@ -329,6 +375,13 @@
             Trash <kbd>X</kbd>
         </button>
         {% endif %}
+        <button class="focus-ring card-act card-act-ask" data-act="ask"
+            hx-get="/paper/{{ pp.paper.arxiv_id }}/chat?project_id={{ project.id }}"
+            hx-target="#chat-{{ pp.id }}" hx-swap="innerHTML"
+            data-tip="Ask a model questions about this paper; it reads the full text where available. The chat is saved with the paper (key A)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-bot"></use></svg>
+            Ask about this paper <kbd>A</kbd>
+        </button>
         <span style="flex: 1;"></span>
         <details class="card-menu">
             <summary class="focus-ring" aria-label="More actions" data-tip="More: Copy / Move, Notify, Regenerate">⋯</summary>
@@ -393,7 +446,14 @@
         </div>
     </div>
 
-    <p class="card-label">Notes</p>
+    <div class="notes-head">
+        <p class="card-label">Notes</p>
+        <button type="button" class="note-bold-btn focus-ring" aria-label="Bold" onmousedown="event.preventDefault()"
+            onclick="noteFormat.boldButton(this)"
+            data-tip="Bold (Ctrl+B / ⌘B): puts ** around the selected text, or takes them off">B</button>
+    </div>
     {% include "partials/_card_notes.html" %}
     <div id="chat-{{ pp.id }}">{% include "partials/chat_slot.html" %}</div>
+    </div>
+    </div>
 </div>

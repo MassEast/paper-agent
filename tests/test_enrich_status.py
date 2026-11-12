@@ -11,6 +11,7 @@ import pytest
 
 from app import crawl, db
 from app.models import Paper, PaperSummary, Project, ProjectPaper
+from tests.conftest import REAL_CARD_PASSES
 
 
 class _SyncThread:
@@ -43,6 +44,11 @@ def added(app):
         Paper.query.filter_by(id=ids["paper"]).delete()
         Project.query.filter_by(id=ids["project"]).delete()
         db.session.commit()
+
+
+@pytest.fixture(autouse=True)
+def _real_why_line(monkeypatch, _no_card_data_passes):  # after the stub in conftest
+    monkeypatch.setattr("app.crawl._add_relevance_reason", REAL_CARD_PASSES["crawl._add_relevance_reason"])
 
 
 @pytest.fixture
@@ -81,14 +87,60 @@ def test_arxiv_add_reports_each_step_and_clears_at_the_end(app, added, steps):
             patch("app.crawl.generate_summary_with_full_content", return_value=({"summary": "S"}, "m", 1, 1)), \
             patch("app.crawl.extract_main_contributions", return_value=("- C", "", 1, 1)), \
             patch("app.crawl.enrich_institutions_from_scholar"):
-        client.return_value.results.return_value = []
-        crawl.start_collection_add_async(added["project"], "2610.00001", added["paper"], app)
-        assert ProjectPaper.query.get(added["pp"]).relevance_reason is None  # added by hand: no why-line
+        client.return_value.results.return_value = [_arxiv_result()]
+        with patch("app.crawl.generate_relevance_reason", return_value="Studies attention directly.") as why:
+            crawl.start_collection_add_async(added["project"], "2610.00001", added["paper"], app)
+        assert ProjectPaper.query.get(added["pp"]).relevance_reason == "Studies attention directly."
+        assert why.call_args.args == ("Real Title", "An abstract.", "attention")
     assert [s for _, s in steps] == [
         "Waiting to start", "Fetching title, authors and abstract from arXiv", "Fetching the figure",
         "Fetching the citation count", "Counting the pages", "Writing the AI summary and main contributions",
-        "Finding the authors' institutions"]
+        "Writing why it matters for this project",
+        "Looking for code, project page and contact emails", "Finding the authors' institutions"]
     assert crawl.enrich_step(added["paper"]) is None
+
+
+def _arxiv_result():
+    from datetime import datetime
+    from types import SimpleNamespace
+    return SimpleNamespace(title="Real Title", summary="An abstract.", authors=["A. Author"], pdf_url="https://arxiv.org/pdf/2610.00001",
+                           published=datetime(2026, 10, 1), updated=datetime(2026, 10, 1), categories=["cs.LG"], doi=None,
+                           entry_id="http://arxiv.org/abs/2610.00001v1", comment=None, journal_ref=None)
+
+
+def _add_without_llm(app, added, results, why_line):
+    with app.app_context(), \
+            patch("app.crawl.threading.Thread", _SyncThread), \
+            patch("app.crawl._ArxivLockCtx"), \
+            patch("app.crawl.arxiv.Client") as client, \
+            patch("app.crawl.get_paper_figure", return_value=(None, None)), \
+            patch("app.crawl.get_citation_count", return_value=None), \
+            patch("app.crawl.enrich_page_counts"), \
+            patch("app.crawl.get_paper_content", return_value=None), \
+            patch("app.crawl.generate_summary_with_full_content", return_value=({"summary": "S"}, "m", 1, 1)), \
+            patch("app.crawl.extract_main_contributions", return_value=("- C", "", 1, 1)), \
+            patch("app.crawl.enrich_institutions_from_scholar"), \
+            patch("app.crawl.generate_relevance_reason", **why_line) as why:
+        client.return_value.results.return_value = results
+        crawl.start_collection_add_async(added["project"], "2610.00001", added["paper"], app)
+        return why, ProjectPaper.query.get(added["pp"]).relevance_reason
+
+
+def test_no_why_line_without_an_abstract_or_a_research_interest(app, added):
+    why, line = _add_without_llm(app, added, [], {"return_value": "x"})  # arXiv didn't answer: no abstract
+    assert line is None and not why.called
+    with app.app_context():
+        db.session.get(Project, added["project"]).research_interest = " "
+        db.session.commit()
+    why, line = _add_without_llm(app, added, [_arxiv_result()], {"return_value": "x"})
+    assert line is None and not why.called
+
+
+def test_a_failing_why_line_does_not_stop_the_add(app, added):
+    why, line = _add_without_llm(app, added, [_arxiv_result()], {"side_effect": RuntimeError("model down")})
+    assert why.called and line is None
+    with app.app_context():
+        assert db.session.get(Paper, added["paper"]).enrich_complete == 1
 
 
 def test_arxiv_add_that_crashes_still_clears_the_status(app, added):

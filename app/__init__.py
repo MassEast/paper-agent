@@ -163,6 +163,21 @@ def create_app():
             "ALTER TABLE project_papers ADD COLUMN notes_runs TEXT",
             "ALTER TABLE project_papers ADD COLUMN tags_at_off TEXT",
             "ALTER TABLE chat_messages ADD COLUMN member_id INTEGER",
+            # Card redesign (2026-11-12): links, corresponding authors and venue from the paper (app/resources.py),
+            # arXiv version/comment (app/arxiv_meta.py), references for "also cites" (app/connections.py)
+            "ALTER TABLE papers ADD COLUMN code_url TEXT",
+            "ALTER TABLE papers ADD COLUMN project_url TEXT",
+            "ALTER TABLE papers ADD COLUMN corresponding_authors TEXT",
+            "ALTER TABLE papers ADD COLUMN venue TEXT",
+            "ALTER TABLE papers ADD COLUMN resources_checked_at DATETIME",
+            "ALTER TABLE papers ADD COLUMN arxiv_version INTEGER",
+            "ALTER TABLE papers ADD COLUMN arxiv_updated DATE",
+            "ALTER TABLE papers ADD COLUMN arxiv_comment TEXT",
+            "ALTER TABLE papers ADD COLUMN journal_ref TEXT",
+            "ALTER TABLE papers ADD COLUMN arxiv_meta_at DATETIME",
+            "ALTER TABLE papers ADD COLUMN references_fetched_at DATETIME",
+            "ALTER TABLE papers ADD COLUMN references_attempted_at DATETIME",
+            "CREATE INDEX IF NOT EXISTS idx_paper_references_paper ON paper_references(paper_id)",
         ]
         for _sql in _migrations:
             try:
@@ -211,6 +226,8 @@ def create_app():
     app.jinja_env.globals["max_web_enrich_attempts"] = MAX_WEB_ENRICH_ATTEMPTS
     from app.crawl import enrich_step
     app.jinja_env.globals["enrich_step"] = enrich_step
+    from app.connections import card_connections
+    app.jinja_env.globals["card_connections"] = card_connections
     from app import chat
     chat.init_app(app)
     from app import members as _members

@@ -36,15 +36,24 @@
         navigator.sendBeacon(url(el, '/note-lock'), form(el, { release: 1 }));
     }
 
+    // The text shown and the version last saved (plain notes: _notesBase in base.html; per person: _base)
+    function snapshot(el) {
+        var base = el.tagName === 'TEXTAREA' ? el._notesBase : el._base;
+        return JSON.stringify([el.tagName === 'TEXTAREA' ? el.value : el.textContent, base]);
+    }
+
     function look() {
         if (document.hidden) return;
         document.querySelectorAll(FIELDS).forEach(function (el) {
-            if ((el === active && !el._lockedShown) || !el.offsetParent) return;
+            // the parent: a plain note's textarea is hidden behind its formatted view while not edited
+            if ((el === active && !el._lockedShown) || !el.parentElement.offsetParent) return;
+            var before = snapshot(el);
             fetch(url(el, '/note-state') + '?' + form(el))
                 .then(function (r) { return r.json(); })
                 .then(function (d) {
                     setLocked(el, d.by);
-                    if (d.by === null && !el._noteDirty()) el._noteRefresh(d);
+                    // an answer that left before a save or an edit here is older than what is shown
+                    if (d.by === null && !el._noteDirty() && snapshot(el) === before) el._noteRefresh(d);
                     if (d.by === null && el === active) claim(el);  // clicked in while it was locked
                 })
                 .catch(function () {});  // the banner reports a lost connection

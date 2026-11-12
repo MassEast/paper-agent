@@ -133,6 +133,45 @@ Papers (numbered, with citation counts):
 
 Return JSON only: {{"selected": <number>}}"""
 
+PAPER_RESOURCES = """\
+From a research paper, pick out its own code repository, its own project page, its corresponding authors' emails
+and the venue it was accepted at. Only use the candidates listed below; copy them exactly.
+
+- code_url: the repository where the authors release THIS paper's code (or models/data, if that is all they
+  release). Not a tool, library, baseline, dataset or other paper's code that they only use or compare with.
+  null if none of the URL candidates is the paper's own code.
+- project_url: THIS paper's own website or project page (often a *.github.io page). Not a lab, company or
+  personal homepage, not a blog post about something else, not the code repository. null if there is none.
+- corresponding: the corresponding authors with their emails. Corresponding authors are marked (for example
+  with *, a dagger, "Corresponding author" or "Correspondence to"). If no author is marked but emails are
+  given, take only the author of the first email listed. Match an email to an author by the name in it, the
+  order, or the context. Use author names exactly as in the author list and emails exactly as in the email
+  candidates. Empty list if there are no email candidates.
+- venue: where the paper was accepted or published, if the comment, the journal reference or the start of the
+  paper says so (for example "Published as a conference paper at ICLR 2025", "Accepted at NeurIPS 2026",
+  "To appear in TMLR"). Short common name with year and, for workshops, "Workshop", e.g. "ICLR 2025",
+  "NeurIPS 2026 Workshop", "ACL 2025 Findings", "TMLR". null for "under review", "preprint", "submitted to",
+  or if nothing is said.
+
+Title: {title}
+Authors:
+{authors}
+
+arXiv comment: {comment}
+Journal reference: {journal_ref}
+
+Start of the paper:
+{start}
+
+URL candidates:
+{urls}
+
+Email candidates:
+{emails}
+
+Return JSON only:
+{{"code_url": "<url or null>", "project_url": "<url or null>", "corresponding": [{{"author": "<name>", "email": "<email>"}}], "venue": "<venue or null>"}}"""
+
 INSTITUTION_EXTRACTION = """\
 Extract the author institution/affiliation names from the {source_label} of this paper.
 Return a JSON array of strings, e.g. ["MIT CSAIL", "Stanford University"].

@@ -13,7 +13,7 @@ from app import db
 from app.auth import login_required
 from app.usage import counted
 from app.models import ChatMessage, Paper, ProjectPaper, Project
-from app import chat
+from app import arxiv_meta, chat, resources
 from app import figures, members, note_locks, paper_lists
 from app.routes import papers_bp
 from app.utils import base_arxiv_id
@@ -303,6 +303,16 @@ def chat_remove_queued(msg_id):
     return _chat_redraw(pp)
 
 
+@papers_bp.route("/papers/titles")
+@login_required
+def paper_titles():
+    """{paper id: title} for the paper links in notes, which show a paper of this app by its title
+    (notes_format.js). At most 50 ids per request."""
+    ids = [int(i) for i in request.args.get("ids", "").split(",") if i.strip().isdigit()][:50]
+    rows = Paper.query.with_entities(Paper.id, Paper.title).filter(Paper.id.in_(ids)).all() if ids else []
+    return jsonify({str(pid): title for pid, title in rows})
+
+
 @papers_bp.route("/project-paper/<int:pp_id>/card")
 @login_required
 def paper_card_refresh(pp_id):
@@ -485,10 +495,21 @@ def regenerate_paper(arxiv_id):
             except Exception as e:
                 _log.warning("[regenerate] institution enrich failed for %s: %s", arxiv_id, e)
 
+            # Version, comment and journal ref (the card's Version and Venue)
+            try:
+                meta = arxiv_meta._fetch([paper.arxiv_id]).get(paper.arxiv_id)
+                if meta:
+                    arxiv_meta.apply(paper, meta)
+            except Exception as e:
+                _log.warning("[regenerate] arXiv data fetch failed for %s: %s", arxiv_id, e)
+
         # Summary + main contributions, from the full text like a crawl (abstract if there is none)
-        content = (get_paper_content(arxiv_id) if paper.is_arxiv else None) or paper.abstract or ""
+        full_text = get_paper_content(arxiv_id) if paper.is_arxiv else None
+        content = full_text or paper.abstract or ""
         try:
             write_summary(paper, content)
+            if full_text:  # code, project page, corresponding authors, venue
+                resources.apply(paper, resources.extract_for(paper, full_text)[0])
         except LLMUnavailableError as e:
             _log.warning("[regenerate] LLM unavailable for %s: %s", arxiv_id, e)
 

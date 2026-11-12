@@ -186,7 +186,7 @@
             </div>
             <div id="inbox-tools"></div>
             <div id="inbox-list" role="listbox" aria-label="Papers"></div>
-            <div class="inbox-keys"><kbd>J</kbd><kbd>K</kbd> next / previous <kbd>C</kbd> to My Collection <kbd>X</kbd> trash <kbd>/</kbd> search</div>
+            <div class="inbox-keys"><kbd>J</kbd><kbd>K</kbd> next / previous <kbd>C</kbd> to My Collection <kbd>X</kbd> trash <kbd>A</kbd> ask <kbd>/</kbd> search</div>
         </div>
         <div class="inbox-main">
             <div id="paper-list">
@@ -1809,7 +1809,7 @@
             if (more) htmx.trigger(more, 'loadmore');
         });
         const NEXT = { ArrowRight: 1, ArrowDown: 1, j: 1, ArrowLeft: -1, ArrowUp: -1, k: -1 };
-        const ACT = { c: 'keep', x: 'trash', r: 'restore' };
+        const ACT = { c: 'keep', x: 'trash', r: 'restore', a: 'ask' };
         document.addEventListener('keydown', function (e) {
             if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
             if (document.body.classList.contains('drawer-open')) return;
