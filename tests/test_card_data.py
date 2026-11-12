@@ -238,5 +238,5 @@ def test_card_connections(app, proj):
         conn = connections.card_connections(pp)
         assert conn["found_via"][0] is seed and conn["found_via"][1] == {"title": "Gone Paper"}
         assert conn["also_cites"] == [cited]  # the found-via one isn't repeated
-        assert conn["shared_authors"] == [("Anna  Wu", [same_author])]  # not the trashed paper
+        assert conn["shared_authors"] == [(["Anna  Wu"], [same_author])]  # not the trashed paper
         assert [(p.name, sec) for p, sec in conn["other_projects"]] == [("Other Proj", "My Collection")]

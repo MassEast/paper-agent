@@ -91,7 +91,7 @@ def test_arxiv_add_reports_each_step_and_clears_at_the_end(app, added, steps):
         with patch("app.crawl.generate_relevance_reason", return_value="Studies attention directly.") as why:
             crawl.start_collection_add_async(added["project"], "2610.00001", added["paper"], app)
         assert ProjectPaper.query.get(added["pp"]).relevance_reason == "Studies attention directly."
-        assert why.call_args.args == ("Real Title", "An abstract.", "attention")
+        assert why.call_args.args == ("Real Title", "An abstract.", "attention", "")  # no full text in this test
     assert [s for _, s in steps] == [
         "Waiting to start", "Fetching title, authors and abstract from arXiv", "Fetching the figure",
         "Fetching the citation count", "Counting the pages", "Writing the AI summary and main contributions",
@@ -235,3 +235,42 @@ def test_added_paper_fills_in_without_a_reload(live_server, browser_session, app
     assert card.locator(".enrich-status").count() == 0
     assert pg.evaluate("window.__notReloaded") is True
     context.close()
+
+
+def test_the_why_line_reads_the_full_text(app, added):
+    """Like the crawl's deep check: the full text goes to the model, cut where that check cuts it."""
+    long_text = "Section on attention heads. " * 8000  # over the cut-off
+    with app.app_context(), patch("app.crawl._llm_json", return_value=({"reason": "R"}, "m", 1, {})) as llm:
+        assert crawl.generate_relevance_reason("T", "A", "attention", long_text) == "R"
+        prompt = llm.call_args.args[0][0]["content"]
+        assert "Section on attention heads." in prompt and len(prompt) < 150000 + 2000
+        crawl.generate_relevance_reason("T", "A", "attention", None)
+        assert "(no full text: judge from the abstract)" in llm.call_args.args[0][0]["content"]
+
+
+def test_nightly_backfill_writes_missing_why_lines_once(app, added, monkeypatch):
+    with app.app_context():
+        db.session.get(Paper, added["paper"]).abstract = "An abstract."
+        other = Paper(arxiv_id="2610.00002", title="No abstract", source="arxiv", authors="[]")
+        db.session.add(other)
+        db.session.flush()
+        db.session.add(ProjectPaper(project_id=added["project"], paper_id=other.id))
+        db.session.commit()
+        monkeypatch.setattr(crawl, "paper_text", lambda paper: "full text of " + paper.arxiv_id)
+        calls = []
+        monkeypatch.setattr(crawl, "generate_relevance_reason",
+                            lambda title, abstract, interest, text: calls.append(text) or "")
+        try:
+            assert crawl.backfill_relevance_reasons() == 0
+            assert calls == ["full text of 2610.00001"]  # the paper without an abstract is not asked
+            assert ProjectPaper.query.get(added["pp"]).relevance_reason == ""  # no usable answer: not asked again
+            assert crawl.backfill_relevance_reasons() == 0 and len(calls) == 1
+            ProjectPaper.query.get(added["pp"]).relevance_reason = None
+            db.session.commit()
+            monkeypatch.setattr(crawl, "generate_relevance_reason", lambda *a: "Studies attention.")
+            assert crawl.backfill_relevance_reasons() == 1
+            assert ProjectPaper.query.get(added["pp"]).relevance_reason == "Studies attention."
+        finally:
+            ProjectPaper.query.filter_by(paper_id=other.id).delete()
+            db.session.delete(other)
+            db.session.commit()

@@ -1734,7 +1734,16 @@
                 }
                 side.appendChild(item);
             });
-            if (more) side.appendChild(el('div', 'inbox-more', more.dataset.left + ' more, loading as you scroll'));
+            if (more) {
+                const m = el('button', 'inbox-more focus-ring', more.dataset.left + ' more, loading as you scroll');
+                m.type = 'button';
+                m.addEventListener('click', () => htmx.trigger(more, 'loadmore'));
+                side.appendChild(m);
+                // a list that doesn't fill its box can't be scrolled: load the next page right away
+                requestAnimationFrame(() => {
+                    if (side.scrollHeight <= side.clientHeight + 120 && side.offsetParent) htmx.trigger(more, 'loadmore');
+                });
+            }
             if (!cs.length) {
                 const sec = document.getElementById(c.sec), empty = sec && sec.querySelector('.tab-empty, #curated-list-filter-empty');
                 side.appendChild(el('div', 'inbox-empty', empty ? empty.textContent.trim() : 'Nothing here.'));

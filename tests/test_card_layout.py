@@ -184,6 +184,21 @@ def test_connections_link_to_the_cards_in_this_project(c, card):
     assert "Nora B also wrote" in side
 
 
+def test_authors_who_share_papers_make_one_line_and_the_rest_unfolds(c, card):
+    """Five authors of one My Collection paper: one line, three names, "and 2 more" opens to the other two
+    (before 2026-11-12: a line per author, the rest only in a tooltip)."""
+    team = ["Sangmin Bae", "Adam Fisch", "Hrayr Harutyunyan", "Ziwei Ji", "Tal Schuster"]
+    rrt, _ = card["add"]("2410.20672", tag="related", title="Relaxed Recursive Transformers", authors=json.dumps(team))
+    solo, _ = card["add"]("2401.20003", tag="related", title="Solo Paper", authors=json.dumps(["Aaron Courville"]))
+    card["add"]("2507.10524", title="Mixture-of-Recursions", authors=json.dumps(team + ["Aaron Courville"]))
+    side = _card(_page(c, card), "2507.10524")
+    side = side[side.index('<aside class="card-side">'):side.index("</aside>")]
+    text = " ".join(re.sub(r"<[^>]+>", " ", side).split())
+    assert "Sangmin Bae, Adam Fisch, Hrayr Harutyunyan and 2 more Ziwei Ji, Tal Schuster also wrote Relaxed Recursive" in text
+    assert '<details class="conn-more"><summary>and 2 more</summary>Ziwei Ji, Tal Schuster</details>' in side
+    assert "Aaron Courville also wrote" in text and text.count("also wrote") == 2
+
+
 def test_no_connections_no_section(c, card):
     card["add"]("2611.10013", authors=json.dumps(["Nobody Known"]))
     assert "Connections" not in _card(_page(c, card), "2611.10013")
@@ -208,3 +223,45 @@ def test_narrow_cards_stack_the_sidebar_under_the_text():
     assert ".paper-card { container-type: inline-size; container-name: card; }" in base
     assert "@container card (max-width: 720px)" in base
     assert 'grid-template-areas: "main" "side" "bottom"' in base
+
+
+def test_the_share_button_next_to_the_title_links_to_this_card(c, card):
+    p, _ = card["add"]("2611.40001")
+    html = _card(_page(c, card), "2611.40001")
+    title_to_authors = html[html.index("Paper 2611.40001"):html.index('class="card-authors"')]
+    assert f'data-share="/projects/{SLUG}?paper={p.id}"' in title_to_authors
+    assert "#icon-share" in title_to_authors
+
+
+@pytest.mark.slow
+def test_share_copies_the_link_and_the_link_opens_the_card(live_server, browser_session, app):
+    """Its own data, committed: the card fixture keeps a write open, which locks the live server out."""
+    with app.app_context():
+        project = Project(name="Share Proj", slug="share-proj")
+        db.session.add(project)
+        db.session.flush()
+        papers = [Paper(arxiv_id=a, title=f"Paper {a}", source="arxiv") for a in ("2611.40002", "2611.40003")]
+        db.session.add_all(papers)
+        db.session.flush()
+        db.session.add_all([ProjectPaper(project_id=project.id, paper_id=p.id, added_at=datetime.utcnow()) for p in papers])
+        db.session.commit()
+        pid, ids, proj_id = papers[1].id, [p.id for p in papers], project.id
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state, permissions=["clipboard-read", "clipboard-write"])
+    pg = context.new_page()
+    try:
+        pg.goto(f"{live_server}/projects/share-proj?paper={pid}")
+        pg.locator(f'button.card-share[data-share$="?paper={pid}"]').click()
+        pg.get_by_text("Link copied").wait_for()
+        url = pg.evaluate("navigator.clipboard.readText()")
+        assert url == f"{live_server}/projects/share-proj?paper={pid}"
+        other = context.new_page()
+        other.goto(url)
+        assert other.locator(f'button.card-share[data-share$="?paper={pid}"]').is_visible()  # that card is the one shown
+    finally:
+        context.close()
+        with app.app_context():
+            ProjectPaper.query.filter_by(project_id=proj_id).delete()
+            Paper.query.filter(Paper.id.in_(ids)).delete()
+            Project.query.filter_by(id=proj_id).delete()
+            db.session.commit()

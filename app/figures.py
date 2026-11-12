@@ -8,6 +8,8 @@ that area. Saved in FIGURES_DIR (next to the SQLite DB unless set) and served at
 
 import os
 import re
+import threading
+from collections import OrderedDict
 from typing import Optional
 
 import httpx
@@ -160,9 +162,38 @@ def _download_pdf(arxiv_id: str) -> Optional[bytes]:
     return r.content
 
 
+_recent = OrderedDict()  # arxiv id -> PDF bytes of the last few papers: Figure 1 and the author block share a download
+_recent_lock = threading.Lock()
+RECENT_PDFS = 12  # crawl workers handle up to 10 papers at once
+
+
+def pdf_bytes(arxiv_id: str) -> Optional[bytes]:
+    with _recent_lock:
+        if arxiv_id in _recent:
+            _recent.move_to_end(arxiv_id)
+            return _recent[arxiv_id]
+    pdf = _download_pdf(arxiv_id)
+    if pdf is not None:
+        with _recent_lock:
+            _recent[arxiv_id] = pdf
+            while len(_recent) > RECENT_PDFS:
+                _recent.popitem(last=False)
+    return pdf
+
+
+def first_page_text(arxiv_id: str) -> Optional[str]:
+    """The text of the PDF's first page: the author block with its marks (*, †) and their legend, which the arXiv
+    HTML can lose (2507.10524: "Correspondence to: , ." there, the two names marked † in the PDF)."""
+    pdf = pdf_bytes(arxiv_id)
+    if pdf is None:
+        return None
+    doc = pymupdf.open(stream=pdf, filetype="pdf")
+    return doc[0].get_text() if len(doc) else None
+
+
 def pdf_figure(arxiv_id: str) -> tuple[Optional[str], Optional[str]]:
     """(figure_url, caption) of Figure 1 cut from the arXiv PDF and saved, or (None, None)."""
-    pdf = _download_pdf(arxiv_id)
+    pdf = pdf_bytes(arxiv_id)
     if pdf is None:
         return None, None
     png, caption = crop_figure_1(pdf)

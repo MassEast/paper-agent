@@ -30,11 +30,19 @@
        (container query in base.html). #}
     <div class="card-head">
         <div class="card-head-main">
+            <div style="font-size: 1rem; font-weight: 600; line-height: 1.35;">
             <a href="{{ pp.paper.landing_url or '#' }}" target="_blank"
-                style="font-size: 1rem; font-weight: 600; color: var(--ink-1); line-height: 1.35; display: block; text-decoration: none;"
+                style="color: var(--ink-1); text-decoration: none;"
                 onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--ink-1)'">
-                {{ pp.paper.title }}
+                {{- pp.paper.title -}}
             </a>
+            {#- A link to this card in this project (opens the project with this paper shown) #}
+            <button type="button" class="card-share focus-ring" onclick="shareCard(this)"
+                data-share="/projects/{{ project.slug }}?paper={{ pp.paper.id }}" data-title="{{ pp.paper.title }}"
+                aria-label="Share a link to this paper" data-tip="Copy a link to this paper (opens this card for anyone with access)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-share"></use></svg>
+            </button>
+            </div>
             {# Authors: up to 4 by name (the first 3 and the last), plus every corresponding author, who is a mailto link #}
             {% set authors = pp.paper.authors_list %}
             {% set _mails = pp.paper.corresponding_emails %}
@@ -154,25 +162,19 @@
     {% endif %}
 
     {% if pp.paper.summary and pp.paper.summary.main_contributions %}
-    <div class="card-contrib">
-        <p class="card-label">Main contributions</p>
+    <details class="card-fold card-contrib">
+        <summary class="focus-ring"><svg class="card-fold-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-chevron-right"></use></svg><span class="card-label">Main contributions</span></summary>
         <ul>
             {% for line in pp.paper.summary.main_contributions.split('\n') if line.strip() %}
             <li>{{ line.strip().lstrip('-•* ').strip() }}</li>
             {% endfor %}
         </ul>
-    </div>
+    </details>
     {% endif %}
 
     {% if pp.paper.abstract and (pp.paper.is_arxiv or pp.paper.source in ('biorxiv', 'journal')) %}
-    <details class="mb-3">
-        <summary
-            style="font-size: 0.75rem; color: var(--ink-3); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; outline: none; list-style: none;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <use href="/static/icons.svg#icon-archive"></use>
-            </svg>
-            Abstract
-        </summary>
+    <details class="card-fold">
+        <summary class="focus-ring"><svg class="card-fold-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-chevron-right"></use></svg><span class="card-label">Abstract</span></summary>
         <p
             style="font-size: 0.75rem; color: var(--ink-2); line-height: 1.5; margin-top: 8px; border-left: 2px solid var(--border-default); padding-left: 12px;">
             {{ pp.paper.abstract }}</p>
@@ -291,8 +293,12 @@
             {% macro plist(ps) %}{% for p in ps[:3] %}{{ plink(p) }}{% if not loop.last %}; {% endif %}{% endfor %}{% if ps|length > 3 %} <span data-tip="{% for p in ps[3:] %}{{ p.title }}{% if not loop.last %}; {% endif %}{% endfor %}">(+{{ ps|length - 3 }})</span>{% endif %}{% endmacro %}
             {% if _conn.found_via %}<li>Found because it cites {{ plist(_conn.found_via) }}</li>{% endif %}
             {% if _conn.also_cites %}<li>{% if _conn.found_via %}Also cites{% else %}Cites{% endif %} {{ plist(_conn.also_cites) }} from My Collection</li>{% endif %}
-            {% for name, ps in _conn.shared_authors[:3] %}<li>{{ name }} also wrote {{ plist(ps) }}</li>{% endfor %}
-            {% if _conn.shared_authors|length > 3 %}<li><span data-tip="{% for name, ps in _conn.shared_authors[3:] %}{{ name }}{% if not loop.last %}, {% endif %}{% endfor %}">+{{ _conn.shared_authors|length - 3 }} more authors of My Collection papers</span></li>{% endif %}
+            {# Authors grouped by the papers they share; past 3 names, or past 3 such lines, the rest unfolds #}
+            {% macro names(ns) %}{% if ns|length <= 3 %}{{ ns[:-1] | join(', ') }}{% if ns|length > 1 %} and {% endif %}{{ ns[-1] }}{% else %}{{ ns[:3] | join(', ') }} <details class="conn-more"><summary>and {{ ns|length - 3 }} more</summary>{{ ns[3:] | join(', ') }}</details>{% endif %}{% endmacro %}
+            {% macro authors_line(ns, ps) %}<li>{{ names(ns) }} also wrote {{ plist(ps) }}</li>{% endmacro %}
+            {% for ns, ps in _conn.shared_authors[:3] %}{{ authors_line(ns, ps) }}{% endfor %}
+            {% if _conn.shared_authors|length > 3 %}<li><details class="conn-more"><summary>{{ _conn.shared_authors|length - 3 }} more shared authors</summary>
+                <ul class="card-conn">{% for ns, ps in _conn.shared_authors[3:] %}{{ authors_line(ns, ps) }}{% endfor %}</ul></details></li>{% endif %}
             {% for proj, sec in _conn.other_projects %}<li>Also in <a href="/projects/{{ proj.slug }}?paper={{ pp.paper.id }}">{{ proj.name }}</a> ({{ sec }})</li>{% endfor %}
         </ul>
         {% endif %}

@@ -156,6 +156,50 @@ def test_a_comment_naming_a_venue_and_year_alone_is_reason_enough_to_ask():
         resources.extract("T", AUTHORS, "Plain text. " * 50, comment="LLNL-CONF-2026172; 9 pages, 4 figures")
 
 
+def test_the_pdfs_first_page_gives_the_marks_the_html_lost():
+    """2507.10524: the arXiv HTML says "Correspondence to: , ." (names lost); the PDF's first page has the marks and
+    their legend, and an address the HTML text doesn't have."""
+    html = ("Mixture-of-Recursions Sangmin Bae Anna Wu Fang-Yi Zhu Email: {bsmn0223,awu}@kaist.ac.kr "
+            "Corresponding author: Correspondence to: , . Abstract We study recursion.")
+    pdf_page = ("Mixture-of-Recursions Sangmin Bae1,* Anna Wu1,* Fang-Yi Zhu2,† 1KAIST AI 2Mila *Equal Contribution, "
+                "†Corresponding Authors Correspondence to: {bsmn0223,awu}@kaist.ac.kr, fyzhu@mila.quebec")
+    answer = {"code_url": None, "project_url": None, "venue": None,
+              "corresponding": [{"author": "Fang-Yi Zhu", "email": "fyzhu@mila.quebec"}]}
+    with patch.object(resources, "_llm_json", return_value=_answer(answer)) as llm:
+        found, _ = resources.extract("MoR", ["Sangmin Bae", "Anna Wu", "Fang-Yi Zhu"], html, first_page=pdf_page)
+    prompt = llm.call_args.args[0][0]["content"]
+    assert "†Corresponding Authors" in prompt  # the marks reach the model
+    assert "a mark for equal contribution or anything else does not count" in " ".join(prompt.split())
+    assert found["corresponding"] == [{"name": "Fang-Yi Zhu", "email": "fyzhu@mila.quebec"}]  # an address only in the PDF
+
+
+def test_extract_for_reads_the_first_page_of_arxiv_papers_only(app, monkeypatch):
+    from types import SimpleNamespace
+    from app import figures
+    asked = []
+    monkeypatch.setattr(figures, "first_page_text", lambda aid: asked.append(aid) or "page one")
+    seen = []
+    monkeypatch.setattr(resources, "extract", lambda *a: seen.append(a[-1]) or (dict(resources.EMPTY), 0))
+    for aid, is_arxiv in (("2507.10524", True), ("web:x", False)):
+        resources.extract_for(SimpleNamespace(arxiv_id=aid, is_arxiv=is_arxiv, title="t", authors_list=[], abstract="",
+                                              arxiv_comment=None, journal_ref=None), "text")
+    assert asked == ["2507.10524"] and seen == ["page one", None]
+
+
+def test_figure_and_author_block_share_one_pdf_download(monkeypatch):
+    from app import figures
+    import pymupdf
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "Ann Lee*  *Corresponding author", fontsize=11)
+    downloads = []
+    monkeypatch.setattr(figures, "_download_pdf", lambda aid: downloads.append(aid) or doc.tobytes())
+    figures._recent.clear()
+    figures.pdf_figure("2601.00001")  # no Figure 1 in it, but the PDF is kept
+    assert "Corresponding author" in figures.first_page_text("2601.00001")
+    assert downloads == ["2601.00001"]
+    figures._recent.clear()
+
+
 def test_apply_stores_the_findings(app):
     from app.models import Paper
     p = Paper(arxiv_id="x", title="t")
@@ -202,6 +246,9 @@ def test_pdf_link_annotations_are_added_when_the_page_text_hides_them():
 # Real papers with what a reader finds in them (checked by hand, 2026-11-12). Keys: code / project (the end of the
 # URL, lower case, or None: nothing may be found), venue (a part of it, or None), corresponding (exactly these),
 # corresponding_has (at least these), not_corresponding (names that must not get an email). A key left out isn't checked.
+from app import figures as _figures  # noqa: E402
+_REAL_PDF_DOWNLOAD = _figures._download_pdf  # taken before conftest's stub
+
 LIVE = [
     # Tuned Lens: code in the abstract, "Correspondence to" in the author block, many other repos cited
     ("2303.08112", {"code": "github.com/alignmentresearch/tuned-lens", "project": None,
@@ -213,11 +260,14 @@ LIVE = [
     # two addresses for the first author: the institutional one is the corresponding one
     ("2611.14221", {"code": "github.com/jackparley/interpretable_inside_outside",
                     "corresponding_has": {"Jack T. Parley": "jack.parley@epfl.ch"}}),
-    # code in the comment, five emails, funding sites linked in the acknowledgements
+    # code in the comment, five emails, funding sites linked in the acknowledgements; the corresponding authors are
+    # marked † in the PDF, a mark the arXiv HTML loses ("Correspondence to: , ."), and * means equal contribution
     ("2507.10524", {"code": "github.com/raymin0223/mixture_of_recursions", "project": None,
-                    "corresponding_has": {"Sangmin Bae": "bsmn0223@kaist.ac.kr"}}),
-    # venue only in the comment ("ICLR 2025; 49 pages, ..."), nothing else to find
-    ("2410.20672", {"code": None, "project": None, "venue": "ICLR 2025", "corresponding": {}}),
+                    "corresponding": {"Aaron Courville": "courvila@mila.quebec", "Se-Young Yun": "yunseyoung@kaist.ac.kr"}}),
+    # venue only in the comment ("ICLR 2025; 49 pages, ..."); the emails only in the PDF: † marks Tal Schuster,
+    # "Correspondence to:" lists him and the first author
+    ("2410.20672", {"code": None, "project": None, "venue": "ICLR 2025",
+                    "corresponding_has": {"Tal Schuster": "talschuster@google.com"}}),
     # the only email belongs to a student, not to the last author (once misattributed to him)
     ("2611.13732", {"code": None, "not_corresponding": ["Haoqian Wang"]}),
     # own repo next to blog posts and a model on Hugging Face
@@ -225,8 +275,9 @@ LIVE = [
     # own repo next to a benchmark repo it uses; a gmail address
     ("2611.11531", {"code": "github.com/ambroiseodt/waldo",
                     "corresponding_has": {"Ambroise Odonnat": "ambroise.odonnat@gmail.com"}}),
-    # nothing in the paper: no candidates, so no model call either
-    ("2510.24824", {"code": None, "project": None, "venue": None, "corresponding": {}, "tokens": 0}),
+    # no link, no venue; the arXiv HTML has no email, the PDF says "Correspondence: Bohong Wu at ..., Xingyan Bin at ..."
+    ("2510.24824", {"code": None, "project": None, "venue": None,
+                    "corresponding": {"Bohong Wu": "bohongwu@bytedance.com", "Xingyan Bin": "binxingyan@bytedance.com"}}),
 ]
 
 
@@ -236,7 +287,7 @@ def _url_ok(found, want):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("arxiv_id,want", LIVE, ids=[a for a, _ in LIVE])
-def test_live_links_and_emails_of_real_papers(arxiv_id, want):
+def test_live_links_and_emails_of_real_papers(arxiv_id, want, monkeypatch):
     import arxiv as arxiv_lib
     from app import arxiv_meta, crawl
     with utils._ArxivLockCtx():
@@ -244,8 +295,10 @@ def test_live_links_and_emails_of_real_papers(arxiv_id, want):
     meta = arxiv_meta.from_result(r)
     text = crawl.get_paper_content(arxiv_id)
     assert text, "no full text: the test would only check the abstract"
+    from app import figures
+    monkeypatch.setattr(figures, "_download_pdf", _REAL_PDF_DOWNLOAD)  # conftest stubs it out
     found, tokens = resources.extract(r.title, [str(a) for a in r.authors], text, r.summary,
-                                      meta["arxiv_comment"], meta["journal_ref"])
+                                      meta["arxiv_comment"], meta["journal_ref"], figures.first_page_text(arxiv_id))
     print(arxiv_id, found, tokens, flush=True)
     emails = {c["name"]: c["email"] for c in found["corresponding"]}
     if "code" in want:

@@ -678,6 +678,8 @@ def test_chat_in_the_browser_queue_stop_and_drafts(live_server, browser_session,
 
     # stop the second answer: the partial text stays, marked as stopped
     card.get_by_role("button", name="Stop").click()
+    # the model goes on only once the server has the Stop (else it may finish first: flaky before 2026-11-12)
+    _wait(lambda: any(live["stop"] for live in list(chat._live.values())), "the stop to arrive")
     model.release()
     pg.wait_for_selector("text=Stopped.")
     log = card.locator(".chat-log").inner_text()

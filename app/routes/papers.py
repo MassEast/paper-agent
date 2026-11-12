@@ -517,7 +517,7 @@ def regenerate_paper(arxiv_id):
         pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first() if project_id else None
         if pp and project and (project.research_interest or "").strip():
             try:
-                why = generate_relevance_reason(paper.title, paper.abstract or "", project.research_interest)
+                why = generate_relevance_reason(paper.title, paper.abstract or "", project.research_interest, full_text)
                 if why:
                     pp.relevance_reason = why
             except LLMUnavailableError as e:

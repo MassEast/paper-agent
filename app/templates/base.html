@@ -155,6 +155,8 @@
         .inbox-tag-to_read { background-color: var(--tag-read-bg); color: var(--tag-read-ink); }
         .inbox-tag-to_discuss { background-color: var(--tag-discuss-bg); color: var(--tag-discuss-ink); }
         .inbox-more, .inbox-empty { padding: 14px 12px; font-size: 0.75rem; color: var(--ink-4); text-align: center; }
+        .inbox-more { display: block; width: 100%; border: none; background: none; cursor: pointer; }
+        .inbox-more:hover { color: var(--accent); }
         .inbox-keys { padding: 8px 4px 0; font-size: 0.7rem; color: var(--ink-4); line-height: 2; }
         kbd { font-family: ui-monospace, monospace; font-size: 0.66rem; padding: 0 5px; margin: 0 2px; border: 1px solid var(--border-strong);
             border-radius: 4px; color: var(--ink-3); background: transparent; }
@@ -205,6 +207,9 @@
         .paper-card { container-type: inline-size; container-name: card; }
         .card-head { display: flex; align-items: flex-start; gap: 12px 20px; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border-subtle); }
         .card-head-main { flex: 1; min-width: 0; }
+        .card-share { display: inline-flex; vertical-align: -2px; margin-left: 6px; padding: 3px; border: none; background: none;
+            border-radius: var(--radius-sm); color: var(--ink-4); cursor: pointer; }
+        .card-share:hover { color: var(--accent); background: var(--paper-3); }
         .card-head-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; max-width: 46%; }
         .card-authors { font-size: 0.78rem; color: var(--ink-3); margin-top: 6px; line-height: 1.45; }
         .card-author-mail { color: var(--ink-2); text-decoration: underline dotted; text-underline-offset: 2px; display: inline-flex; align-items: center; gap: 3px; }
@@ -232,8 +237,20 @@
         .card-conn { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; line-height: 1.4; }
         .card-conn a { color: var(--accent); text-decoration: none; }
         .card-conn a:hover { text-decoration: underline; }
-        .card-contrib { margin-bottom: 12px; }
-        .card-contrib ul { margin: 2px 0 0; padding-left: 18px; list-style: disc; font-size: 0.8rem; color: var(--ink-2); line-height: 1.5; }
+        .conn-more { display: inline; }
+        .conn-more > summary { display: inline; cursor: pointer; color: var(--ink-3); text-decoration: underline dotted; list-style: none; }
+        .conn-more > summary::-webkit-details-marker { display: none; }
+        .conn-more[open] > summary { color: var(--ink-4); }
+        .conn-more > .card-conn { margin-top: 5px; }
+        /* Main contributions and the abstract fold away; the label reads like the other section labels */
+        .card-fold { margin-bottom: 10px; }
+        .card-fold > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; border-radius: var(--radius-sm); }
+        .card-fold > summary::-webkit-details-marker { display: none; }
+        .card-fold > summary .card-label { margin: 0; }
+        .card-fold > summary:hover .card-label, .card-fold > summary:hover .card-fold-arrow { color: var(--ink-2); }
+        .card-fold-arrow { color: var(--ink-4); transition: transform 0.15s; flex-shrink: 0; }
+        .card-fold[open] > summary .card-fold-arrow { transform: rotate(90deg); }
+        .card-contrib ul { margin: 4px 0 0; padding-left: 18px; list-style: disc; font-size: 0.8rem; color: var(--ink-2); line-height: 1.5; }
         .card-act-ask { color: var(--ink-2); background-color: var(--paper-3); border: 1px solid var(--border-default); font-weight: 500; }
         .card-act-ask:hover { border-color: var(--border-strong); }
         @container card (max-width: 720px) {
@@ -431,13 +448,25 @@
         if (!navigator.onLine) rwNet.failed();
         document.addEventListener('input', sync);
 
-        window.showToast = function (msg) {
+        window.showToast = function (msg, ok) {  // ok: a confirmation (green, short) instead of an error
             var t = document.createElement('div');
             t.className = 'rw-toast';
             t.textContent = msg;
-            t.style.cssText = 'padding: 10px 14px; border-radius: var(--radius-md); font-size: 0.8rem; background-color: var(--error-bg); color: var(--error); border: 1px solid color-mix(in oklch, var(--error) 40%, transparent); box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
+            var c = ok ? 'success' : 'error';
+            t.style.cssText = 'padding: 10px 14px; border-radius: var(--radius-md); font-size: 0.8rem; background-color: var(--' + c + '-bg); color: var(--' + c + (ok ? '-ink' : '') + '); border: 1px solid color-mix(in oklch, var(--' + c + ') 40%, transparent); box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
             document.getElementById('toast-stack').appendChild(t);
-            setTimeout(function () { t.remove(); }, 7000);
+            setTimeout(function () { t.remove(); }, ok ? 2500 : 7000);
+        };
+        // The share button next to a card's title: the phone's share sheet, else the link to the clipboard
+        window.shareCard = function (btn) {
+            var url = location.origin + btn.dataset.share;
+            if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+                navigator.share({ title: btn.dataset.title, url: url }).catch(function () {});
+                return;
+            }
+            navigator.clipboard.writeText(url).then(
+                function () { showToast('Link copied', true); },
+                function () { showToast('Could not copy the link: ' + url); });
         };
 
         function isNotes(elt) { return elt.matches && elt.matches('textarea[data-arxiv-id]'); }

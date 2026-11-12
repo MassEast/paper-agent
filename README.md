@@ -115,16 +115,16 @@ Return JSON only: {"relevant": true} or {"relevant": false}
 
 | Diagram step                                                   | Prompt                                                                                                 |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Research interest from Collection / refine existing text      | [`RESEARCH_INTEREST_FROM_COLLECTION`](app/prompts.py#L105-L120) / [`RESEARCH_INTEREST_IMPROVE`](app/prompts.py#L186-L203) |
+| Research interest from Collection / refine existing text      | [`RESEARCH_INTEREST_FROM_COLLECTION`](app/prompts.py#L108-L123) / [`RESEARCH_INTEREST_IMPROVE`](app/prompts.py#L196-L213) |
 | Extract keywords                                               | [`KEYWORD_EXTRACTION`](app/prompts.py#L6-L18)                                                          |
 | Quick relevance check                                          | [`RELEVANCE_QUICK`](app/prompts.py#L20-L32)                                                            |
 | Deep relevance check + why it's relevant                       | [`RELEVANCE_DEEP`](app/prompts.py#L34-L54)                                                             |
-| Summary + main contributions                                   | [`SUMMARY_WITH_FULL_CONTENT`](app/prompts.py#L59-L75) / [`MAIN_CONTRIBUTIONS`](app/prompts.py#L92-L103) |
-| Why it's relevant, for copied/moved papers + the one-off refill | [`RELEVANCE_REASON`](app/prompts.py#L77-L90)                                                        |
-| Institutions (LLM fallback, batched after all papers screened) | [`INSTITUTION_EXTRACTION`](app/prompts.py#L175-L184)                                                   |
-| Code, project page, corresponding authors, venue              | [`PAPER_RESOURCES`](app/prompts.py#L136-L173)                                                              |
-| Pick featured paper                                            | [`FEATURED_PAPER_SELECTION`](app/prompts.py#L122-L134)                                                 |
-| Ask about a paper (chat on a card)                             | [`PAPER_CHAT_SYSTEM`](app/prompts.py#L207-L225)                                                        |
+| Summary + main contributions                                   | [`SUMMARY_WITH_FULL_CONTENT`](app/prompts.py#L59-L75) / [`MAIN_CONTRIBUTIONS`](app/prompts.py#L95-L106) |
+| Why it's relevant, for copied/moved papers + the one-off refill | [`RELEVANCE_REASON`](app/prompts.py#L77-L93)                                                        |
+| Institutions (LLM fallback, batched after all papers screened) | [`INSTITUTION_EXTRACTION`](app/prompts.py#L185-L194)                                                   |
+| Code, project page, corresponding authors, venue              | [`PAPER_RESOURCES`](app/prompts.py#L139-L183)                                                              |
+| Pick featured paper                                            | [`FEATURED_PAPER_SELECTION`](app/prompts.py#L125-L137)                                                 |
+| Ask about a paper (chat on a card)                             | [`PAPER_CHAT_SYSTEM`](app/prompts.py#L217-L235)                                                        |
 
 ## Quick start
 

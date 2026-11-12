@@ -203,16 +203,25 @@ def _end_steps(paper_id: int, by: str) -> None:
         _enriching.pop(paper_id, None)
 
 
-def _add_relevance_reason(project_id: int, paper, by: str) -> None:
+def paper_text(paper) -> Optional[str]:
+    """The paper's full text: the copy the paper chat keeps, else fetched (get_paper_content)."""
+    from app.models import PaperText
+    cached = PaperText.query.filter_by(paper_id=paper.id).first()
+    return cached.text if cached else get_paper_content(paper.arxiv_id, paper.pdf_url)
+
+
+def _add_relevance_reason(project_id: int, paper, by: str, text: Optional[str] = None) -> None:
     """The card's "why it's relevant" line for a paper added by hand (crawled papers get theirs from the deep
-    check). Needs the abstract and a research interest; a failure only leaves the line out."""
+    check), from the full text (text if the caller has it, else paper_text). Needs the abstract and a research
+    interest; a failure only leaves the line out."""
     project = db.session.get(Project, project_id)
     pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
     if not pp or pp.relevance_reason or not paper.abstract or not (project.research_interest or "").strip():
         return
     _set_step(paper.id, by, "Writing why it matters for this project")
     try:
-        pp.relevance_reason = generate_relevance_reason(paper.title, paper.abstract, project.research_interest) or None
+        pp.relevance_reason = generate_relevance_reason(paper.title, paper.abstract, project.research_interest,
+                                                        text if text is not None else paper_text(paper)) or None
         db.session.commit()
     except Exception as e:
         _log.warning("[%s-add] why-relevant line failed for paper %s: %s", by, paper.id, e)
@@ -338,7 +347,9 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
                     _log.warning("[collection-add] summary failed for %s: %s", arxiv_id, e)
 
             # --- Step 5a: why it's relevant for this project ---
-            _add_relevance_reason(project_id, paper, "arxiv")
+            if not text_tried:
+                full_text, text_tried = get_paper_content(arxiv_id), True
+            _add_relevance_reason(project_id, paper, "arxiv", full_text or "")
 
             # --- Step 5b: code, project page, corresponding authors, venue (app/resources.py) ---
             if paper.resources_checked_at is None:
@@ -574,7 +585,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
                 except Exception as e:
                     _log.warning("[web-add] summary failed for %s: %s", url, e)
 
-            _add_relevance_reason(project_id, paper, "web")
+            _add_relevance_reason(project_id, paper, "web", page_full_text or "")
 
             # Web papers can't be further enriched from arXiv — mark complete
             try:
@@ -3206,9 +3217,10 @@ def run_crawl(
                     found, res_tokens = (None, 0)
                     if paper_content:
                         _meta = pd.get("arxiv_meta") or {}
-                        found, res_tokens = resources.extract(pd["title"], pd["authors"], paper_content,
-                                                              pd["abstract"], _meta.get("arxiv_comment"),
-                                                              _meta.get("journal_ref"))
+                        found, res_tokens = resources.extract(
+                            pd["title"], pd["authors"], paper_content, pd["abstract"], _meta.get("arxiv_comment"),
+                            _meta.get("journal_ref"),
+                            None if arxiv_id.startswith("web:") else figures.first_page_text(arxiv_id))
                     return {
                         "relevant": True,
                         "paper_data": pd,
@@ -3454,12 +3466,14 @@ def run_crawl(
     return crawl_log
 
 
-def generate_relevance_reason(title: str, abstract: str, research_interest: str) -> str:
+def generate_relevance_reason(title: str, abstract: str, research_interest: str, text: str | None = None) -> str:
     """One sentence on why a paper matters for a research interest — for papers that reach a
     project without being screened (copied/moved from another project, or added by hand). Screened papers get
-    theirs from the deep relevance check instead. "" if the LLM answer can't be parsed."""
+    theirs from the deep relevance check instead. Reads the full text like that check (same cut-off) when there is
+    one. "" if the LLM answer can't be parsed."""
     prompt = prompts.RELEVANCE_REASON.format(
-        research_interest=research_interest, title=title, abstract=abstract or ""
+        research_interest=research_interest, title=title, abstract=abstract or "",
+        content=(text or "")[:150000] or "(no full text: judge from the abstract)",
     )
     result, _, _, _ = _llm_json([{"role": "user", "content": prompt}], temperature=0.3, max_tokens=4096)
     if not isinstance(result, dict):
@@ -3483,7 +3497,8 @@ def start_relevance_reason_async(project_id: int, paper_id: int, app=None) -> th
             if not project or not pp or not (project.research_interest or "").strip():
                 return
             try:
-                why = generate_relevance_reason(pp.paper.title, pp.paper.abstract, project.research_interest)
+                why = generate_relevance_reason(pp.paper.title, pp.paper.abstract, project.research_interest,
+                                                paper_text(pp.paper))
             except Exception:
                 _log.exception("[relevance-reason] failed for paper %s in project %s", paper_id, project_id)
                 return
@@ -4013,8 +4028,44 @@ def backfill_missing_paper_metadata() -> int:
     updated += backfill_resources()
     from app import connections
     updated += connections.fetch_references()
+    updated += backfill_relevance_reasons()  # Pass 9
 
     return updated
+
+
+WHY_PER_RUN = int(os.environ.get("WHY_PER_RUN", "5"))  # 4 runs a night; each reads a full text (~40k tokens)
+
+
+def backfill_relevance_reasons(limit: int = WHY_PER_RUN) -> int:
+    """Nightly backfill Pass 9: the "why it's relevant" line, from the full text, for papers someone can see that
+    have none (added by hand before 2026-11-12, or the crawl's check gave none), in projects with a research
+    interest. Newest first, each once: no usable answer is stored as "" (the card shows no line), so it isn't asked
+    again. Returns how many got one."""
+    todo = (ProjectPaper.query.join(Project, Project.id == ProjectPaper.project_id)
+            .join(Paper, Paper.id == ProjectPaper.paper_id)
+            .filter(ProjectPaper.trashed_at.is_(None), Project.trashed_at.is_(None),
+                    ProjectPaper.relevance_reason.is_(None),
+                    Project.research_interest.isnot(None), Project.research_interest != "",
+                    Paper.abstract.isnot(None), Paper.abstract != "")
+            .order_by(ProjectPaper.id.desc()).limit(limit).all())
+    if todo:
+        _log.info("[backfill] why-relevant lines for %d paper(s) (capped at %d/run)", len(todo), limit)
+    got = 0
+    for pp in todo:
+        paper = pp.paper
+        text = paper_text(paper)
+        try:
+            with counted(pp.project_id, "relevance_reason"):
+                why = generate_relevance_reason(paper.title, paper.abstract, pp.project.research_interest, text)
+        except LLMUnavailableError as e:  # the model is down: stop here, the next run goes on
+            _log.error("[backfill] why-relevant lines stopped, LLM unavailable: %s", e)
+            break
+        pp.relevance_reason = why or ""
+        db.session.commit()
+        got += bool(why)
+        _log.info("[backfill] why-line for %s in project %s: %s", paper.arxiv_id, pp.project_id,
+                  "written" if why else "no usable answer")
+    return got
 
 
 RESOURCES_PER_RUN = int(os.environ.get("RESOURCES_PER_RUN", "30"))  # 4 runs a night

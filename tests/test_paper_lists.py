@@ -223,10 +223,14 @@ def test_inbox_title_list_and_keys_on_a_laptop(live_server, browser_session, big
     pg.goto(f"{live_server}/projects/pl-proj")
     items = pg.locator("#inbox-list .inbox-item")
     shown = lambda: pg.locator("#new-papers-list > .paper-card:visible").first.get_attribute("id")
-    assert items.count() == PAGE_SIZE and "is-current" in items.first.get_attribute("class")
+    # the short test titles don't fill the list, so it loads pages until it can scroll (see the test below)
+    pg.wait_for_function("() => { const s = document.getElementById('inbox-list');"
+                         " return s.scrollHeight > s.clientHeight || !s.querySelector('.inbox-more'); }")
+    assert items.count() >= PAGE_SIZE and "is-current" in items.first.get_attribute("class")
     # Sorting and Re-screen sit in the left column above the list; the ‹ › arrows are for phones only
     assert pg.locator("#inbox-tools #new-sort-pub").is_visible() and not pg.locator("#new-section .new-carousel-nav").is_visible()
-    assert pg.locator("#inbox-list .inbox-more").inner_text().startswith(f"{N_NEW - PAGE_SIZE} more")
+    more = pg.locator("#inbox-list .inbox-more")
+    assert not more.count() or more.inner_text() == f"{N_NEW - items.count()} more, loading as you scroll"
 
     items.nth(3).click()
     assert shown().startswith("paper-card-2602-00003-") and "is-current" in items.nth(3).get_attribute("class")
@@ -282,3 +286,25 @@ def test_nightly_crawl_off_banner_says_what_it_means(c, big_project):
     assert [(label, done == "done", bool(req)) for done, _, label, req in steps] == [
         ("Research interest", False, True), ("Search keywords", False, True),
         ("A few papers in My Collection", True, False), ("An email address", False, False)]
+
+
+@pytest.mark.slow
+def test_a_title_list_that_does_not_fill_its_box_loads_more_by_itself(live_server, browser_session, big_project):
+    """On a tall screen the first page of titles doesn't fill the list, so it can't be scrolled to load more:
+    it loads the next pages until it can (or none are left); the "N more" row loads on a click too."""
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state, viewport={"width": 1440, "height": 2600})
+    pg = context.new_page()
+    try:
+        pg.goto(f"{live_server}/projects/pl-proj")
+        pg.wait_for_function(f"() => document.querySelectorAll('#inbox-list .inbox-item').length > {PAGE_SIZE}")
+        side = pg.locator("#inbox-list")
+        pg.wait_for_function("() => { const s = document.getElementById('inbox-list');"
+                             " return s.scrollHeight > s.clientHeight || !s.querySelector('.inbox-more'); }")
+        n = pg.locator("#inbox-list .inbox-item").count()
+        more = side.locator(".inbox-more")
+        if more.count():
+            more.click()
+            pg.wait_for_function(f"() => document.querySelectorAll('#inbox-list .inbox-item').length > {n}")
+    finally:
+        context.close()

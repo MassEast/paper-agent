@@ -43,9 +43,9 @@ def test_relevance_deep_format():
 
 def test_relevance_reason_format():
     result = prompts.RELEVANCE_REASON.format(
-        research_interest="long-context LLMs", title="Some Paper", abstract="Some abstract."
+        research_interest="long-context LLMs", title="Some Paper", abstract="Some abstract.", content="Full text."
     )
-    assert "long-context LLMs" in result
+    assert "long-context LLMs" in result and "Full text." in result
     assert "Some Paper" in result
     assert '{"reason"' in result
 

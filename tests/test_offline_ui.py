@@ -206,7 +206,10 @@ def test_notes_changed_elsewhere_are_merged_with_conflict_markers(app, page, see
         "<<<<<<< this browser (not saved before)\nwritten here\n=======\n"
         "written elsewhere\n>>>>>>> saved version\n"
     )
-    assert _notes(page, seeded, COLL_ID).input_value() == merged
+    # The old page may save the merged note while the reload already fetched the new page: then the new page
+    # shows the version from just before, and the 5 s poll (note_lock.js) brings the merged one
+    page.wait_for_function("([el, want]) => el.value === want",
+                           arg=[_notes(page, seeded, COLL_ID).element_handle(), merged], timeout=12_000)
     assert _link(app, seeded, COLL_ID).notes == merged
 
 

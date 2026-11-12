@@ -20,6 +20,7 @@ _log = logging.getLogger(__name__)
 
 EMAIL_CHARS = 15000  # emails are in the author block or a footnote on the first page
 START_CHARS = 2500  # the start of the paper the model sees: author block, markers, a venue header
+FIRST_PAGE_CHARS = 5000  # the PDF's first page: author block, marks and their legend, footnotes
 CONTEXT_CHARS = 160  # text on each side of a candidate the model sees
 MAX_URLS = 25
 MAX_EMAILS = 20
@@ -184,13 +185,15 @@ EMPTY = {"code_url": None, "project_url": None, "corresponding": [], "venue": No
 
 
 def extract(title: str, authors: list[str], text: str | None, abstract: str = "", comment: str | None = None,
-            journal_ref: str | None = None) -> tuple[dict, int]:
+            journal_ref: str | None = None, first_page: str | None = None) -> tuple[dict, int]:
     """({code_url, project_url, corresponding: [{name, email}], venue}, tokens) from what the paper says. No LLM
-    call (0 tokens) when the text has no link, no email and nothing that sounds like a venue."""
+    call (0 tokens) when the text has no link, no email and nothing that sounds like a venue. first_page: the
+    text of the PDF's first page (figures.first_page_text), which keeps the marks after the author names."""
     body = body_text(text or "")
+    first_page = (first_page or "")[:FIRST_PAGE_CHARS]
     meta = " ".join(x for x in (comment, journal_ref) if x)
     urls = candidate_urls([abstract or "", meta, body])
-    emails = candidate_emails(body[:EMAIL_CHARS])
+    emails = list({e: c for e, c in candidate_emails(body[:EMAIL_CHARS]) + candidate_emails(first_page)}.items())
     start = body[:START_CHARS]
     venue_source = f"{meta} {start}"
     if not urls and not emails and not (journal_ref or _VENUE_HINT_RE.search(venue_source)
@@ -202,6 +205,7 @@ def extract(title: str, authors: list[str], text: str | None, abstract: str = ""
         comment=comment or "(none)",
         journal_ref=journal_ref or "(none)",
         start=start or "(no full text)",
+        first_page=first_page or "(not available)",
         urls="\n".join(f'[{i}] {u}\n    context: "{c}"' for i, (u, c) in enumerate(urls, 1)) or "(none)",
         emails="\n".join(f'[{i}] {e}\n    context: "{c}"' for i, (e, c) in enumerate(emails, 1)) or "(none)",
     )
@@ -225,6 +229,12 @@ def apply(paper, found: dict) -> None:
     paper.resources_checked_at = datetime.utcnow()
 
 
+def first_page(paper) -> str | None:
+    """The PDF's first page for an arXiv paper (one more download unless Figure 1 just fetched the PDF)."""
+    from app import figures
+    return figures.first_page_text(paper.arxiv_id) if paper.is_arxiv else None
+
+
 def extract_for(paper, text: str | None) -> tuple[dict, int]:
     return extract(paper.title, paper.authors_list, text, paper.abstract or "", paper.arxiv_comment,
-                   paper.journal_ref)
+                   paper.journal_ref, first_page(paper))

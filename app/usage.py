@@ -25,7 +25,7 @@ KINDS = {
     "regenerate": "Regenerate",
     "rescreen": "Re-screen",
     "refresh": "Nightly full-text re-read",
-    "relevance_reason": "Why-relevant lines (Copy / Move)",
+    "relevance_reason": "Why-relevant lines (Copy / Move, nightly backfill)",
     "keywords": "Keyword generation",
     "research_interest": "Research interest generation",
     "metadata": "Metadata backfill",

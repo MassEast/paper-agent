@@ -87,6 +87,9 @@ Paper:
 Title: {title}
 Abstract: {abstract}
 
+Full text (may be cut off):
+{content}
+
 Return JSON only: {{"reason": "<why>"}}"""
 
 MAIN_CONTRIBUTIONS = """\
@@ -142,11 +145,15 @@ and the venue it was accepted at. Only use the candidates listed below; copy the
   null if none of the URL candidates is the paper's own code.
 - project_url: THIS paper's own website or project page (often a *.github.io page). Not a lab, company or
   personal homepage, not a blog post about something else, not the code repository. null if there is none.
-- corresponding: the corresponding authors with their emails. Corresponding authors are marked (for example
-  with *, a dagger, "Corresponding author" or "Correspondence to"). If no author is marked but emails are
-  given, take only the author of the first email listed. Match an email to an author by the name in it, the
-  order, or the context. Use author names exactly as in the author list and emails exactly as in the email
-  candidates. Empty list if there are no email candidates.
+- corresponding: the corresponding authors with their emails. Corresponding authors are marked after their
+  name, and a legend says what each mark means (for example "*Equal contribution, †Corresponding author"): a
+  mark for equal contribution or anything else does not count. "Correspondence to: <names or emails>" also
+  names them. Read the marks from the first page of the PDF when it is given (the HTML text can lose them).
+  If the paper says there are corresponding authors but you cannot tell who (for example "Correspondence to:
+  , ." with the names lost), return an empty list rather than guess. Only if the paper marks nobody at all,
+  take the author of the first email listed. Match an email to an author by the name in it, the order, or the
+  context. Use author names exactly as in the author list and emails exactly as in the email candidates. Empty
+  list if there are no email candidates or a corresponding author has no email among them.
 - venue: where the paper was accepted or published, if the comment, the journal reference or the start of the
   paper says so (for example "Published as a conference paper at ICLR 2025", "Accepted at NeurIPS 2026",
   "To appear in TMLR"). Short common name with year and, for workshops, "Workshop", e.g. "ICLR 2025",
@@ -162,6 +169,9 @@ Journal reference: {journal_ref}
 
 Start of the paper:
 {start}
+
+First page of the PDF (marks after the author names and their legend):
+{first_page}
 
 URL candidates:
 {urls}

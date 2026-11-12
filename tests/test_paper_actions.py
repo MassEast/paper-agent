@@ -87,8 +87,10 @@ def test_summary_prompt_does_not_get_the_research_interest(app):
 def test_relevance_reason_is_filled_in_background(app, two_projects):
     from app.crawl import start_relevance_reason_async
     with app.app_context():
-        with patch("app.crawl._llm_json", return_value=make_llm_json_response({"reason": "Robots, like yours."})):
+        with patch("app.crawl._llm_json", return_value=make_llm_json_response({"reason": "Robots, like yours."})) as llm, \
+                patch("app.crawl.paper_text", return_value="The full text about robots."):
             start_relevance_reason_async(two_projects["src"], two_projects["coll"], app=app).join(5)
+        assert "The full text about robots." in llm.call_args.args[0][0]["content"]
         assert _link(two_projects["src"], two_projects["coll"]).relevance_reason == "Robots, like yours."
 
 

@@ -128,7 +128,8 @@ def _collection_index(project_id: int) -> dict:
 
 
 def card_connections(pp) -> dict:
-    """For the card: found_via [papers or {"title"}], also_cites [papers], shared_authors [(name, [papers])],
+    """For the card: found_via [papers or {"title"}], also_cites [papers], shared_authors [([names], [papers])]
+    (authors who share the same papers in one entry),
     other_projects [(project, "My Collection" | "New Papers")]. Papers are Paper rows (link to their card)."""
     idx = _collection_index(pp.project_id)
     paper = pp.paper
@@ -149,11 +150,13 @@ def card_connections(pp) -> dict:
         hit = idx["by_key"].get(k)
         if hit and hit.id != paper.id and hit.id not in found_ids:
             also[hit.id] = hit
-    shared = []
+    # Authors who wrote the same My Collection papers go in one line ("A, B and C also wrote X"), in author order
+    groups = {}
     for a in paper.authors_list:
-        others = [p for p in idx["by_author"].get(_norm_author(a), []) if p.id != paper.id]
+        others = list({p.id: p for p in idx["by_author"].get(_norm_author(a), []) if p.id != paper.id}.values())
         if others:
-            shared.append((a, list({p.id: p for p in others}.values())))
+            groups.setdefault(tuple(sorted(p.id for p in others)), ([], others))[0].append(a)
+    shared = list(groups.values())
     other_projects = []
     for op in (ProjectPaper.query.filter(ProjectPaper.paper_id == paper.id, ProjectPaper.project_id != pp.project_id,
                                          ProjectPaper.trashed_at.is_(None)).all()):
