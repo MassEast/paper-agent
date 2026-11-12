@@ -327,7 +327,8 @@
         });
         el.addEventListener('blur', function () {
             if (el._dirty) save(el);
-            draw(el);  // formatted again
+            // switching to another app blurs the note but leaves it focused: redrawing would lose the cursor
+            if (document.activeElement !== el) draw(el);  // formatted again
         });
         // A click into the formatted note: open a link, or edit with the cursor where the click was
         el.addEventListener('mousedown', function (e) {

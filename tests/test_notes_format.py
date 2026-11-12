@@ -320,3 +320,61 @@ def test_formatted_plain_note_picks_up_edits_from_elsewhere(live_server, browser
         assert view.inner_text() == "new text"
     finally:
         context.close()
+
+
+# Switching to another app: the field stays document.activeElement but gets blur/focusout, then focus/focusin
+# when the window is back (what Chrome does on a window switch)
+_LEAVE_AND_COME_BACK = """sel => { const el = document.querySelector(sel);
+    el.dispatchEvent(new FocusEvent('blur')); el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); }"""
+_COME_BACK = """sel => { const el = document.querySelector(sel);
+    el.dispatchEvent(new FocusEvent('focus')); el.dispatchEvent(new FocusEvent('focusin', { bubbles: true })); }"""
+
+
+@pytest.mark.slow
+def test_switching_apps_keeps_the_cursor_in_plain_notes(live_server, browser_session, paper):
+    context, pg = _open(browser_session, live_server)
+    try:
+        ta = pg.locator(f'[data-pp-card="{paper["pp"]}"] textarea[data-arxiv-id]')
+        ta.click()
+        pg.keyboard.type("hello world")
+        pg.wait_for_timeout(1700)  # saved
+        ta.evaluate("t => t.setSelectionRange(5, 5)")
+        sel = "textarea[data-arxiv-id]"
+        pg.evaluate(_LEAVE_AND_COME_BACK, sel)
+        pg.wait_for_timeout(6000)  # a lock poll while away
+        pg.evaluate(_COME_BACK, sel)
+        pg.keyboard.type(",")
+        assert ta.input_value() == "hello, world"
+    finally:
+        context.close()
+
+
+@pytest.mark.slow
+def test_switching_apps_keeps_the_cursor_in_per_person_notes(live_server, browser_session, paper, app):
+    from app import members
+    with app.app_context():
+        project = db.session.get(Project, paper["project"])
+        project.per_person = True
+        project.notification_emails = "ann.lee@example.org"
+        members.sync_from_emails(project)
+        ann_id = members.members(project)[0].id
+        db.session.commit()
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state)
+    context.add_cookies([{"name": f"rw_member_{paper['project']}", "value": str(ann_id), "url": live_server}])
+    pg = context.new_page()
+    try:
+        pg.goto(f"{live_server}/projects/{SLUG}")
+        note = pg.locator(f'[data-pp-card="{paper["pp"]}"] .rich-notes')
+        note.click()
+        pg.keyboard.type("hello world")
+        pg.wait_for_timeout(1700)
+        pg.evaluate("""() => { const el = document.querySelector('.rich-notes'), n = el.firstChild.firstChild || el.firstChild;
+            const r = document.createRange(); r.setStart(n, 5); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); }""")
+        pg.evaluate(_LEAVE_AND_COME_BACK, ".rich-notes")
+        pg.wait_for_timeout(6000)
+        pg.evaluate(_COME_BACK, ".rich-notes")
+        pg.keyboard.type(",")
+        assert note.inner_text() == "hello, world"
+    finally:
+        context.close()
