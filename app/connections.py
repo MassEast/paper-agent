@@ -89,15 +89,16 @@ def fetch_references(batches: int = REFERENCES_BATCHES_PER_RUN) -> int:
         if r.status_code != 200:
             _log.warning("[references] Semantic Scholar answered %d, next run goes on: %s", r.status_code, r.text[:200])
             break
-        now = datetime.utcnow()
+        now, got = datetime.utcnow(), 0
         for paper, item in zip(papers, r.json()):
             paper.references_attempted_at = now
             refs = (item or {}).get("references") or []
             if refs:
                 store_references(paper, refs)
-                done += 1
+                got += 1
+        done += got
         db.session.commit()
-        _log.info("[references] %d/%d papers got their references", done, len(papers))
+        _log.info("[references] %d/%d papers got their references", got, len(papers))
         if len(papers) < REFERENCES_BATCH:
             break
     return done
