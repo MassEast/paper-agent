@@ -28,11 +28,21 @@
     <div class="rich-notes" contenteditable="plaintext-only" spellcheck="true" role="textbox" aria-multiline="true"
         aria-label="Notes, shared by everyone; each person's text in their color"
         data-arxiv-id="{{ _aid }}" data-project-id="{{ project.id }}" data-me="{{ _me.id }}"
-        data-runs='{{ note_runs(pp) | tojson }}'
+        data-runs='{{ note_runs(pp) | tojson }}' data-edited='{{ note_last_edit(pp) | tojson }}'
         data-placeholder="Notes, shared by everyone; your words show in your color (auto-saved)"
         style="min-height: 2.5rem; white-space: pre-wrap; word-break: break-word; background-color: var(--paper-3); border-radius: var(--radius-md); padding: 8px 12px; font-size: 0.75rem; color: var(--ink-1); outline: none; border-left: 3px solid {{ _me.color }};"></div>
     <script type="application/json" class="rich-notes-people">{{ {'people': _people | map(attribute='id') | list, 'names': _people | map(attribute='name') | list, 'colors': _people | map(attribute='color') | list} | tojson }}</script>
+    {# Phones have no hover: a tap on someone's words shows who wrote them (.rich-notes-who), the pencil edits #}
+    <button type="button" class="rich-notes-edit focus-ring" aria-label="Edit notes" data-tip="Edit notes">✎</button>
     <span class="rich-notes-status" style="display:none;position:absolute;bottom:6px;right:8px;font-size:0.65rem;color:var(--success);pointer-events:none;">saved</span>
+</div>
+<p class="rich-notes-who" hidden></p>
+{# Everyone who wrote part of the note, in their color, and who saved it last (rich_notes.js redraws it as the
+   note changes and writes the time in the reader's time zone) #}
+{% set _authors = note_runs(pp) | map('first') | list %}
+<div class="rich-notes-legend">
+    {%- for p in _people if p.id in _authors %}<span><i style="background: {{ p.color }};"></i>{{ p.name }}</span>{% endfor -%}
+    {%- if none in _authors %}<span><i></i>before per-person notes</span>{% endif -%}
 </div>
 
 {% endif %}

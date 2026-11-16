@@ -181,6 +181,8 @@ def update_notes_runs(arxiv_id):
     runs = members.merge_runs(runs)
     pp.notes_runs = json.dumps(runs)
     pp.notes = "".join(r[1] for r in runs)
+    me = members.current(pp.project)
+    pp.notes_edited_at, pp.notes_edited_by = datetime.utcnow(), me.id if me else None
     db.session.commit()
     return ("", 204)
 
@@ -216,7 +218,7 @@ def note_state(arxiv_id):
     """The open card asks every few seconds: is someone writing, and what does the note say now."""
     pp = _project_paper(arxiv_id)
     return jsonify(by=note_locks.holder(pp.project_id, pp.paper_id, request.args["client"]),
-                   notes=pp.notes or "", runs=members.runs(pp))
+                   notes=pp.notes or "", runs=members.runs(pp), edited=members.last_edit(pp))
 
 
 def _chat_pp(arxiv_id):

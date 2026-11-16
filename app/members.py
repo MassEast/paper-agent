@@ -219,6 +219,13 @@ def runs(pp) -> list:
     return [[None, pp.notes, None]] if pp.notes else []
 
 
+def last_edit(pp) -> dict | None:
+    """Who saved the note last and when ({"by": member id or None, "at": ISO time in UTC}), for the legend."""
+    if not pp.notes_edited_at:
+        return None
+    return {"by": pp.notes_edited_by, "at": pp.notes_edited_at.isoformat(timespec="seconds") + "Z"}
+
+
 def note_parts(pp) -> list:
     """The note in reading order, split by who wrote it and on which day: [(member or None, day or None, text), ...].
     No names or days outside per-person projects."""

@@ -178,6 +178,9 @@ def create_app():
             "ALTER TABLE papers ADD COLUMN references_fetched_at DATETIME",
             "ALTER TABLE papers ADD COLUMN references_attempted_at DATETIME",
             "CREATE INDEX IF NOT EXISTS idx_paper_references_paper ON paper_references(paper_id)",
+            # Who saved a per-person note last, and when (the legend under the note, 2026-11-16)
+            "ALTER TABLE project_papers ADD COLUMN notes_edited_at DATETIME",
+            "ALTER TABLE project_papers ADD COLUMN notes_edited_by INTEGER",
         ]
         for _sql in _migrations:
             try:
@@ -242,6 +245,7 @@ def create_app():
         average_vote=_members.average_vote,
         project_members=_members.members,
         note_runs=_members.runs,
+        note_last_edit=_members.last_edit,
     )
 
     _berlin = ZoneInfo("Europe/Berlin")

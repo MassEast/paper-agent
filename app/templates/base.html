@@ -287,6 +287,23 @@
         }
         /* Empty shared notes (per-person projects, rich_notes.js) */
         .rich-notes:empty::before { content: attr(data-placeholder); color: var(--ink-4); pointer-events: none; }
+        /* A tapped run (phones): a tint of its author's color, which is its text color */
+        .rich-notes .picked { background: color-mix(in srgb, currentColor 22%, transparent); border-radius: 2px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+        /* The pencil only where there is no hover (phones): with a mouse, hover names the author and a click edits */
+        @media (hover: hover) { .rich-notes-edit { display: none; } }
+        @media (hover: none) { .rich-notes:not(:focus) { padding-right: 34px !important; } }
+        .rich-notes-edit { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; padding: 0; border: none; border-radius: var(--radius-sm);
+            background: transparent; color: var(--ink-3); font-size: 0.85rem; line-height: 1; cursor: pointer; }
+        .rich-notes-edit:hover { color: var(--ink-1); background: var(--paper-2); }
+        .rich-notes:focus ~ .rich-notes-edit { display: none; }
+        .rich-notes-who { margin: 4px 0 0 2px; font-size: 0.7rem; color: var(--ink-3); }
+        .rich-notes-who strong { font-weight: 700; }
+        .rich-notes-who[hidden] { display: none; }
+        .rich-notes-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 4px 0 0 2px; font-size: 0.65rem; color: var(--ink-3); }
+        .rich-notes-legend:empty { display: none; }
+        .rich-notes-legend span { display: inline-flex; align-items: center; gap: 4px; }
+        .rich-notes-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-4); flex: none; }
+        .rich-notes-legend .rich-notes-last { margin-left: auto; }
         /* Notes shown formatted while not edited (notes_format.js): links, paper links as titles, **bold** */
         .note-view { width: 100%; min-height: 2.5rem; white-space: pre-wrap; word-break: break-word; background-color: var(--paper-3); border-radius: var(--radius-md);
             padding: 8px 12px; font-size: 0.75rem; line-height: 1.5; color: var(--ink-1); cursor: text; }

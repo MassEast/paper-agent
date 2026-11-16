@@ -165,6 +165,10 @@ def test_shared_notes_keep_who_wrote_which_run(client, team, app):
     assert c.post("/paper/2611.00000/notes-runs", data={"project_id": pid, "runs": json.dumps([[999999, "x"]])}).status_code == 400
     html = c.get(f"/projects/{SLUG}").get_data(as_text=True)
     assert 'class="rich-notes"' in html
+    # Phones have no hover: an edit button, and a legend of who wrote part of the note (2026-11-16)
+    assert 'class="rich-notes-edit' in html and 'aria-label="Edit notes"' in html
+    legend = html.split('class="rich-notes-legend">', 1)[1].split("</div>", 1)[0]
+    assert "Justus" in legend and "Felix" in legend and "before per-person" not in legend
 
 
 def test_each_run_of_a_note_keeps_the_day_it_was_written(client, team, app):
@@ -223,6 +227,19 @@ def test_colors_are_given_not_chosen(client, team, app):
     with app.app_context():
         m = db.session.get(ProjectMember, fe)
         assert m.name == "Felix G" and m.color == members.COLORS[1]  # second person, second color
+
+
+def test_the_legend_knows_who_saved_the_note_last(client, team, app):
+    pid, fe = team["id"], team["people"]["Felix"]
+    c = _as(client, team, "Felix")
+    assert c.post("/paper/2611.00000/notes-runs", data={"project_id": pid, "runs": json.dumps([[fe, "hi"]])}).status_code == 204
+    with app.app_context():
+        pp = ProjectPaper.query.filter_by(project_id=pid, paper_id=team["papers"][0]).one()
+        assert pp.notes_edited_by == fe and members.last_edit(pp)["at"].endswith("Z")
+    state = c.get(f"/paper/2611.00000/note-state?project_id={pid}&client=x").get_json()
+    assert state["edited"]["by"] == fe
+    html = c.get(f"/projects/{SLUG}").get_data(as_text=True)
+    assert re.search(r"data-edited='\{\"at\": \"[^\"]+Z\", \"by\": %d\}'" % fe, html)
 
 
 def test_an_email_link_says_who_clicked(client, team):

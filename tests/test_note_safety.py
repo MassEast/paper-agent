@@ -279,3 +279,65 @@ def test_notify_saves_the_note_first_and_sends_the_message(app, open_as, team):
         card.get_by_text("✓ Sent").wait_for()
     html = send.call_args.kwargs["content_html"]
     assert "you should read this" in html and "just typed" in html and "Ann writes" in html
+
+
+@pytest.mark.slow
+def test_on_a_phone_a_tap_shows_who_wrote_it_and_the_pencil_edits(app, c, live_server, browser_session, team):
+    """Phones have no hover (2026-11-16): tapping someone's words names them below the note, tapping again closes
+    it, a link still opens, the pencil edits, and a legend lists everyone who wrote part of the note."""
+    ann, bea = team["people"]["Ann"], team["people"]["Bea"]
+    runs = [[ann, "See https://example.org/x for it. ", "2026-11-12"], [bea, "Agreed, try it.", "2026-11-16"]]
+    assert c.post(f"/paper/{ARXIV}/notes-runs", data={"project_id": team["id"], "runs": json.dumps(runs),
+                                                       "base": ""}).status_code == 204
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state, viewport={"width": 390, "height": 844},
+                                  has_touch=True, is_mobile=True)
+    context.route("https://example.org/**", lambda route: route.fulfill(body="linked page"))
+    try:
+        page = context.new_page()
+        page.goto(f"{live_server}/projects/{SLUG}?as={ann}")
+        page.wait_for_function("window.htmx !== undefined")
+        page.evaluate("showPaperTab('col')")
+        note = page.locator(".rich-notes:visible")
+        card = page.locator(".paper-card:visible")
+        who = card.locator(".rich-notes-who")
+        focused = "document.activeElement === document.querySelector('.paper-card:not([hidden]) .rich-notes')"
+        legend = card.locator(".rich-notes-legend").inner_text()
+        assert legend.startswith("Ann") and "Bea" in legend
+        bea_words = note.locator('span[data-r="1"]').first
+        tint = "s => getComputedStyle(s).backgroundColor"
+        plain_bg = bea_words.evaluate(tint)
+
+        note.locator('span[data-r="1"]').first.tap()
+        assert who.is_visible() and who.inner_text() == "Bea, Nov 16, 2026"
+        assert who.locator("strong").inner_text() == "Bea"
+        assert bea_words.evaluate(tint) != plain_bg  # the tapped part gets a tint of its author's color
+        assert note.locator(".picked").count() >= 1 and not page.evaluate(focused)
+        note.locator('span[data-r="0"]').first.tap()
+        assert who.inner_text() == "Ann, Nov 12, 2026"
+        note.locator('span[data-r="0"]').first.tap()
+        assert not who.is_visible() and note.locator(".picked").count() == 0
+
+        with context.expect_page() as opened:
+            note.locator("a.note-link").tap()
+        assert opened.value.url == "https://example.org/x"
+        assert not who.is_visible() and not page.evaluate(focused)
+
+        card.locator(".rich-notes-edit").tap()
+        page.wait_for_function(focused)
+        assert note.inner_text() == "See https://example.org/x for it. Agreed, try it."
+        assert not card.locator(".rich-notes-edit").is_visible()
+    finally:
+        context.close()
+
+    # With a mouse nothing changes: no pencil (hover names the author, a click edits)
+    context = browser.new_context(storage_state=state)
+    try:
+        page = context.new_page()
+        page.goto(f"{live_server}/projects/{SLUG}?as={ann}")
+        page.wait_for_function("window.htmx !== undefined")
+        page.evaluate("showPaperTab('col')")
+        page.wait_for_selector(".rich-notes:visible")
+        assert not page.locator(".paper-card:visible .rich-notes-edit").is_visible()
+    finally:
+        context.close()

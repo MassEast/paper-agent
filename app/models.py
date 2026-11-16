@@ -327,6 +327,8 @@ class ProjectPaper(db.Model):
     # per_person projects: JSON list of [member_id or null, text] runs (who wrote what); joined, they are the
     # note text, which `notes` keeps too
     notes_runs = db.Column(db.Text)
+    notes_edited_at = db.Column(db.DateTime)  # last save of a per-person note, and by whom
+    notes_edited_by = db.Column(db.Integer, db.ForeignKey("project_members.id"), nullable=True)
     # The shared tags as members.set_per_person left them when per-person mode was turned off; turning it on
     # again compares: tags changed meanwhile apply to everyone, unchanged ones give everyone their own tags back
     tags_at_off = db.Column(db.Text)

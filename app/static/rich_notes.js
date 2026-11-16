@@ -8,6 +8,10 @@
 // changed elsewhere meanwhile, what you wrote is added below the saved version.
 // While the note isn't focused it is drawn formatted (notes_format.js: clickable links, paper links as titles,
 // **bold**), still in its authors' colors; focusing it shows the plain text again.
+// Each author's words are in their color. Phones have no hover, so there a tap on the formatted
+// note shows who wrote the tapped words in a line below it (tap again to close) and a pencil button edits; with a
+// mouse, hover names the author and a click edits with the cursor where it was. Below the note a legend names
+// everyone who wrote part of it, and who saved it last and when.
 // Since every keystroke redraws the note, the browser's own undo can't work here, so the editor keeps its own:
 // Ctrl/⌘+Z steps back one burst of typing (a pause of a second ends one) or one bold toggle, Ctrl/⌘+Shift+Z
 // or Ctrl+Y redoes.
@@ -16,6 +20,7 @@
         var raw = JSON.parse(el.parentElement.querySelector('.rich-notes-people').textContent);
         var out = {};
         raw.people.forEach(function (id, i) { out[id] = { name: raw.names[i], color: raw.colors[i] }; });
+        Object.defineProperty(out, 'order', { value: raw.people });  // the project's order (keys come out sorted)
         return out;
     }
 
@@ -117,8 +122,9 @@
         sel.addRange(r);
     }
 
-    function paint(span, run, who) {
+    function paint(span, run, who, idx) {
         var p = run[0] != null && who[run[0]];
+        if (idx != null) span.dataset.r = idx;
         span.dataset.m = run[0] == null ? '' : run[0];
         span.dataset.tip = (p ? p.name : 'Written before notes were per person') + (run[2] ? ', ' + dayLabel(run[2]) : '');
         if (p) span.style.color = p.color;
@@ -128,6 +134,7 @@
         var who = el._people;
         el.textContent = '';
         el._formatted = document.activeElement !== el;
+        legend(el);
         if (el._formatted) return drawFormatted(el);
         el._runs.forEach(function (r) {
             var span = document.createElement('span');
@@ -141,7 +148,7 @@
     // (formatting first: bold put around someone else's words has its ** in another run than the words)
     function drawFormatted(el) {
         var who = el._people, bounds = [], pos = 0;
-        el._runs.forEach(function (r) { bounds.push([pos, pos + r[1].length, r]); pos += r[1].length; });
+        el._runs.forEach(function (r, i) { bounds.push([pos, pos + r[1].length, r, i]); pos += r[1].length; });
         var runAt = function (off) {
             for (var i = 0; i < bounds.length; i++) if (off < bounds[i][1]) return bounds[i];
             return bounds[bounds.length - 1];
@@ -151,18 +158,73 @@
         el.querySelectorAll('[data-s]').forEach(function (piece) {
             if (piece.tagName === 'STRONG') return;  // its pieces are painted themselves
             var s = parseInt(piece.dataset.s, 10);
-            if (piece.tagName === 'A') { paint(piece, runAt(s)[2], who); return; }
+            if (piece.tagName === 'A') { var a = runAt(s); paint(piece, a[2], who, a[3]); return; }
             var text = piece.textContent, parts = [], i = 0;
             while (i < text.length) {
                 var b = runAt(s + i), end = Math.min(text.length, b[1] - s), span = document.createElement('span');
                 span.textContent = text.slice(i, end);
                 span.dataset.s = s + i;
-                paint(span, b[2], who);
+                paint(span, b[2], who, b[3]);
                 parts.push(span);
                 i = end;
             }
             piece.replaceWith.apply(piece, parts);
         });
+        showWho(el, el._picked);  // keeps a tapped run marked across redraws (e.g. paper titles arriving)
+    }
+
+    function whoLine(el) { return el.parentElement.nextElementSibling; }
+
+    // The line below the note naming who wrote run idx (null closes it), and that run marked in the note
+    function showWho(el, idx) {
+        var line = whoLine(el), run = idx != null && el._runs[idx];
+        el._picked = run ? idx : null;
+        el.querySelectorAll('.picked').forEach(function (n) { n.classList.remove('picked'); });
+        if (!run) { line.hidden = true; return; }
+        var marked = el.querySelectorAll('[data-r="' + idx + '"]');
+        marked.forEach(function (n) { n.classList.add('picked'); });
+        var p = run[0] != null && el._people[run[0]], name = document.createElement('strong');
+        name.textContent = p ? p.name : 'Written before notes were per person';
+        name.style.color = p ? p.color : 'var(--ink-2)';
+        line.textContent = '';
+        line.appendChild(name);
+        if (run[2]) line.appendChild(document.createTextNode(', ' + dayLabel(run[2])));
+        line.hidden = !marked.length;
+    }
+
+    // Everyone with words in the note: a dot in their color and their name, in the order of the project's people
+    function legend(el) {
+        var box = whoLine(el).nextElementSibling, ids = {}, anon = false;
+        el._runs.forEach(function (r) { if (r[0] == null) anon = true; else ids[r[0]] = true; });
+        box.textContent = '';
+        var item = function (name, color) {
+            var s = document.createElement('span'), dot = document.createElement('i');
+            if (color) dot.style.background = color;
+            s.appendChild(dot);
+            s.appendChild(document.createTextNode(name));
+            box.appendChild(s);
+        };
+        el._people.order.forEach(function (id) {
+            if (ids[id]) item(el._people[id].name, el._people[id].color);
+        });
+        if (anon) item('before per-person notes', null);
+        var ed = el._edited, by = ed && ed.by != null && el._people[ed.by];
+        if (ed && plain(el._runs)) {
+            var last = document.createElement('span');
+            last.className = 'rich-notes-last';
+            last.textContent = 'last edited ' + (by ? 'by ' + by.name + ', ' : '') + whenLabel(ed.at);
+            box.appendChild(last);
+        }
+    }
+
+    // "Mon 14:32" within the last six days, else "Nov 3" (the reader's time zone)
+    function whenLabel(iso) {
+        var d = new Date(iso);
+        if (Date.now() - d.getTime() < 6 * 864e5) {
+            return d.toLocaleDateString('en-US', { weekday: 'short' }) + ' '
+                + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        }
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
 
     function status(el, text, ok) {
@@ -215,6 +277,8 @@
                 }
                 if (!r.ok) throw new Error(r.status);
                 el._base = sent;
+                el._edited = { by: parseInt(el.dataset.me, 10), at: new Date().toISOString() };
+                legend(el);
                 if (plain(el._runs) !== sent) return save(el);  // typed on while this was on its way
                 el._dirty = false;
                 localStorage.removeItem(draftKey(el));
@@ -290,10 +354,13 @@
         el._runs = JSON.parse(el.dataset.runs || '[]');
         el._base = plain(el._runs);
         el._people = people(el);
+        el._edited = JSON.parse(el.dataset.edited || 'null');
         forget(el);
         el._noteDirty = function () { return !!el._dirty; };
         el._noteRefresh = function (d) {
+            if (d.edited) el._edited = d.edited;
             if (plain(d.runs) !== el._base) { el._runs = d.runs; el._base = plain(d.runs); forget(el); draw(el); }
+            else legend(el);
         };
         el._flushNote = function () { return el._saving || (el._dirty ? save(el) : Promise.resolve()); };
         var raw = localStorage.getItem(draftKey(el));
@@ -330,6 +397,30 @@
             // switching to another app blurs the note but leaves it focused: redrawing would lose the cursor
             if (document.activeElement !== el) draw(el);  // formatted again
         });
+        // A tap on the formatted note (a touch that didn't move or rest): open a link, show who wrote the tapped
+        // words, or edit if the note is empty. Taking over touchend keeps the phone from focusing the note.
+        el.addEventListener('touchstart', function (e) {
+            var t = e.touches[0];
+            el._touch = e.touches.length === 1 && document.activeElement !== el ? { x: t.clientX, y: t.clientY, t: Date.now() } : null;
+        }, { passive: true });
+        el.addEventListener('touchend', function (e) {
+            var start = el._touch, t = e.changedTouches[0];
+            el._touch = null;
+            if (!start || document.activeElement === el || Date.now() - start.t > 500
+                || Math.abs(t.clientX - start.x) > 10 || Math.abs(t.clientY - start.y) > 10) return;
+            e.preventDefault();
+            if (!el._runs.length) { el.focus(); return; }
+            var hit = document.elementFromPoint(t.clientX, t.clientY), a = hit && hit.closest('a');
+            if (a && el.contains(a)) {
+                if (a.target === '_blank') window.open(a.href, '_blank', 'noopener');
+                else window.location.href = a.href;
+                return;
+            }
+            var piece = hit && el.contains(hit) && hit.closest('[data-r]');
+            var idx = piece ? parseInt(piece.dataset.r, 10) : null;
+            showWho(el, idx === el._picked ? null : idx);
+        });
+        el.parentElement.querySelector('.rich-notes-edit').addEventListener('click', function () { el.focus(); });
         // A click into the formatted note: open a link, or edit with the cursor where the click was
         el.addEventListener('mousedown', function (e) {
             if (document.activeElement === el || e.button !== 0) return;
@@ -345,6 +436,7 @@
             setCaret(el, offset);
         });
         el.addEventListener('focus', function () {
+            showWho(el, null);
             if (!el._formatted) return;
             draw(el);  // plain text for editing
             setCaret(el, plain(el._runs).length);
