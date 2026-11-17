@@ -179,9 +179,25 @@ def test_connections_link_to_the_cards_in_this_project(c, card):
     html = _card(_page(c, card), "2611.10012")
     side = html[html.index('<aside class="card-side">'):html.index("</aside>")]
     assert "Connections" in side
-    assert f'Found because it cites <a href="/projects/{SLUG}?paper=2401.20001"' in side
-    assert f'Also cites <a href="/projects/{SLUG}?paper=2401.20002"' in side and "from My Collection" in side
-    assert "Nora B also wrote" in side
+    assert f'Found because it cites: <ul class="conn-papers"><li><a href="/projects/{SLUG}?paper=2401.20001"' in side
+    assert f'Also cites from My Collection: <ul class="conn-papers"><li><a href="/projects/{SLUG}?paper=2401.20002"' in side
+    assert "Nora B also wrote:" in side
+
+
+def test_connections_list_papers_as_bullets_with_author_and_year_and_the_rest_unfolds(c, card):
+    """Five cited My Collection papers: three bullets ("title Li et al., 2024"), "2 more" opens the other two in
+    place (before 2026-11-17: titles in one run-on line, the rest as "(+N)" with a tooltip)."""
+    new, _ = card["add"]("2611.10014", title="Citing Paper", authors=json.dumps(["Nobody Known"]))
+    for i, authors in enumerate([["Wei Li", "Ann Bo", "Cy Do"], ["Wei Li", "Ann Bo"], ["Wei Li"], ["X Y"], ["Z Q"]]):
+        p, _ = card["add"](f"2401.3000{i}", tag="related", title=f"Paper {i}", authors=json.dumps(authors))
+        p.year = 2024
+        db.session.add(PaperReference(paper_id=new.id, ref_key=f"arxiv:2401.3000{i}"))
+    side = _card(_page(c, card), "2611.10014")
+    side = side[side.index('<aside class="card-side">'):side.index("</aside>")]
+    text = " ".join(re.sub(r"<[^>]+>", " ", side).split())
+    assert "Paper 0 Li et al., 2024 Paper 1 Li and Bo, 2024 Paper 2 Li, 2024 2 more Paper 3" in text
+    assert '<details class="conn-more conn-rest"><summary>2 more</summary>' in side
+    assert "(+" not in text
 
 
 def test_authors_who_share_papers_make_one_line_and_the_rest_unfolds(c, card):
@@ -194,7 +210,7 @@ def test_authors_who_share_papers_make_one_line_and_the_rest_unfolds(c, card):
     side = _card(_page(c, card), "2507.10524")
     side = side[side.index('<aside class="card-side">'):side.index("</aside>")]
     text = " ".join(re.sub(r"<[^>]+>", " ", side).split())
-    assert "Sangmin Bae, Adam Fisch, Hrayr Harutyunyan and 2 more Ziwei Ji, Tal Schuster also wrote Relaxed Recursive" in text
+    assert "Sangmin Bae, Adam Fisch, Hrayr Harutyunyan and 2 more Ziwei Ji, Tal Schuster also wrote: Relaxed Recursive" in text
     assert '<details class="conn-more"><summary>and 2 more</summary>Ziwei Ji, Tal Schuster</details>' in side
     assert "Aaron Courville also wrote" in text and text.count("also wrote") == 2
 

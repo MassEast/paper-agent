@@ -289,13 +289,14 @@
         {% if _conn.found_via or _conn.also_cites or _conn.shared_authors or _conn.other_projects %}
         <p class="card-label">Connections</p>
         <ul class="card-conn">
-            {% macro plink(p) %}{% if p.id is defined %}<a href="/projects/{{ project.slug }}?paper={{ p.link_ref }}" data-tip="{{ p.title }}">{{ p.title | truncate(60) }}</a>{% else %}<span data-tip="{{ p.title }}">{{ p.title | truncate(60) }}</span>{% endif %}{% endmacro %}
-            {% macro plist(ps) %}{% for p in ps[:3] %}{{ plink(p) }}{% if not loop.last %}; {% endif %}{% endfor %}{% if ps|length > 3 %} <span data-tip="{% for p in ps[3:] %}{{ p.title }}{% if not loop.last %}; {% endif %}{% endfor %}">(+{{ ps|length - 3 }})</span>{% endif %}{% endmacro %}
-            {% if _conn.found_via %}<li>Found because it cites {{ plist(_conn.found_via) }}</li>{% endif %}
-            {% if _conn.also_cites %}<li>{% if _conn.found_via %}Also cites{% else %}Cites{% endif %} {{ plist(_conn.also_cites) }} from My Collection</li>{% endif %}
+            {# Each paper on its own bullet line: title, then "Li et al., 2024"; past 3, "N more" opens the rest in place #}
+            {% macro plink(p) %}{% if p.id is defined %}<a href="/projects/{{ project.slug }}?paper={{ p.link_ref }}" data-tip="{{ p.title }}">{{ p.title | truncate(80) }}</a>{% if p.short_cite %} <span class="conn-cite">{{ p.short_cite }}</span>{% endif %}{% else %}<span data-tip="{{ p.title }}">{{ p.title | truncate(80) }}</span>{% endif %}{% endmacro %}
+            {% macro plist(ps) %}<ul class="conn-papers">{% for p in ps[:3] %}<li>{{ plink(p) }}</li>{% endfor %}</ul>{% if ps|length > 3 %}<details class="conn-more conn-rest"><summary>{{ ps|length - 3 }} more</summary><ul class="conn-papers">{% for p in ps[3:] %}<li>{{ plink(p) }}</li>{% endfor %}</ul></details>{% endif %}{% endmacro %}
+            {% if _conn.found_via %}<li>Found because it cites: {{ plist(_conn.found_via) }}</li>{% endif %}
+            {% if _conn.also_cites %}<li>{% if _conn.found_via %}Also cites{% else %}Cites{% endif %} from My Collection: {{ plist(_conn.also_cites) }}</li>{% endif %}
             {# Authors grouped by the papers they share; past 3 names, or past 3 such lines, the rest unfolds #}
             {% macro names(ns) %}{% if ns|length <= 3 %}{{ ns[:-1] | join(', ') }}{% if ns|length > 1 %} and {% endif %}{{ ns[-1] }}{% else %}{{ ns[:3] | join(', ') }} <details class="conn-more"><summary>and {{ ns|length - 3 }} more</summary>{{ ns[3:] | join(', ') }}</details>{% endif %}{% endmacro %}
-            {% macro authors_line(ns, ps) %}<li>{{ names(ns) }} also wrote {{ plist(ps) }}</li>{% endmacro %}
+            {% macro authors_line(ns, ps) %}<li>{{ names(ns) }} also wrote: {{ plist(ps) }}</li>{% endmacro %}
             {% for ns, ps in _conn.shared_authors[:3] %}{{ authors_line(ns, ps) }}{% endfor %}
             {% if _conn.shared_authors|length > 3 %}<li><details class="conn-more"><summary>{{ _conn.shared_authors|length - 3 }} more shared authors</summary>
                 <ul class="card-conn">{% for ns, ps in _conn.shared_authors[3:] %}{{ authors_line(ns, ps) }}{% endfor %}</ul></details></li>{% endif %}

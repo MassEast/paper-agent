@@ -158,6 +158,14 @@ class Paper(db.Model):
         return []
 
     @property
+    def short_cite(self) -> str:
+        """"Li et al., 2024" for the card's Connections list ("" if neither authors nor year are known)."""
+        last = [a.split()[-1] for a in self.authors_list[:2] if a and a.split()]
+        who = (f"{last[0]} et al." if len(self.authors_list) > 2 else " and ".join(last)) if last else ""
+        year = self.year or (self.published_date.year if self.published_date else None)
+        return ", ".join(x for x in (who, str(year) if year else "") if x)
+
+    @property
     def corresponding_list(self) -> list[dict]:
         return json.loads(self.corresponding_authors) if self.corresponding_authors else []
 
