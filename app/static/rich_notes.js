@@ -423,14 +423,18 @@
         el.parentElement.querySelector('.rich-notes-edit').addEventListener('click', function () { el.focus(); });
         // A click into the formatted note: open a link, or edit with the cursor where the click was
         el.addEventListener('mousedown', function (e) {
-            if (document.activeElement === el || e.button !== 0) return;
-            e.preventDefault();
+            if (document.activeElement === el) return;
             var a = e.target.closest('a');
-            if (a) {
-                if (a.target === '_blank') window.open(a.href, '_blank', 'noopener');
+            // The note is editable, so its links don't open by themselves: open them here, in a new tab with
+            // ⌘/Ctrl/Shift or the middle button, as an ordinary link would
+            if (a && (e.button === 0 || e.button === 1)) {
+                e.preventDefault();
+                if (a.target === '_blank' || e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) window.open(a.href, '_blank', 'noopener');
                 else window.location.href = a.href;
                 return;
             }
+            if (e.button !== 0) return;
+            e.preventDefault();
             var offset = noteFormat.offsetAt(e.clientX, e.clientY, plain(el._runs).length);
             el.focus();
             setCaret(el, offset);

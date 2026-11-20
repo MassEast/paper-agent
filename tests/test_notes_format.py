@@ -204,6 +204,43 @@ def test_per_person_notes_format_in_their_authors_colors(live_server, browser_se
         context.close()
 
 
+@pytest.mark.slow
+def test_per_person_note_links_open_in_a_new_tab_with_cmd_or_middle_click(live_server, browser_session, paper, app):
+    """The note is editable, so rich_notes.js opens its links itself: ⌘/Ctrl-click and the middle button open a
+    new tab like an ordinary link, a plain click opens it here (2026-11-20)."""
+    from app import members
+    link = f"{live_server}/projects/{SLUG}?paper=2611.30001"
+    with app.app_context():
+        project = db.session.get(Project, paper["project"])
+        project.per_person = True
+        project.notification_emails = "ann.lee@example.org"
+        members.sync_from_emails(project)
+        ann = members.members(project)[0]
+        pp = db.session.get(ProjectPaper, paper["pp"])
+        pp.notes = f"see {link} now"
+        pp.notes_runs = json.dumps([[ann.id, pp.notes, "2026-11-20"]])
+        db.session.commit()
+        ann_id = ann.id
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state)
+    context.add_cookies([{"name": f"rw_member_{paper['project']}", "value": str(ann_id), "url": live_server}])
+    pg = context.new_page()
+    try:
+        pg.goto(f"{live_server}/projects/{SLUG}")
+        a = pg.locator(f'[data-pp-card="{paper["pp"]}"] .rich-notes a.note-paper-link')
+        for how in ({"modifiers": ["ControlOrMeta"]}, {"button": "middle"}):
+            with context.expect_page() as new:
+                a.click(**how)
+            assert new.value.url == link
+            new.value.close()
+            assert pg.url != link  # this tab stays where it was (its URL names its own selected card)
+        with pg.expect_navigation() as nav:
+            a.click()
+        assert nav.value.url == link  # a plain click opens it in this tab
+    finally:
+        context.close()
+
+
 def test_the_notify_email_shows_notes_and_the_message_formatted(app, paper, monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import patch
