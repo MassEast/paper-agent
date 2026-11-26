@@ -158,7 +158,9 @@
         el.querySelectorAll('[data-s]').forEach(function (piece) {
             if (piece.tagName === 'STRONG') return;  // its pieces are painted themselves
             var s = parseInt(piece.dataset.s, 10);
-            if (piece.tagName === 'A') { var a = runAt(s); paint(piece, a[2], who, a[3]); return; }
+            if (piece.tagName === 'A' || piece.classList.contains('note-bullet')) {  // keep the element, painted
+                var a = runAt(s); paint(piece, a[2], who, a[3]); return;
+            }
             var text = piece.textContent, parts = [], i = 0;
             while (i < text.length) {
                 var b = runAt(s + i), end = Math.min(text.length, b[1] - s), span = document.createElement('span');
@@ -383,6 +385,20 @@
         el.addEventListener('compositionend', function () { el._composing = false; onInput(el); });
         el.addEventListener('input', function () { onInput(el); });
         el.addEventListener('keydown', function (e) {
+            if (noteFormat.isEnter(e) && !el._composing) {  // bullets: next "- ", or end the list
+                var text = plain(el._runs), sel = selectionOffsets(el);
+                var r = sel && noteFormat.listEnter(text, sel[0], sel[1]);
+                if (!r) return;
+                e.preventDefault();
+                el._lastEdit = 0;  // one undo step of its own
+                selectOffsets(el, r.from, r.to);
+                if (!document.execCommand || !document.execCommand(r.insert ? 'insertText' : 'delete', false, r.insert)) {
+                    el.textContent = text.slice(0, r.from) + r.insert + text.slice(r.to);
+                    onInput(el);
+                }
+                selectOffsets(el, r.caret, r.caret);
+                return;
+            }
             if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
             var k = e.key.toLowerCase();
             if (k === 'z' && !e.shiftKey) { e.preventDefault(); history(el, el._undo, el._redo); }

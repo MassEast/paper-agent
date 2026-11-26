@@ -1,5 +1,5 @@
 """Notes as HTML for emails (Notify), formatted like the card shows them (app/static/notes_format.js): links are
-clickable, a link to a paper of this app shows as that paper's title, **text** is bold."""
+clickable, a link to a paper of this app shows as that paper's title, **text** is bold, a line starting with "- " is a bullet."""
 import html
 import os
 import re
@@ -38,7 +38,8 @@ def _link(url: str) -> str:
 
 
 def to_html(text: str) -> str:
-    """Escaped HTML of a note or message: newlines as <br>, links as <a>, **text** as <b>."""
+    """Escaped HTML of a note or message: newlines as <br>, links as <a>, **text** as <b>, "- " lines as "• "."""
+    text = re.sub(r"^- ", "• ", text, flags=re.M)
     out, last = [], 0
     for m in _TOKEN.finditer(text):
         if m.start() < last:

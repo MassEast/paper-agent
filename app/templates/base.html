@@ -310,8 +310,10 @@
         .rich-notes-legend .rich-notes-last { margin-left: auto; }
         /* Notes shown formatted while not edited (notes_format.js): links, paper links as titles, **bold** */
         .note-view { width: 100%; min-height: 2.5rem; white-space: pre-wrap; word-break: break-word; background-color: var(--paper-3); border-radius: var(--radius-md);
-            padding: 8px 12px; font-size: 0.75rem; line-height: 1.5; color: var(--ink-1); cursor: text; }
+            padding: 8px 12px 20px; font-size: 0.75rem; line-height: 1.5; color: var(--ink-1); cursor: text; }
         .note-view[hidden] { display: none; }
+        .note-li { display: block; padding-left: 1.1em; text-indent: -1.1em; }
+        .note-bullet { display: inline-block; width: 1.1em; text-indent: 0; }
         .note-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
         .note-paper-link { word-break: normal; font-style: italic; text-decoration-style: dotted; }
         .notes-head { display: flex; align-items: center; gap: 6px; margin: 0 0 4px 2px; }

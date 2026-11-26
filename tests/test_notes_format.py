@@ -415,3 +415,103 @@ def test_switching_apps_keeps_the_cursor_in_per_person_notes(live_server, browse
         assert note.inner_text() == "hello, world"
     finally:
         context.close()
+
+
+def test_email_html_shows_bullets(app):
+    with app.app_context():
+        assert note_format.to_html("todo:\n- read\n- **cite**\nnot - this") == (
+            "todo:<br>• read<br>• <b>cite</b><br>not - this")
+
+
+@pytest.mark.slow
+def test_bullets_render_with_a_hanging_indent_and_no_extra_lines(live_server, browser_session, paper):
+    context, pg = _open(browser_session, live_server)
+    try:
+        r = pg.evaluate("""() => {
+            const show = text => {
+                const div = document.createElement('div');
+                div.className = 'note-view';
+                div.style.width = '200px';
+                noteFormat.render(text, 0).forEach(n => div.appendChild(n));
+                document.body.appendChild(div);
+                return div;
+            };
+            const plain = show('a\\nb\\nc'), list = show('a\\n- b\\nc'), long = show('- ' + 'word '.repeat(20));
+            const li = long.querySelector('.note-li'), dot = li.querySelector('.note-bullet');
+            const range = document.createRange(); range.selectNodeContents(li.lastChild);
+            const rects = [...range.getClientRects()];
+            return {same: plain.offsetHeight === list.offsetHeight, html: list.innerHTML,
+                    dotLeft: dot.getBoundingClientRect().left,
+                    // leftmost fragment per line (each line also ends in a fragment for its trailing space)
+                    textLefts: Object.values(rects.reduce((m, r) => { const k = Math.round(r.top);
+                        m[k] = Math.min(m[k] ?? 1e9, Math.round(r.left)); return m; }, {})),
+                    next: noteFormat.listEnter('x\\n- one', 7, 7), end: noteFormat.listEnter('- one\\n- ', 8, 8),
+                    none: noteFormat.listEnter('one', 3, 3), before: noteFormat.listEnter('- one', 1, 1)};
+        }""")
+        assert r["same"]  # a bullet line takes one line, as before
+        assert '<span class="note-li"><span data-s="2" class="note-bullet">• </span><span data-s="4">b\n</span></span>' in r["html"]
+        assert len(r["textLefts"]) > 2 and len(set(r["textLefts"])) == 1 and r["textLefts"][0] > r["dotLeft"]  # wrapped lines line up after the bullet
+        assert r["next"] == {"from": 7, "to": 7, "insert": "\n- ", "caret": 10}
+        assert r["end"] == {"from": 6, "to": 8, "insert": "", "caret": 6}
+        assert r["none"] is None and r["before"] is None
+    finally:
+        context.close()
+
+
+@pytest.mark.slow
+def test_enter_continues_bullets_in_plain_notes(live_server, browser_session, paper, app):
+    context, pg = _open(browser_session, live_server)
+    try:
+        ta = pg.locator(f'[data-pp-card="{paper["pp"]}"] textarea[data-arxiv-id]')
+        ta.click()
+        pg.keyboard.type("todo\n- read")
+        pg.keyboard.press("Enter")
+        pg.keyboard.type("cite")
+        pg.keyboard.press("Enter")
+        pg.keyboard.press("Enter")  # an empty bullet ends the list
+        pg.keyboard.type("done")
+        assert ta.input_value() == "todo\n- read\n- cite\ndone"
+        pg.wait_for_timeout(1600)
+        with app.app_context():
+            assert ProjectPaper.query.get(paper["pp"]).notes == "todo\n- read\n- cite\ndone"
+    finally:
+        context.close()
+
+
+@pytest.mark.slow
+def test_enter_continues_bullets_in_per_person_notes(live_server, browser_session, paper, app):
+    from app import members
+    with app.app_context():
+        project = db.session.get(Project, paper["project"])
+        project.per_person = True
+        project.notification_emails = "ann.lee@example.org"
+        members.sync_from_emails(project)
+        ann_id = members.members(project)[0].id
+        db.session.commit()
+    browser, state = browser_session
+    context = browser.new_context(storage_state=state)
+    context.add_cookies([{"name": f"rw_member_{paper['project']}", "value": str(ann_id), "url": live_server}])
+    pg = context.new_page()
+    try:
+        pg.goto(f"{live_server}/projects/{SLUG}")
+        note = pg.locator(f'[data-pp-card="{paper["pp"]}"] .rich-notes')
+        note.click()
+        pg.keyboard.type("- read")
+        pg.keyboard.press("Enter")
+        pg.keyboard.type("cite")
+        pg.keyboard.press("Enter")
+        pg.keyboard.press("Enter")
+        pg.keyboard.type("done")
+        assert note.inner_text() == "- read\n- cite\ndone"
+        pg.locator("body").click(position={"x": 5, "y": 5})  # leave the note: shown formatted
+        pg.wait_for_function("() => document.querySelectorAll('.rich-notes .note-li').length === 2")
+        assert note.locator(".note-bullet").first.inner_text().startswith("•")
+        with app.app_context():
+            for _ in range(20):
+                db.session.expire_all()
+                if db.session.get(ProjectPaper, paper["pp"]).notes == "- read\n- cite\ndone":
+                    break
+                pg.wait_for_timeout(200)
+            assert db.session.get(ProjectPaper, paper["pp"]).notes == "- read\n- cite\ndone"
+    finally:
+        context.close()

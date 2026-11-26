@@ -1,6 +1,7 @@
 // Notes formatting (2026-11-12): while a note isn't being edited it is shown formatted: links are clickable, a
 // link to a paper in this app (…/projects/<slug>?paper=<id> on this host) shows as that paper's title, and
-// **text** is bold. Editing shows the plain text again (where bold is **text**); Ctrl/⌘+B or the B button next
+// **text** is bold, and a line starting with "- " is a bullet (hanging indent; Enter on it starts the next one,
+// Enter on an empty one ends the list). Editing shows the plain text again (where bold is **text**); Ctrl/⌘+B or the B button next
 // to "Notes" puts ** around the selection or takes them off. The stored note stays plain text.
 // Every shown piece remembers where it starts in the plain text (data-s), so a click into a formatted note puts
 // the cursor at the same place in the plain text. Used by the plain notes (base.html) and the per-person
@@ -73,8 +74,30 @@
         return a;
     }
 
-    // Formatted nodes for text that starts at offset base in the whole note
+    // Formatted nodes for text that starts at offset base in the whole note: line by line, a "- " line as a
+    // bullet (a block with a hanging indent; its "- " shows as "• ", same length so offsets still match)
     function render(text, base, rerender) {
+        var out = [], pos = 0, lines = text.split('\n');
+        lines.forEach(function (line, i) {
+            var rest = line + (i < lines.length - 1 ? '\n' : '');
+            if (line.slice(0, 2) !== '- ') {
+                if (rest) out = out.concat(inline(rest, base + pos, rerender));
+            } else {
+                var li = document.createElement('span');
+                li.className = 'note-li';
+                var dot = piece('span', '• ', base + pos);
+                dot.className = 'note-bullet';
+                li.appendChild(dot);
+                inline(rest.slice(2), base + pos + 2, rerender).forEach(function (n) { li.appendChild(n); });
+                out.push(li);
+            }
+            pos += rest.length;
+        });
+        return out;
+    }
+
+    // Links and **bold** in text without line structure
+    function inline(text, base, rerender) {
         var out = [], last = 0, m, token = new RegExp(TOKEN.source, 'g');
         while ((m = token.exec(text))) {
             var start = m.index, raw = m[0];
@@ -86,7 +109,7 @@
             if (m[1] !== undefined) {
                 var b = document.createElement('strong');
                 b.dataset.s = base + start + 2;
-                render(m[1], base + start + 2, rerender).forEach(function (n) { b.appendChild(n); });
+                inline(m[1], base + start + 2, rerender).forEach(function (n) { b.appendChild(n); });
                 out.push(b);
             } else {
                 out.push(link(raw, base + start, rerender));
@@ -122,6 +145,21 @@
         if (sel.length > 4 && sel.slice(0, 2) === '**' && sel.slice(-2) === '**')
             return { from: s, to: e, insert: sel.slice(2, -2), s: s, e: e - 4 };
         return { from: s, to: e, insert: '**' + sel + '**', s: s + 2, e: e + 2 };
+    }
+
+    // Enter with the cursor in a "- " line: {from, to, insert, caret} that starts the next bullet, or takes the
+    // "- " off again if the bullet is still empty (ends the list); null if it isn't a bullet line
+    function listEnter(text, s, e) {
+        if (s !== e) return null;
+        var start = text.lastIndexOf('\n', s - 1) + 1, end = text.indexOf('\n', s);
+        var line = text.slice(start, end < 0 ? text.length : end);
+        if (line.slice(0, 2) !== '- ' || s < start + 2) return null;
+        if (line === '- ') return { from: start, to: start + 2, insert: '', caret: start };
+        return { from: s, to: s, insert: '\n- ', caret: s + 3 };
+    }
+
+    function isEnter(e) {
+        return e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing;
     }
 
     // Replace [from, to) of a textarea with insert, keeping the browser's undo where it can
@@ -206,6 +244,17 @@
     }
 
     document.addEventListener('keydown', function (e) {
+        var t = e.target;
+        if (!isEnter(e) || !t.matches || !t.matches('textarea[data-arxiv-id]')) return;
+        var r = listEnter(t.value, t.selectionStart, t.selectionEnd);
+        if (!r) return;
+        e.preventDefault();
+        if (r.insert) replaceInTextarea(t, r.from, r.to, r.insert);
+        else { t.setSelectionRange(r.from, r.to); if (!document.execCommand('delete')) t.setRangeText('', r.from, r.to, 'end'); }
+        t.setSelectionRange(r.caret, r.caret);
+    });
+
+    document.addEventListener('keydown', function (e) {
         if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || (e.key !== 'b' && e.key !== 'B')) return;
         var t = e.target;
         if (t.matches && t.matches('textarea[data-arxiv-id]')) { e.preventDefault(); boldTextarea(t); }
@@ -215,6 +264,6 @@
         }
     });
 
-    window.noteFormat = { render: render, offsetAt: offsetAt, toggleBold: toggleBold, attach: attach,
+    window.noteFormat = { render: render, offsetAt: offsetAt, toggleBold: toggleBold, listEnter: listEnter, isEnter: isEnter, attach: attach,
                           refresh: showView, boldButton: boldButton, _titles: titles };
 })();

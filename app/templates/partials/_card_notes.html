@@ -8,7 +8,7 @@
         <textarea name="notes" placeholder="Notes... (auto-saved)"
             id="notes-{{ _aid }}-{{ project.id }}"
             data-arxiv-id="{{ _aid }}" data-project-id="{{ project.id }}"
-            style="width: 100%; background-color: var(--paper-3); border: none; outline: none; border-radius: var(--radius-md); padding: 8px 12px; font-size: 0.75rem; color: var(--ink-1); resize: vertical; min-height: 2.5rem;{% if pp.notes_height %} height: {{ pp.notes_height }}px;{% endif %}"
+            style="width: 100%; background-color: var(--paper-3); border: none; outline: none; border-radius: var(--radius-md); padding: 8px 12px 20px; font-size: 0.75rem; color: var(--ink-1); resize: vertical; min-height: 2.5rem;{% if pp.notes_height %} height: {{ pp.notes_height }}px;{% endif %}"
             rows="2"
             hx-post="/paper/{{ _aid }}/notes"
             hx-trigger="keyup delay:1200ms, blur, notes-retry"
@@ -30,7 +30,7 @@
         data-arxiv-id="{{ _aid }}" data-project-id="{{ project.id }}" data-me="{{ _me.id }}"
         data-runs='{{ note_runs(pp) | tojson }}' data-edited='{{ note_last_edit(pp) | tojson }}'
         data-placeholder="Notes, shared by everyone; your words show in your color (auto-saved)"
-        style="min-height: 2.5rem; white-space: pre-wrap; word-break: break-word; background-color: var(--paper-3); border-radius: var(--radius-md); padding: 8px 12px; font-size: 0.75rem; color: var(--ink-1); outline: none; border-left: 3px solid {{ _me.color }};"></div>
+        style="min-height: 2.5rem; white-space: pre-wrap; word-break: break-word; background-color: var(--paper-3); border-radius: var(--radius-md); padding: 8px 12px 20px; font-size: 0.75rem; color: var(--ink-1); outline: none; border-left: 3px solid {{ _me.color }};"></div>
     <script type="application/json" class="rich-notes-people">{{ {'people': _people | map(attribute='id') | list, 'names': _people | map(attribute='name') | list, 'colors': _people | map(attribute='color') | list} | tojson }}</script>
     {# Phones have no hover: a tap on someone's words shows who wrote them (.rich-notes-who), the pencil edits #}
     <button type="button" class="rich-notes-edit focus-ring" aria-label="Edit notes" data-tip="Edit notes">✎</button>
