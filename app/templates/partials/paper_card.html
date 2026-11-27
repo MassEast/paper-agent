@@ -14,7 +14,7 @@
     data-title="{{ pp.paper.title }}"
     data-why="{{ (pp.relevance_reason or (pp.paper.summary.summary_text if pp.paper.summary else '') or '') | truncate(160) }}"
     {% if show_restore %}data-trashed="{{ pp.trashed_at | berlin_time('%b %d') if pp.trashed_at else '' }}{% if pp.trashed_reason %}, {{ pp.trashed_reason }}{% endif %}"{% endif %}
-    {% if _me and _sec == 'new' and unseen_move(pp) %}data-moved="{{ pp.moved_by.name }}" data-moved-color="{{ pp.moved_by.color }}"{% endif %}
+    {% if _me and _sec == 'new' and unseen_move(pp) %}data-moved="{{ pp.moved_by.name }} {{ 'trashed this' if pp.trashed_at else ('put this back' if pp.manual_tag is none else 'collected this') }}" data-moved-color="{{ pp.moved_by.color }}"{% endif %}
     style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">
     {% set _step = enrich_step(pp.paper_id) %}
     {% if _step %}

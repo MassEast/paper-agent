@@ -82,6 +82,7 @@ def test_a_paper_collected_by_one_stays_in_the_others_new_papers_until_seen(clie
     titles, html = _new_titles(c)
     assert titles[0] == "Paper 0"
     assert "added this to Collection" in html and "Justus" in html
+    assert 'data-moved="Justus collected this"' in html  # the label in the title list
     _post(c, "/paper/2611.00000/seen", project_id=pid)  # Keep in Collection
     assert "Paper 0" not in _new_titles(c)[0]
 
@@ -95,9 +96,11 @@ def test_a_paper_trashed_by_one_can_be_put_back_by_the_other(client, team):
     c = _as(client, team, "Felix")
     titles, html = _new_titles(c)
     assert "Paper 1" in titles and "moved this to Trash" in html
+    assert 'data-moved="Justus trashed this"' in html
     _post(c, "/paper/2611.00001/restore", project_id=pid)  # Put back into New Papers
     titles, html = _new_titles(_as(client, team, "Justus"))
     assert "Paper 1" in titles and "put this back into New Papers" in html
+    assert 'data-moved="Felix put this back"' in html
     _post(c, "/paper/2611.00001/seen", project_id=pid)  # Justus: OK
     titles, html = _new_titles(c)
     assert "Paper 1" in titles and "put this back" not in html  # still a New Paper, the note is gone

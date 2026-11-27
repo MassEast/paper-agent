@@ -1725,7 +1725,7 @@
                 const sub = card.dataset.trashed ? 'Trashed ' + card.dataset.trashed : card.dataset.why;
                 if (sub) item.appendChild(el('span', 'inbox-why', sub));
                 if (card.dataset.moved) {
-                    const m = el('span', 'inbox-moved', card.dataset.moved + (name === 'new' ? ' moved this' : ''));
+                    const m = el('span', 'inbox-moved', card.dataset.moved);
                     m.style.color = card.dataset.movedColor;
                     item.appendChild(m);
                 }
