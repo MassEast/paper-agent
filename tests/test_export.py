@@ -15,7 +15,8 @@ from app.models import Paper, Project, ProjectPaper
 def export_project(app):
     """One project with an old-style arXiv id (contains a "v"), a new-style one, a web paper and a trashed one."""
     papers = [
-        Paper(arxiv_id="solv-int/9901001", title="Old Style", source="arxiv"),
+        Paper(arxiv_id="solv-int/9901001", title="Old Style", source="arxiv",
+              code_url="https://github.com/example/old-style"),
         Paper(arxiv_id="2601.00042", title="New Style", source="arxiv"),
         Paper(arxiv_id="web:abc123def456", title="Web Paper", source="web", pdf_url="https://aclanthology.org/x.pdf"),
         Paper(arxiv_id="2601.00043", title="Trashed", source="arxiv"),
@@ -43,11 +44,16 @@ def test_export_links_each_paper_like_its_card(client, export_project):
         sess["logged_in"] = True
     resp = client.get("/project/ex-proj/export.csv")
     assert resp.status_code == 200
-    urls = {row["title"]: row["url"] for row in csv.DictReader(io.StringIO(resp.data.decode()))}
-    assert urls == {
+    rows = {row["title"]: row for row in csv.DictReader(io.StringIO(resp.data.decode()))}
+    assert {t: r["url"] for t, r in rows.items()} == {
         "Old Style": "https://arxiv.org/abs/solv-int/9901001",
         "New Style": "https://arxiv.org/abs/2601.00042",
         "Web Paper": "https://aclanthology.org/x.pdf",
+    }
+    assert {t: r["code"] for t, r in rows.items()} == {
+        "Old Style": "https://github.com/example/old-style",
+        "New Style": "",
+        "Web Paper": "",
     }
 
 
