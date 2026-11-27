@@ -14,7 +14,7 @@ def _line(day, answered, tries, pid, name):
 
 def test_parses_names_with_slashes_and_spaces_and_ignores_other_lines():
     out = misses.parse_outcomes([
-        "2026-10-29 01:00:37,413 INFO: Related Work Agent startup [in /app/app/__init__.py:47]\n",
+        "2026-10-29 01:00:37,413 INFO: Paper Agent startup [in /app/app/__init__.py:47]\n",
         _line("2026-10-29", "yes", 1, 3, "FUGU/FlexOlmoBar"),
         _line("2026-10-29", "no", 3, 12, "VLM self ident"),
     ])

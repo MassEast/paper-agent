@@ -1123,7 +1123,7 @@ def send_notification(
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #374151; background-color: #f9fafb; margin: 0; padding: 20px;">
   <div style="max-width: 580px; margin: 0 auto;">
     <div style="background: linear-gradient(135deg, #7c3aed 0%, #9333ea 100%); color: white; padding: 24px; border-radius: 12px 12px 0 0;">
-      <h1 style="margin: 0; font-size: 22px; font-weight: 600;">✨ Related Work Agent</h1>
+      <h1 style="margin: 0; font-size: 22px; font-weight: 600;">✨ Paper Agent</h1>
     </div>
     <div style="background-color: #ffffff; padding: 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
       <div style="margin-bottom: 20px;">{body_html}</div>
@@ -1135,7 +1135,7 @@ def send_notification(
 
     if notifier == "resend":
         api_key = os.environ.get("RESEND_API_KEY")
-        from_addr = os.environ.get("RESEND_FROM", "Related Work Agent <notifications@example.com>")
+        from_addr = os.environ.get("RESEND_FROM", "Paper Agent <notifications@example.com>")
         if not api_key:
             _log.warning("[email] RESEND_API_KEY not set")
             return False

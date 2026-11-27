@@ -195,7 +195,7 @@ def detail(slug):
         llm_model=LLM_MODELS[0],
         llm_api_base=os.environ.get("LLM_API_BASE", ""),
         cost_comparison_model=os.environ.get("LLM_COST_COMPARISON_MODEL", "Claude Sonnet 4.6"),
-        notification_sender=os.environ.get("RESEND_FROM", "Related Work Agent <notifications@example.com>"),
+        notification_sender=os.environ.get("RESEND_FROM", "Paper Agent <notifications@example.com>"),
     )
 
 

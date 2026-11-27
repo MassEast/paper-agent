@@ -44,7 +44,7 @@ def setup_logging(app: Flask):
 
     # Do NOT add a second handler to app.logger — it propagates to root and would duplicate every line
     app.logger.setLevel(logging.INFO)
-    app.logger.info("Related Work Agent startup")
+    app.logger.info("Paper Agent startup")
     
     return file_handler
 

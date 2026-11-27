@@ -17,7 +17,7 @@ if __name__ == "__main__":
     from app.crawl import send_notification
 
     result = send_notification(
-        subject="[Test] Related Work Agent email check",
+        subject="[Test] Paper Agent email check",
         message="If you see this, email delivery is working.",
         project_emails=recipient,
     )
