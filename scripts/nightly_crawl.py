@@ -26,7 +26,8 @@ except ImportError:
 from app import create_app, db
 from app.models import CrawlLog, Project, Paper, ProjectPaper
 from app.utils import nightly_marker
-from app.crawl import run_crawl, refresh_from_full_text, send_carry_notification, _search_warning, backfill_missing_paper_metadata, get_citation_count, get_citation_count_by_scholar_id, send_notification
+from app.crawl import run_crawl, refresh_from_full_text, send_carry_notification, _search_warning, backfill_missing_paper_metadata, get_citation_counts, _arxiv_doi_ref, send_notification
+from app.utils import base_arxiv_id
 
 _log = logging.getLogger(__name__)
 
@@ -47,62 +48,45 @@ def _setup_crawl_log():
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
-def _refresh_collection_citations():
-    """Update citation counts for papers in any My Collection that are >30 days stale."""
+def _citation_refs(paper) -> list[str]:
+    """How Semantic Scholar may know a paper. An arXiv paper also by its arXiv DOI: Semantic Scholar sometimes keeps
+    the citations on that second record (split_scholar_records), so both are asked and the larger count kept."""
+    if paper.is_arxiv:
+        return [f"arXiv:{base_arxiv_id(paper.arxiv_id)}", _arxiv_doi_ref(paper.arxiv_id)]
+    if paper.doi:
+        return [f"DOI:{paper.doi}"]
+    return [paper.semantic_scholar_id] if paper.semantic_scholar_id else []
+
+
+def _refresh_citations():
+    """Update citation counts, older than 30 days, of every paper in New Papers or Collection of any project (not
+    only Collection since 2026-11-27: the lists sort by citations), in /paper/batch requests."""
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
-
-    collection_paper_ids = {
-        row[0] for row in
-        db.session.query(ProjectPaper.paper_id).filter(
-            ProjectPaper.manual_tag.isnot(None),
-            ProjectPaper.trashed_at.is_(None),
-        ).distinct().all()
-    }
-
-    if not collection_paper_ids:
-        _log.info("[nightly] citation refresh: no collection papers found")
-        return 0
-
-    papers = Paper.query.filter(
-        Paper.id.in_(collection_paper_ids),
-        db.or_(
-            ~Paper.arxiv_id.like("web:%"),  # every arXiv paper; source "arxiv" left out the ones added by hand ("manual")
-            Paper.doi.isnot(None),
-            Paper.semantic_scholar_id.isnot(None),
-        ),
-        db.or_(
-            Paper.citation_fetched_at.is_(None),
-            Paper.citation_fetched_at < cutoff,
-        ),
-    ).all()
-
+    live_ids = {row[0] for row in db.session.query(ProjectPaper.paper_id).filter(
+        ProjectPaper.trashed_at.is_(None)).distinct().all()}
+    papers = [p for p in Paper.query.filter(
+        Paper.id.in_(live_ids),
+        db.or_(Paper.citation_fetched_at.is_(None), Paper.citation_fetched_at < cutoff),
+    ).all() if _citation_refs(p)]
     _log.info("[nightly] citation refresh: %d paper(s) due (stale > 30 days)", len(papers))
+    counts = get_citation_counts([ref for p in papers for ref in _citation_refs(p)])
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     updated = 0
     for paper in papers:
-        try:
-            if paper.is_arxiv:
-                count = get_citation_count(paper.arxiv_id)
-            elif paper.doi:
-                count = get_citation_count_by_scholar_id(f"DOI:{paper.doi}")
-            elif paper.semantic_scholar_id:
-                count = get_citation_count_by_scholar_id(paper.semantic_scholar_id)
-            else:
-                continue
-            if count is not None:
-                if paper.citation_manual and count < paper.citation_count:
-                    # Scholar returned fewer than the manually set value — keep it; just refresh timestamp
-                    _log.info("[nightly] citation refresh: keeping manual override for %s (%d > %d from Scholar)",
-                              paper.arxiv_id or paper.semantic_scholar_id, paper.citation_count, count)
-                else:
-                    paper.citation_count = count
-                    paper.citation_manual = False
-                paper.citation_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                updated += 1
-        except Exception as e:
-            _log.warning("[nightly] citation refresh failed for %s: %s", paper.arxiv_id or paper.semantic_scholar_id, e)
-
+        found = [counts[ref] for ref in _citation_refs(paper) if ref in counts]
+        if not found:
+            continue
+        count = max(found)
+        if paper.citation_manual and count < paper.citation_count:
+            _log.info("[nightly] citation refresh: keeping manual override for %s (%d > %d from Scholar)",
+                      paper.arxiv_id, paper.citation_count, count)
+        else:
+            paper.citation_count = count
+            paper.citation_manual = False
+        paper.citation_fetched_at = now
+        updated += 1
     db.session.commit()
-    _log.info("[nightly] citation refresh: %d updated", updated)
+    _log.info("[nightly] citation refresh: %d/%d updated", updated, len(papers))
     return updated
 
 
@@ -326,8 +310,8 @@ def _nightly_crawl():
         filled = backfill_missing_paper_metadata()
         _log.info("[nightly] backfill complete: %d paper(s) updated", filled)
 
-        _log.info("[nightly] ── citation refresh: updating stale collection papers ──────────────────────")
-        _refresh_collection_citations()
+        _log.info("[nightly] ── citation refresh: counts older than 30 days ──────────────────────")
+        _refresh_citations()
 
 
 if __name__ == "__main__":

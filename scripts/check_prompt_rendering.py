@@ -1,6 +1,6 @@
 """
 Renders the real prompt templates from app/prompts.py through the actual
-selection/formatting code in app/crawl.py, using synthetic My Collection
+selection/formatting code in app/crawl.py, using synthetic Collection
 papers, and prints the fully-substituted prompt text for visual review.
 
 No LLM call, no network, no DB — just proves _select_reference_papers,

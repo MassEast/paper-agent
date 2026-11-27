@@ -234,6 +234,14 @@ Authors: {authors}
 {text}
 ---"""
 
+# Only added when the paper has notes. The researcher's notes may misread the paper; the chat should say so.
+PAPER_CHAT_NOTES_LINE = """
+The researcher's notes on this paper: {notes}
+Always answer their question first. Then, only if something in these notes looks wrong or is not backed by the \
+paper, add a short note at the end that names each such point and why (one sentence each), or asks about it. \
+Leave this out when the notes are fine, and don't repeat it in later answers.
+"""
+
 PAPER_CHAT_SOURCE_NOTES = {
     "html": "Full text, from the paper's arXiv HTML version (figures are not included; tables and "
             "math may be garbled):",

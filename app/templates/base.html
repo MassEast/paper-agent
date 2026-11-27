@@ -217,6 +217,11 @@
         .card-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
         .card-badges:empty { display: none; }
         .card-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+        .card-link-missing { cursor: pointer; opacity: 0.45; border-style: dashed; }
+        .card-link-missing:hover { opacity: 1; }
+        .code-add { display: inline-flex; gap: 4px; align-items: center; }
+        .code-add input { width: 220px; height: 28px; padding: 0 10px; font-size: 0.75rem; border-radius: 9999px; border: 1px solid var(--border-default); background: var(--paper-3); color: var(--ink-1); outline: none; }
+        .code-add button { height: 28px; padding: 0 11px; font-size: 0.75rem; border-radius: 9999px; border: none; background: var(--accent); color: #fff; cursor: pointer; }
         .card-link { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 9999px; font-size: 0.75rem;
             color: var(--ink-2); background-color: var(--paper-3); border: 1px solid var(--border-default); text-decoration: none; white-space: nowrap; }
         .card-link:hover { border-color: var(--border-strong); color: var(--ink-1); }
@@ -254,7 +259,7 @@
         .card-fold > summary:hover .card-label, .card-fold > summary:hover .card-fold-arrow { color: var(--ink-2); }
         .card-fold-arrow { color: var(--ink-4); transition: transform 0.15s; flex-shrink: 0; }
         .card-fold[open] > summary .card-fold-arrow { transform: rotate(90deg); }
-        .card-contrib ul { margin: 4px 0 0; padding-left: 18px; list-style: disc; font-size: 0.8rem; color: var(--ink-2); line-height: 1.5; }
+        .card-contrib ul { margin: 4px 0 0; padding-left: 18px; list-style: disc; font-size: 0.875rem; color: var(--ink-2); line-height: 1.5; }
         .card-act-ask { color: var(--ink-2); background-color: var(--paper-3); border: 1px solid var(--border-default); font-weight: 500; }
         .card-act-ask:hover { border-color: var(--border-strong); }
         @container card (max-width: 720px) {

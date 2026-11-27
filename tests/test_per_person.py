@@ -1,6 +1,6 @@
 """Several people in one project (app/members.py, Project.per_person; built 2026-11-02 for LLM Anatomy).
 
-My Collection and Trash are shared; New Papers, tags, votes and the paper chat are per person; a paper someone
+Collection and Trash are shared; New Papers, tags, votes and the paper chat are per person; a paper someone
 else collected or trashed stays in your New Papers until you've acted on it (kept it there or moved it). Notes: one per person, or one shared
 text whose runs remember their author. Each person gets their own email whose links say who they are."""
 
@@ -81,8 +81,8 @@ def test_a_paper_collected_by_one_stays_in_the_others_new_papers_until_seen(clie
     c = _as(client, team, "Felix")
     titles, html = _new_titles(c)
     assert titles[0] == "Paper 0"
-    assert "added this to My Collection" in html and "Justus" in html
-    _post(c, "/paper/2611.00000/seen", project_id=pid)  # Keep in My Collection
+    assert "added this to Collection" in html and "Justus" in html
+    _post(c, "/paper/2611.00000/seen", project_id=pid)  # Keep in Collection
     assert "Paper 0" not in _new_titles(c)[0]
 
     # Felix's keep is not a move: it doesn't show up in Justus's New Papers
@@ -298,7 +298,7 @@ def test_a_resize_saves_only_the_height_not_the_text(client, team, app):
         assert (pp.notes, pp.notes_height) == ("Justus's note", 120)
 
 
-def test_my_collection_sorts_by_average_vote(client, team, app):
+def test_collection_sorts_by_average_vote(client, team, app):
     pid = team["id"]
     c = _as(client, team, "Justus")
     for i, v in ((0, 2), (1, 5)):
@@ -422,8 +422,8 @@ def test_typing_in_a_note_shows_name_and_day_on_hover(live_server, browser_sessi
     context.close()
 
 
-def test_moving_to_my_collection_sets_no_tag(client, team, app):
-    """Since 2026-11-12 no automatic "to read": the paper opens in My Collection and its tags are set there."""
+def test_moving_to_collection_sets_no_tag(client, team, app):
+    """Since 2026-11-12 no automatic "to read": the paper opens in Collection and its tags are set there."""
     pid = team["id"]
     _post(_as(client, team, "Justus"), "/paper/2611.00000/tag", project_id=pid, tag="related")
     with app.app_context():

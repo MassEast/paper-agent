@@ -1,5 +1,5 @@
 """
-Tests for _select_reference_papers (app/crawl.py) — the My Collection paper selection
+Tests for _select_reference_papers (app/crawl.py) — the Collection paper selection
 used to build LLM reference/calibration context for keyword extraction, relevance
 screening, and research-interest generation/refinement. Pure selection logic for the
 first class below, no DB needed — uses lightweight stand-ins for ProjectPaper/Paper

@@ -67,7 +67,7 @@ def test_new_plus_collection_merges_into_collection(tmp_path):
     c = _conn(tmp_path)
     _paper(c, 1, "2402.02834v1"); _paper(c, 2, "2402.02834v2")
     _link(c, 1, 1, None)                                   # old version: New Papers
-    _link(c, 2, 1, "related", '["to_read"]', "my note")    # newer version: My Collection
+    _link(c, 2, 1, "related", '["to_read"]', "my note")    # newer version: Collection
     c.commit()
     mig.normalize(c, apply=True)
     rows = [tuple(r) for r in c.execute("SELECT manual_tag, paper_tags, notes, trashed_at FROM project_papers")]

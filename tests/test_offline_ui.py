@@ -34,7 +34,7 @@ COLL_ID = "2501.22222"
 
 @pytest.fixture
 def seeded(app):
-    """A project with one New Papers paper and one My Collection paper."""
+    """A project with one New Papers paper and one Collection paper."""
     with app.app_context():
         project = Project(name="Offline UI Test", slug=SLUG, research_interest="original interest")
         db.session.add(project)
@@ -72,7 +72,7 @@ def page(live_server, browser_session, seeded):
 
 
 def _notes(page, pid, arxiv_id):
-    # The paper lists are tabs: open the one this card is in (My Collection for COLL_ID)
+    # The paper lists are tabs: open the one this card is in (Collection for COLL_ID)
     page.evaluate("""id => { const t = document.getElementById(id);
         const sec = t && t.closest('#new-section, #col-section, #trash-section');
         if (sec) showPaperTab(sec.id.split('-')[0]); }""", f"notes-{arxiv_id}-{pid}")
@@ -91,14 +91,14 @@ def test_offline_click_shows_toast_and_changes_nothing(app, page, seeded):
     box, nav = banner.bounding_box(), page.locator("nav").bounding_box()
     assert box["y"] + box["height"] <= nav["y"] + 1  # above the nav, not over it
 
-    page.get_by_role("button", name="Move to My Collection").first.click()
+    page.get_by_role("button", name="Move to Collection").first.click()
 
     toast = page.locator(".rw-toast")
     toast.wait_for()
     assert "NOT saved" in toast.inner_text()
     assert _link(app, seeded, NEW_ID).manual_tag is None
     # Button is usable again for a retry
-    assert page.get_by_role("button", name="Move to My Collection").first.is_enabled()
+    assert page.get_by_role("button", name="Move to Collection").first.is_enabled()
 
 
 @pytest.mark.slow
@@ -175,7 +175,7 @@ def test_offline_research_interest_save_reports_failure(app, page, seeded):
 @pytest.mark.slow
 def test_logged_out_click_goes_to_login_page(app, page, seeded):
     page.context.clear_cookies()
-    page.get_by_role("button", name="Move to My Collection").first.click()
+    page.get_by_role("button", name="Move to Collection").first.click()
     page.wait_for_url("**/login")
     assert _link(app, seeded, NEW_ID).manual_tag is None
 

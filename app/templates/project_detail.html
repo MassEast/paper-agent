@@ -56,7 +56,7 @@
             <div style="font-weight:600;color:var(--ink-1);margin-bottom:6px;">Getting started — here's what to do:
             </div>
             <ol style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px;">
-                <li><strong>Add papers to My Collection</strong>: use "Add paper" at the top. These become reference
+                <li><strong>Add papers to Collection</strong>: use "Add paper" at the top. These become reference
                     examples for the AI screener.</li>
                 <li><strong>Write or generate a Research Interest</strong> under Settings: describe what you're working on (or click
                     <em>Generate</em> to derive it from your collection).</li>
@@ -130,8 +130,8 @@
                         {% else %}
                         <strong>{{ focus_pp.paper.title }}</strong>:
                         {% if focus_where == 'new' %}still in New Papers, shown first below.
-                        {% elif focus_sec == 'new' %}{% if focus_pp.moved_by %}<span style="color: {{ focus_pp.moved_by.color }}; font-weight: 600;">{{ focus_pp.moved_by.name }}</span> {{ 'added it to My Collection' if focus_where == 'col' else 'moved it to Trash' }}; it is first in your New Papers.{% else %}first in your New Papers.{% endif %}
-                        {% elif focus_where == 'col' %}already in My Collection{% if focus_pp.moved_by %}, added by <span style="color: {{ focus_pp.moved_by.color }}; font-weight: 600;">{{ focus_pp.moved_by.name }}</span>{% endif %}{% if focus_pp.collected_at %} (since {{ focus_pp.collected_at | berlin_time('%b %d') }}){% endif %}, shown first there.
+                        {% elif focus_sec == 'new' %}{% if focus_pp.moved_by %}<span style="color: {{ focus_pp.moved_by.color }}; font-weight: 600;">{{ focus_pp.moved_by.name }}</span> {{ 'added it to Collection' if focus_where == 'col' else 'moved it to Trash' }}; it is first in your New Papers.{% else %}first in your New Papers.{% endif %}
+                        {% elif focus_where == 'col' %}already in Collection{% if focus_pp.moved_by %}, added by <span style="color: {{ focus_pp.moved_by.color }}; font-weight: 600;">{{ focus_pp.moved_by.name }}</span>{% endif %}{% if focus_pp.collected_at %} (since {{ focus_pp.collected_at | berlin_time('%b %d') }}){% endif %}, shown first there.
                         {% else %}moved to Trash on {{ focus_pp.trashed_at | berlin_time('%b %d') }}{% if focus_pp.trashed_reason %} ({{ focus_pp.trashed_reason }}){% endif %}. It is shown first in Trash, where you can restore it.
                         {% endif %}
                         {% endif %}
@@ -168,7 +168,7 @@
                     {% if me %}<span class="paper-tab-who" style="--who: {{ me.color }};" data-tip="Your own New Papers, {{ me.name }}" aria-label="for {{ me.name }}"></span>{% endif %}
                 </button>
                 <button type="button" role="tab" class="paper-tab focus-ring" data-tab="col" style="--tab-color: var(--success);" onclick="showPaperTab('col')">
-                    My Collection <span id="col-count" class="paper-tab-count">{{ s.col_total }}</span>
+                    Collection <span id="col-count" class="paper-tab-count">{{ s.col_total }}</span>
                 </button>
                 <button type="button" role="tab" class="paper-tab focus-ring" data-tab="trash" style="--tab-color: var(--error);" onclick="showPaperTab('trash')">
                     Trash <span id="trash-count" class="paper-tab-count">{{ s.trash|length }}</span>
@@ -179,14 +179,14 @@
                     hx-get="/projects/{{ project.slug }}/papers" hx-target="#paper-list"
                     hx-trigger="keyup changed delay:300ms" class="focus-ring">
                 <a href="/project/{{ project.slug }}/export.csv" download class="focus-ring inbox-csv"
-                    data-tip="New Papers and My Collection (not Trash) as CSV: title, authors, link, tag, abstract">
+                    data-tip="New Papers and Collection (not Trash) as CSV: title, authors, link, tag, abstract">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-download"></use></svg>
                     CSV
                 </a>
             </div>
             <div id="inbox-tools"></div>
             <div id="inbox-list" role="listbox" aria-label="Papers"></div>
-            <div class="inbox-keys"><kbd>J</kbd><kbd>K</kbd> next / previous <kbd>C</kbd> to My Collection <kbd>X</kbd> trash <kbd>A</kbd> ask <kbd>/</kbd> search</div>
+            <div class="inbox-keys"><kbd>J</kbd><kbd>K</kbd> next / previous <kbd>C</kbd> to Collection <kbd>X</kbd> trash <kbd>A</kbd> ask <kbd>/</kbd> search</div>
         </div>
         <div class="inbox-main">
             <div id="paper-list">
@@ -232,7 +232,7 @@
     {# Phone: the two triage actions of the card shown, always in reach #}
     <div class="mobile-triage">
         <button type="button" class="focus-ring card-act card-act-trash" onclick="inboxAct('trash')">Trash</button>
-        <button type="button" class="focus-ring card-act card-act-keep mobile-keep" onclick="inboxAct('keep')">To My Collection</button>
+        <button type="button" class="focus-ring card-act card-act-keep mobile-keep" onclick="inboxAct('keep')">To Collection</button>
         <button type="button" class="focus-ring card-act card-act-keep mobile-restore" onclick="inboxAct('restore')">Restore</button>
     </div>
 </div>
@@ -269,7 +269,7 @@
                     style="margin-bottom: 12px; padding: 12px; background-color: var(--paper-3); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--ink-2);">
                     <p style="font-weight: 600; color: var(--ink-1); margin-bottom: 6px;">How keywords work</p>
                     <p>An LLM reads your <strong>research interest</strong> + <strong>titles and abstracts of all papers
-                            in My Collection</strong> (up to {{ reference_papers_limit }}, priority-ordered by tag), then outputs 3–6 short
+                            in Collection</strong> (up to {{ reference_papers_limit }}, priority-ordered by tag), then outputs 3–6 short
                         search phrases (for the arXiv search, and the bioRxiv search if it is switched on). The more papers you have tagged, the better the vocabulary.</p>
                     <p style="margin-top: 6px; color: var(--ink-3);">Keywords are saved and reused by the nightly crawl
                         automatically. Regenerate only when your research focus changes significantly.</p>
@@ -375,24 +375,24 @@
                         <li>
                             <strong>Semantic Scholar recommendations</strong> (if you have papers in My
                             Collection): fetches papers similar to your collection via the Semantic Scholar
-                            recommendations API, from up to 100 My Collection papers in groups of 10 (the API ranks by
-                            similarity, not date, so smaller groups reach more recent papers). A My Collection paper
+                            recommendations API, from up to 100 Collection papers in groups of 10 (the API ranks by
+                            similarity, not date, so smaller groups reach more recent papers). A Collection paper
                             that is not on arXiv is used by its DOI (or found on Semantic Scholar by its title). The
                             recommendations in your date range are kept: arXiv papers, bioRxiv preprints (full text
                             read as for the bioRxiv search) and journal papers with a DOI and an abstract (judged on the abstract, unless
                             their PDF is openly available from a site on the open-access list).
                         </li>
                         <li>
-                            <strong>Papers citing My Collection</strong> (the "Citations" source): for each paper
-                            in My Collection that Semantic Scholar knows (up to 50 per crawl, the ones checked longest ago
+                            <strong>Papers citing the Collection</strong> (the "Citations" source): for each paper
+                            in Collection that Semantic Scholar knows (up to 50 per crawl, the ones checked longest ago
                             first), asks Semantic Scholar which papers cite it, and keeps the ones dated in your date
                             range, the same kinds as for the recommendations. One request per
-                            My Collection paper (the groups of 10 are only for the recommendations), so this is the slowest source.
+                            Collection paper (the groups of 10 are only for the recommendations), so this is the slowest source.
                             A paper found by several sources is screened once; its card says how it was found
                             ("Found via keyword …", "Semantic Scholar recommendation", "cites …").
                         </li>
                         <li>
-                            <strong>Quick relevance filter:</strong> LLM receives your research interest + My Collection
+                            <strong>Quick relevance filter:</strong> LLM receives your research interest + Collection
                             paper titles/abstracts + the candidate paper's title and abstract. Returns <code
                                 style="font-family:monospace">{"relevant": true/false}</code>.
                             <button type="button"
@@ -418,10 +418,10 @@
                         </li>
                         <li><strong>Screening cache:</strong> Papers already in this project (New Papers, My
                             Collection or Trash) are never added again. Before calling the LLM, each crawl also
-                            computes a short hash of your research interest + the titles of your My Collection
+                            computes a short hash of your research interest + the titles of your Collection
                             papers; papers already rejected under the same hash are skipped without an LLM call.
                             The hash changes (and rejected papers get a new chance) when you edit the research
-                            interest or add/remove a paper in My Collection. To re-check papers already in New
+                            interest or add/remove a paper in Collection. To re-check papers already in New
                             Papers after such a change, use <em>Re-screen</em> there.</li>
                         <li><strong>Summary:</strong> For papers that pass both checks, the LLM writes a neutral
                             3-sentence summary plus the badges (dataset, method, …), and in a second call the main
@@ -449,7 +449,7 @@
                     <div
                         style="margin-top: 10px; padding: 10px; background-color: color-mix(in oklch, var(--accent) 15%, var(--paper-1)); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
                         <p style="font-weight: 600; color: var(--accent);">How tagging improves future crawls</p>
-                        <p style="margin-top: 4px; color: var(--ink-3);">Papers in My Collection (up to
+                        <p style="margin-top: 4px; color: var(--ink-3);">Papers in Collection (up to
                             {{ reference_papers_limit }}, Important first, then Discuss, then To Read) are used as reference
                             context in the relevance check prompts. The more you curate, the more precisely the LLM
                             understands your research scope. They also seed the Semantic Scholar recommendations
@@ -507,18 +507,18 @@
                             <span style="min-width: 0;">bioRxiv keyword search</span>
                             <span style="margin-left: auto; padding-left: 8px; color: var(--ink-4);">slower</span>
                         </label>
-                        <label data-tip="Papers Semantic Scholar finds similar to papers in My Collection"
+                        <label data-tip="Papers Semantic Scholar finds similar to papers in Collection"
                             style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
                             <input type="checkbox" id="use-scholar-checkbox" checked
                                 style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
                             <span style="min-width: 0;">Semantic Scholar recommendations</span>
                             <span style="margin-left: auto; padding-left: 8px; color: var(--ink-4);">fast</span>
                         </label>
-                        <label data-tip="New papers that cite a paper in My Collection (looked up on Semantic Scholar, one request per My Collection paper)"
+                        <label data-tip="New papers that cite a paper in Collection (looked up on Semantic Scholar, one request per Collection paper)"
                             style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
                             <input type="checkbox" id="use-citations-checkbox" checked
                                 style="width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer;">
-                            <span style="min-width: 0;">Papers citing My Collection</span>
+                            <span style="min-width: 0;">Papers citing the Collection</span>
                             <span style="margin-left: auto; padding-left: 8px; color: var(--ink-4);">slow</span>
                         </label>
                     </div>
@@ -676,7 +676,7 @@
                                 if (data.error) {
                                     status.innerHTML = '<div style="color: var(--error);">' + data.error + '</div>';
                                 } else if (!data.keywords || data.keywords.length === 0) {
-                                    status.innerHTML = '<div style="color: var(--error);">No keywords generated — add a research interest or papers to My Collection first.</div>';
+                                    status.innerHTML = '<div style="color: var(--error);">No keywords generated — add a research interest or papers to Collection first.</div>';
                                 } else {
                                     keywordData.keywords = data.keywords;
                                     uncheckedKeywords = new Set();
@@ -751,7 +751,7 @@
                         let elapsedInterval = null;
                         const sourceLabel = [useArxiv && 'arXiv', useBiorxiv && 'bioRxiv', useScholar && 'Semantic Scholar', useCitations && 'citations']
                             .filter(Boolean).join(' + ');
-                        const typicalTime = useCitations ? 'citations take ~1–7s per My Collection paper'
+                        const typicalTime = useCitations ? 'citations take ~1–7s per Collection paper'
                             : useArxiv ? '20–60s typical' : useBiorxiv ? 'bioRxiv takes ~10s per day of the range' : '~3s typical';
 
                         function updateElapsed() {
@@ -788,7 +788,7 @@
                                 const parts = ['arXiv: ' + arxivCount];
                                 if (biorxivCount > 0) parts.push('bioRxiv: ' + biorxivCount);
                                 if (ssCount > 0) parts.push('Semantic Scholar: ' + ssCount);
-                                if (citingCount > 0) parts.push(citingCount + ' cite My Collection');
+                                if (citingCount > 0) parts.push(citingCount + ' cite the Collection');
                                 if (alreadyKnown > 0) parts.push(alreadyKnown + ' already in project (skipped)');
                                 sourceNote = '<p style="font-size:0.7rem;color:var(--ink-4);margin-bottom:8px;">' + parts.join(', ') + '</p>';
                                 if (previouslyRejected > 0) {
@@ -839,7 +839,7 @@
                                                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
                                                 _spinnerHtml + ' Waiting for arXiv&hellip; (' + waiters + ' request' + (waiters > 1 ? 's' : '') + ' ahead, ' + s + 's)</div>';
                                         } else {
-                                            const scholarInfo = data.citations ? ', checking citations of My Collection (' + data.citations + ')…'
+                                            const scholarInfo = data.citations ? ', checking citations of Collection (' + data.citations + ')…'
                                                 : data.scholar_status === 'running' ? ', fetching Semantic Scholar…' : '';
                                             countContent.innerHTML =
                                                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-3);">' +
@@ -1164,7 +1164,7 @@
                             </ol>
                         </li>
                     </ol>
-                    <p style="margin-top: 8px; color: var(--ink-3);">Papers skip LLM screening. They go to My Collection tagged
+                    <p style="margin-top: 8px; color: var(--ink-3);">Papers skip LLM screening. They go to Collection tagged
                         <em>Important</em>, or, with "Put it in New Papers instead" ticked, to New Papers, where everyone in the
                         project comes across it.</p>
                 </div>
@@ -1179,13 +1179,13 @@
                     <div class="flex flex-col sm:flex-row gap-3">
                         <input type="url" name="url" placeholder="Paste any URL — arXiv, ACL, NeurIPS, blog…"
                             style="flex: 1 1 auto; min-width: 0; height: var(--input-height); background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 0 16px; color: var(--ink-1); outline: none;">
-                        <button class="focus-ring" type="submit" data-tip="Adds the paper to My Collection, tagged &quot;important&quot; (or to New Papers, if ticked below)"
+                        <button class="focus-ring" type="submit" data-tip="Adds the paper to Collection, tagged &quot;important&quot; (or to New Papers, if ticked below)"
                             style="height: var(--button-height); padding: 0 24px; background-color: var(--accent); color: var(--accent-ink); border-radius: var(--radius-md); border: none; white-space: nowrap;">
                             Add
                         </button>
                     </div>
                     <label style="display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.8rem; color: var(--ink-2); cursor: pointer;"
-                        data-tip="For a paper the others should see too: it shows up in everyone's New Papers instead of going straight to My Collection">
+                        data-tip="For a paper the others should see too: it shows up in everyone's New Papers instead of going straight to Collection">
                         <input type="checkbox" name="to_new" value="1" style="accent-color: var(--accent);">
                         Put it in New Papers instead
                     </label>
@@ -1222,7 +1222,7 @@
                             How it works</button>
                         <button class="focus-ring" type="button" id="generate-btn"
                             style="font-size: 0.75rem; color: var(--accent); height: var(--button-height); padding: 0 12px; border-radius: var(--radius-md); background-color: color-mix(in oklch, var(--accent) 12%, var(--paper-2)); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent); cursor: pointer; width: fit-content; display: inline-flex; align-items: center; gap: 6px; transition: background-color 150ms ease, color 150ms ease;"
-                            data-tip="Let AI generate or improve the research interest from My Collection papers"
+                            data-tip="Let AI generate or improve the research interest from Collection papers"
                             onmouseover="if(!this.disabled) { this.style.backgroundColor='color-mix(in oklch, var(--accent) 22%, var(--paper-2))'; }"
                             onmouseout="if(!this.disabled) { this.style.backgroundColor='color-mix(in oklch, var(--accent) 12%, var(--paper-2))'; }"
                             onclick="generateResearchInterest()">
@@ -1251,7 +1251,7 @@
                 <div style="display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
                     {% if project.research_interest %}
             <button type="button" class="focus-ring rw-chip-btn section-tool" id="rescreen-btn" hx-on::after-request="closeDrawers()"
-                data-tip="For everyone in this project: re-checks every paper in New Papers against the saved research interest and My Collection, with the same two-step screen a crawl uses. Papers that no longer fit go to Trash (restorable); papers someone voted on, wrote notes on or asked the chat about are left alone."
+                data-tip="For everyone in this project: re-checks every paper in New Papers against the saved research interest and Collection, with the same two-step screen a crawl uses. Papers that no longer fit go to Trash (restorable); papers someone voted on, wrote notes on or asked the chat about are left alone."
                 hx-post="/projects/{{ project.slug }}/rescreen" hx-target="#rescreen-status" hx-swap="outerHTML"
                 hx-confirm="Re-screen New Papers for everyone in this project, against the saved research interest? Papers that no longer fit move to Trash (you can restore them). Papers already screened against this exact interest and collection are skipped, and so are papers someone voted on, wrote notes on or asked the chat about.">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-rotate-ccw"></use></svg>
@@ -1403,15 +1403,15 @@
                     <p style="font-weight: 600; margin-bottom: 6px; color: var(--ink-1);">How research interest
                         generation works</p>
                     <p>If you already have text in the box, Generate <strong>refines your existing
-                            description</strong> into at most about 300 words (a longer text gets condensed), using papers in My Collection as silent background context — the
+                            description</strong> into at most about 300 words (a longer text gets condensed), using papers in Collection as silent background context — the
                         output will not mention specific papers or authors, only ideas, problems, methods, and goals.
                     </p>
                     <p style="margin-top: 6px;">If the box is empty, the LLM reads <strong>titles and abstracts of all
-                            papers in My Collection</strong> (up to {{ reference_papers_limit }}, priority-ordered by tag) and
+                            papers in Collection</strong> (up to {{ reference_papers_limit }}, priority-ordered by tag) and
                         writes a research interest from scratch (at most about 300 words).</p>
                     <p style="margin-top: 6px;">The research interest goes into every screening prompt, so it is
                         limited to {{ "{:,}".format(research_interest_max) }} characters.</p>
-                    <p style="margin-top: 6px;">Only My Collection is used: New Papers and Trash are ignored.</p>
+                    <p style="margin-top: 6px;">Only Collection is used: New Papers and Trash are ignored.</p>
                     <p style="margin-top: 6px; color: var(--ink-4);">Tip: the more diverse and well-tagged your
                         collection, the more precise the generated description.</p>
                     <button type="button" onclick="document.getElementById('prompt-ri').classList.toggle('hidden')"
@@ -1683,7 +1683,7 @@
     // end, fires 'loadmore' on the page sentinel. A card that leaves (collect / trash / restore) is removed
     // by htmx, so the next one moves into the same position; a re-rendered section (sort change, filter,
     // crawl) starts again at the first card. Keys (outside text fields): J / ↓ / → next, K / ↑ / ← previous,
-    // C to My Collection, X trash, R restore, / search. Phones: swipe, and the bottom bar.
+    // C to Collection, X trash, R restore, / search. Phones: swipe, and the bottom bar.
     (function () {
         const carousels = { new: { list: 'new-papers-list', sec: 'new-section', idx: 0 },
                             col: { list: 'curated-list', sec: 'col-section', idx: 0 },
@@ -1846,7 +1846,7 @@
             sx = null;
             if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(sname, dx < 0 ? 1 : -1);
         }, { passive: true });
-        // A paper moved to My Collection from New Papers: show it there, so its tags can be set right away. New
+        // A paper moved to Collection from New Papers: show it there, so its tags can be set right away. New
         // Papers keeps its place (the next paper), so going back to it carries on where one was.
         let collected = null;
         document.addEventListener('htmx:beforeRequest', function (e) {

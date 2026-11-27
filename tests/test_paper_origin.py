@@ -126,14 +126,14 @@ def _placement(app, pid):
                 for pp in ProjectPaper.query.filter_by(project_id=pid)}
 
 
-def test_adding_by_url_goes_to_my_collection_or_on_request_to_new_papers(c, app, two):
+def test_adding_by_url_goes_to_collection_or_on_request_to_new_papers(c, app, two):
     web_new = "web:" + __import__("hashlib").sha256(b"https://example.org/new").hexdigest()[:12]
     with patch("app.routes.projects.start_collection_add_async"), patch("app.routes.projects.start_web_paper_add_async"):
         c.post("/projects/origin-a/collection-add", data={"url": "https://arxiv.org/abs/2612.00011"})
         c.post("/projects/origin-a/collection-add", data={"url": "https://arxiv.org/abs/2612.00012", "to_new": "1"})
         c.post("/projects/origin-a/collection-add", data={"url": "https://example.org/new", "to_new": "1"})
     got = _placement(app, two["a"])
-    assert got["2612.00011"] == ("related", ["important"], True, True)  # default: My Collection, important
+    assert got["2612.00011"] == ("related", ["important"], True, True)  # default: Collection, important
     assert got["2612.00012"] == (None, [], False, True)  # New Papers, no tags
     assert got[web_new] == (None, [], False, True)
     # Re-adding a trashed paper with the box ticked brings it back to New Papers

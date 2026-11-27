@@ -2,7 +2,7 @@
 Per-paper actions across projects and the New Papers re-screen:
 
 - "Why it's relevant" (ProjectPaper.relevance_reason) from the deep relevance check
-- Copy / Move a paper into another project's My Collection (/paper/<id>/transfer)
+- Copy / Move a paper into another project's Collection (/paper/<id>/transfer)
 - Re-screen New Papers against the current research interest (crawl.run_rescreen)
 - Card layout: New Papers actions sit together in the bottom row
 
@@ -21,7 +21,7 @@ from tests.conftest import make_llm_json_response, FAKE_RELEVANCE_YES, FAKE_RELE
 
 @pytest.fixture
 def two_projects(app):
-    """Source project with one New Papers and one My Collection paper, plus a target project."""
+    """Source project with one New Papers and one Collection paper, plus a target project."""
     with app.app_context():
         src = Project(name="Source Proj", slug="pa-source", research_interest="sparse attention")
         dst = Project(name="Target Proj", slug="pa-target", research_interest="robot manipulation")
@@ -102,7 +102,7 @@ def test_copy_puts_paper_in_target_collection_and_keeps_source(app, logged_in, t
         resp = logged_in.post("/paper/2601.00002/transfer", data={
             "project_id": ids["src"], "target_project_id": ids["dst"], "mode": "copy"})
     assert resp.status_code == 200
-    assert "Copied to My Collection of" in resp.get_data(as_text=True)
+    assert "Copied to the Collection of" in resp.get_data(as_text=True)
     target = _link(ids["dst"], ids["coll"])
     assert target.manual_tag == "related" and target.collected_at is not None
     assert json.loads(target.paper_tags) == ["important"]
@@ -212,7 +212,7 @@ def test_transfer_menu_lists_other_projects(app, logged_in, two_projects):
     try:
         html = logged_in.get(f"/paper/2601.00002/transfer-menu?project_id={ids['src']}").get_data(as_text=True)
         assert "Target Proj" in html
-        assert "already in its My Collection" in html
+        assert "already in its Collection" in html
         assert "Source Proj" not in html and "Trashed Proj" not in html
         html = logged_in.get(f"/paper/2601.00001/transfer-menu?project_id={ids['src']}").get_data(as_text=True)
         assert '"mode": "copy"' in html and '"mode": "move"' in html
@@ -266,7 +266,7 @@ def test_rescreen_trashes_clear_rejects_and_keeps_the_rest(app, two_projects):
             assert _link(src.id, papers["Garbled"]).relevance_reason == "old"
             assert _link(src.id, papers["Still fits"]).relevance_reason == "Fresh reason for Still fits"
             assert _link(src.id, papers["Already screened"]).relevance_reason == "old"
-            # My Collection is never touched
+            # Collection is never touched
             assert _link(src.id, ids["coll"]).trashed_at is None
             # Clear verdicts are cached for the next crawl/re-screen, parse failures aren't
             cached = {sp.arxiv_id: sp.is_relevant for sp in ScreenedPaper.query.filter_by(project_id=src.id)}
@@ -284,7 +284,7 @@ def test_rescreen_leaves_papers_collected_meanwhile_alone(app, two_projects):
     ids = two_projects
 
     def quick_and_collect(title, *args):
-        # The user moves the paper to My Collection (another request) while its screen is running
+        # The user moves the paper to Collection (another request) while its screen is running
         with app.app_context():
             pp = ProjectPaper.query.filter_by(project_id=ids["src"], paper_id=ids["new"]).first()
             pp.manual_tag = "related"
@@ -378,15 +378,15 @@ def test_new_papers_card_has_its_actions_in_the_bar_and_the_rest_in_the_menu(app
     html = logged_in.get("/projects/pa-source/papers").get_data(as_text=True)
     new_card = html[html.index('id="paper-card-2601-00001'):html.index('id="paper-card-2601-00002')]
     # The two triage actions (with their keys) first, then the ⋯ menu with Copy / Move and Notify
-    order = [new_card.index(s) for s in ("Move to My Collection", '/trash"', 'class="card-menu"', "Copy / Move", "Notify")]
+    order = [new_card.index(s) for s in ("Move to Collection", '/trash"', 'class="card-menu"', "Copy / Move", "Notify")]
     assert order == sorted(order)
     assert "<kbd>C</kbd>" in new_card and "<kbd>X</kbd>" in new_card
     assert "Why it's relevant for this project" in new_card and "It uses sparse attention." in new_card
     # Not in the title row any more: it comes after the summary and the arXiv/PDF links
-    assert new_card.index(">PDF</a>") < new_card.index("Move to My Collection")
+    assert new_card.index(">PDF</a>") < new_card.index("Move to Collection")
     assert "stops the same papers from coming back" in html  # Trash explains why it is never emptied
     coll_card = html[html.index('id="paper-card-2601-00002'):]
-    assert "Move to My Collection" not in coll_card[:coll_card.index("Notes...")]
+    assert "Move to Collection" not in coll_card[:coll_card.index("Notes...")]
     assert "Copy / Move" in coll_card
 
 
@@ -531,7 +531,7 @@ def test_starred_project_goes_on_top_and_stays_after_reload(live_server, browser
 
 
 def test_collection_sorts_by_when_a_paper_was_collected_not_when_it_was_crawled(app, logged_in, two_projects):
-    """'Date added' in My Collection = date added to My Collection: a paper crawled long ago but
+    """'Date added' in Collection = date added to Collection: a paper crawled long ago but
     collected just now goes to the top."""
     import re
     from datetime import datetime, timedelta

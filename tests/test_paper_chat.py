@@ -32,7 +32,7 @@ ARXIV = "2609.11111"
 
 @pytest.fixture
 def chat_pp(app):
-    """A project with one arXiv paper in My Collection and one web paper without an open-access PDF."""
+    """A project with one arXiv paper in Collection and one web paper without an open-access PDF."""
     with app.app_context():
         project = Project(name="Chat Proj", slug="chat-proj", research_interest="sparse attention")
         paper = Paper(arxiv_id=ARXIV, title="Sparse Things", source="arxiv", abstract="We sparsify things.",
@@ -778,6 +778,7 @@ def test_prompt_carries_the_project_keywords_and_the_card_notes(c, app, chat_pp,
     assert "in the sense of that project" in system
     assert "Search keywords of the project: layer looping, PoLar" in system
     assert "The researcher's notes on this paper: maybe not for polars" in system
+    assert "Always answer their question first" in system
     assert "sparse attention" in system and "It sparsifies attention." in system
 
 
@@ -828,3 +829,41 @@ def test_a_long_answer_stops_scrolling_once_the_question_is_at_the_top(live_serv
         pg.wait_for_function(at_bottom)  # the new short exchange is shown  # the new short exchange is shown
     finally:
         context.close()
+
+
+# ── Live (slow): the real model with the notes instruction ───────────────────
+
+_AIAYN = ("The dominant sequence transduction models are based on complex recurrent or convolutional neural networks "
+          "in an encoder-decoder configuration. The best performing models also connect the encoder and decoder through "
+          "an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on "
+          "attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine "
+          "translation tasks show these models to be superior in quality while being more parallelizable and requiring "
+          "significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English-to-German translation "
+          "task, improving over the existing best results, including ensembles by over 2 BLEU. On the WMT 2014 "
+          "English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of "
+          "41.8 after training for 3.5 days on eight GPUs.")
+
+
+def _live_answer(notes):
+    from app import prompts
+    system = prompts.PAPER_CHAT_SYSTEM.format(
+        research_interest="Efficient sequence models for machine translation.", keywords_line="",
+        notes_line=prompts.PAPER_CHAT_NOTES_LINE.format(notes=notes), relevance_line="",
+        title="Attention Is All You Need", authors="Vaswani et al.",
+        source_note=prompts.PAPER_CHAT_SOURCE_NOTES["abstract"], text=_AIAYN)
+    text, *_ = llm._llm([{"role": "system", "content": system}, {"role": "user", "content": "How fast was training?"}],
+                        temperature=0.3, max_tokens=6000)
+    return text
+
+
+@pytest.mark.slow
+def test_live_chat_answers_first_then_questions_wrong_notes_and_leaves_right_ones_alone():
+    """Real endpoint. Measured 2026-11-27, 5 runs each: wrong notes flagged 4/5 from the abstract (5/5 with the full
+    text), always after the answer; right notes never flagged. So: 3 runs, at least 2 must flag."""
+    wrong = [_live_answer("- Transformer still uses an LSTM encoder\n- 28.4 BLEU on En-Fr") for _ in range(3)]
+    flagged = [a for a in wrong if re.search(r"\bnotes?\b", a, re.I)]
+    assert len(flagged) >= 2, wrong
+    for a in flagged:
+        assert a.find("3.5 days") < re.search(r"\bnotes?\b", a, re.I).start(), a  # the answer comes first
+    right = _live_answer("- no recurrence, attention only\n- 28.4 BLEU En-De, 41.8 En-Fr")
+    assert "3.5 days" in right and not re.search(r"your notes?\b", right, re.I), right

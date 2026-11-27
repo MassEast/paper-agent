@@ -26,7 +26,7 @@ window._paperFilter = window._paperFilter || {{ state.col_tags | tojson }};
 window._paperSlug = '{{ project.slug }}';
 
 // Which tab shows: the one asked for, else the last one this browser used in this project, else New Papers
-// when it has papers, else My Collection.
+// when it has papers, else Collection.
 function showPaperTab(tab) {
     var list = document.getElementById('paper-list');
     if (!list) return;
@@ -74,7 +74,7 @@ function toggleGroupBy() {
     _reloadSection('col');
 }
 
-// Tag filter for My Collection — click-to-toggle multi-select (union: show a paper if it has ANY of
+// Tag filter for Collection — click-to-toggle multi-select (union: show a paper if it has ANY of
 // the active tags; no active tags means show everything).
 function toggleTagFilter(tag) {
     var arr = window._paperFilter, idx = arr.indexOf(tag);

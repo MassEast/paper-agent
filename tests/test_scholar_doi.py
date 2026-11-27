@@ -1,5 +1,5 @@
 """
-Semantic Scholar sources beyond arXiv: My Collection papers that are not on arXiv seed the recommendations and
+Semantic Scholar sources beyond arXiv: Collection papers that are not on arXiv seed the recommendations and
 citations by DOI or by their Semantic Scholar id (found by title), and the two sources keep bioRxiv and journal
 papers instead of dropping everything without an arXiv id. DOIs are stored wherever a source gives one.
 
@@ -230,24 +230,35 @@ class TestStored:
         assert papers[0]["doi"] == "10.1/journal"
 
 
-def test_the_monthly_citation_refresh_covers_hand_added_arxiv_papers_and_doi_papers(app, proj):
-    """It used to pick arXiv papers by source "arxiv", which left out the ones added by hand (source
-    "manual"); papers that are not on arXiv are refreshed by DOI or Semantic Scholar id."""
+def test_the_monthly_citation_refresh_covers_new_papers_hand_added_arxiv_papers_and_doi_papers(app, proj):
+    """Every paper not in Trash (New Papers too, since the lists sort by citations), arXiv papers by id and arXiv
+    DOI (larger count kept), others by DOI; one batch request; trashed and fresh ones left alone."""
     from scripts import nightly_crawl
     with app.app_context():
-        old = datetime(2026, 6, 1)
+        old, fresh = datetime(2026, 6, 1), datetime.utcnow()
         manual = _link(proj, "2401.77777", "Added by link", source="manual", citation_count=1, citation_fetched_at=old)
         doi = _link(proj, "web:t-6", "Journal paper", source="web", doi="10.3389/x", citation_count=1, citation_fetched_at=old)
         blog = _link(proj, "web:t-7", "A blog post", source="web", citation_count=0, citation_fetched_at=old)
-        with patch.object(nightly_crawl, "get_citation_count", return_value=5) as by_arxiv, \
-                patch.object(nightly_crawl, "get_citation_count_by_scholar_id", return_value=9) as by_ref, \
-                patch.object(nightly_crawl.time, "sleep"):
-            nightly_crawl._refresh_collection_citations()
-        by_arxiv.assert_called_once_with("2401.77777")
-        by_ref.assert_called_once_with("DOI:10.3389/x")
-        assert (manual.paper.citation_count, doi.paper.citation_count, blog.paper.citation_count) == (5, 9, 0)
+        new = _link(proj, "2401.77778", "In New Papers", citation_count=2, citation_fetched_at=old)
+        new.manual_tag = None
+        trashed = _link(proj, "2401.77779", "In Trash", citation_count=2, citation_fetched_at=old)
+        trashed.trashed_at = fresh
+        recent = _link(proj, "2401.77780", "Checked last week", citation_count=2, citation_fetched_at=fresh)
+        db.session.commit()
+        answer = {"arXiv:2401.77777": 5, "DOI:10.48550/arXiv.2401.77777": 3, "DOI:10.3389/x": 9,
+                  "DOI:10.48550/arXiv.2401.77778": 11}
+        with patch.object(nightly_crawl, "get_citation_counts",
+                          side_effect=lambda refs: {r: answer[r] for r in refs if r in answer}) as batch:
+            assert nightly_crawl._refresh_citations() == 3
+        assert batch.call_count == 1
+        asked = set(batch.call_args[0][0])
+        assert "arXiv:2401.77779" not in asked and "arXiv:2401.77780" not in asked
+        assert (manual.paper.citation_count, doi.paper.citation_count, blog.paper.citation_count,
+                new.paper.citation_count, trashed.paper.citation_count) == (5, 9, 0, 11, 2)
+        assert blog.paper.citation_fetched_at == old  # not answered: tried again next night
         ProjectPaper.query.filter_by(project_id=proj).delete()
-        db.session.delete(Paper.query.filter_by(arxiv_id="2401.77777").one())
+        for aid in ("2401.77777", "2401.77778", "2401.77779", "2401.77780"):
+            db.session.delete(Paper.query.filter_by(arxiv_id=aid).one())
         db.session.commit()
 
 

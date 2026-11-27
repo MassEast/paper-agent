@@ -1,5 +1,5 @@
-"""How a paper connects to the rest of the project, for the card's sidebar (redesign 2026-11-12): the My Collection
-papers it was found through (it cites them), other My Collection papers it cites, authors who also wrote a My
+"""How a paper connects to the rest of the project, for the card's sidebar (redesign 2026-11-12): the Collection
+papers it was found through (it cites them), other Collection papers it cites, authors who also wrote a My
 Collection paper, and the other projects it is in. The paper's references come from Semantic Scholar, fetched by
 a nightly pass (fetch_references) into PaperReference."""
 import logging
@@ -109,7 +109,7 @@ def _norm_author(name: str) -> str:
 
 
 def _collection_index(project_id: int) -> dict:
-    """The project's My Collection, indexed by reference key and by author, once per request (kept on the request,
+    """The project's Collection, indexed by reference key and by author, once per request (kept on the request,
     not on flask.g, which can outlive it and would keep stale rows alive)."""
     cache = request.environ.setdefault("rw.connections", {}) if has_request_context() else {}
     if project_id not in cache:
@@ -131,7 +131,7 @@ def _collection_index(project_id: int) -> dict:
 def card_connections(pp) -> dict:
     """For the card: found_via [papers or {"title"}], also_cites [papers], shared_authors [([names], [papers])]
     (authors who share the same papers in one entry),
-    other_projects [(project, "My Collection" | "New Papers")]. Papers are Paper rows (link to their card)."""
+    other_projects [(project, "Collection" | "New Papers")]. Papers are Paper rows (link to their card)."""
     idx = _collection_index(pp.project_id)
     paper = pp.paper
     found, found_ids = [], set()
@@ -142,7 +142,7 @@ def card_connections(pp) -> dict:
                else _doi_key(v["seed"][4:]) if (v.get("seed") or "").startswith("DOI:")
                else f"s2:{v['seed']}" if v.get("seed") else None)
         hit = idx["by_key"].get(key) if key else None
-        found.append(hit or {"title": v.get("title") or "a paper in My Collection"})
+        found.append(hit or {"title": v.get("title") or "a paper in Collection"})
         if hit:
             found_ids.add(hit.id)
     refs = {r.ref_key for r in PaperReference.query.filter_by(paper_id=paper.id).all()}
@@ -151,7 +151,7 @@ def card_connections(pp) -> dict:
         hit = idx["by_key"].get(k)
         if hit and hit.id != paper.id and hit.id not in found_ids:
             also[hit.id] = hit
-    # Authors who wrote the same My Collection papers go in one line ("A, B and C also wrote X"), in author order
+    # Authors who wrote the same Collection papers go in one line ("A, B and C also wrote X"), in author order
     groups = {}
     for a in paper.authors_list:
         others = list({p.id: p for p in idx["by_author"].get(_norm_author(a), []) if p.id != paper.id}.values())
@@ -163,6 +163,6 @@ def card_connections(pp) -> dict:
                                          ProjectPaper.trashed_at.is_(None)).all()):
         proj = db.session.get(Project, op.project_id)
         if proj and not proj.trashed_at:
-            other_projects.append((proj, "My Collection" if op.manual_tag else "New Papers"))
+            other_projects.append((proj, "Collection" if op.manual_tag else "New Papers"))
     return {"found_via": found, "also_cites": sorted(also.values(), key=lambda p: p.title or ""),
             "shared_authors": shared, "other_projects": other_projects}

@@ -49,6 +49,12 @@ spec:
                 secretKeyRef:
                   name: related-work-secret
                   key: SCHOLAR_API_KEY
+            - name: GITHUB_TOKEN  # optional: stars work without it, just slower to fill in
+              valueFrom:
+                secretKeyRef:
+                  name: related-work-secret
+                  key: GITHUB_TOKEN
+                  optional: true
             - name: RESEND_API_KEY
               valueFrom:
                 secretKeyRef:

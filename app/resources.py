@@ -222,7 +222,9 @@ def extract(title: str, authors: list[str], text: str | None, abstract: str = ""
 
 def apply(paper, found: dict) -> None:
     """Store what extract found on the paper (caller commits)."""
-    paper.code_url = found["code_url"]
+    if found["code_url"] and paper.code_url != found["code_url"]:  # another repo: its stars are fetched next night
+        paper.github_stars, paper.github_checked_at = None, None
+    paper.code_url = found["code_url"] or paper.code_url  # nothing found keeps a link added by hand
     paper.project_url = found["project_url"]
     paper.corresponding_authors = json.dumps(found["corresponding"]) if found["corresponding"] else None
     paper.venue = found["venue"]

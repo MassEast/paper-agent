@@ -77,6 +77,30 @@ def test_link_buttons_only_for_links_we_found_in_the_agreed_order(c, card):
     assert "BibTeX" not in html and "Demo" not in html
 
 
+def test_github_stars_in_the_sidebar_only_when_known_and_a_missing_code_link_can_be_added(c, card, monkeypatch):
+    card["add"]("2611.10011", code_url="https://github.com/a/big", github_stars=12345, github_checked_at=datetime(2026, 11, 20))
+    card["add"]("2611.10012", code_url="https://github.com/a/unchecked")
+    _, pp = card["add"]("2611.10013")
+    html = _page(c, card)
+    big = _card(html, "2611.10011")
+    assert '<dt>GitHub</dt><dd><a href="https://github.com/a/big"' in big and "12,345 stars</a>" in big
+    assert _buttons(big)[-1] == "Code"
+    assert "<dt>GitHub</dt>" not in _card(html, "2611.10012")  # not fetched yet: no line, no "0"
+    none = _card(html, "2611.10013")
+    assert "<dt>GitHub</dt>" not in none and "card-link-missing" in none
+    assert f'hx-post="/project-paper/{pp.id}/code-url"' in none
+    assert "card-link-missing" not in big
+
+    from app import github_stars
+    monkeypatch.setattr(github_stars.httpx, "get", lambda url, **kw: __import__("httpx").Response(
+        200, json={"stargazers_count": 42}, request=__import__("httpx").Request("GET", url)))
+    assert c.post(f"/project-paper/{pp.id}/code-url", data={"url": "javascript:alert(1)"}).status_code == 400
+    r = c.post(f"/project-paper/{pp.id}/code-url", data={"url": "https://github.com/me/found/"})
+    assert r.status_code == 200 and r.headers["HX-Retarget"] == f'[data-pp-card="{pp.id}"]'
+    body = r.data.decode()
+    assert 'href="https://github.com/me/found"' in body and "42 stars</a>" in body and "card-link-missing" not in body
+
+
 def test_web_papers_keep_source_and_pdf(c, card):
     card["add"]("web:layout-x", source="journal", doi="10.1/x", pdf_url="https://example.org/x.pdf",
                 code_url="https://github.com/a/x")
@@ -161,7 +185,7 @@ def test_key_a_opens_the_chat_and_is_in_the_key_hint():
     assert "<kbd>A</kbd> ask" in page
 
 
-def test_my_collection_tags_move_into_the_action_bar(c, card):
+def test_collection_tags_move_into_the_action_bar(c, card):
     card["add"]("2611.10011", tag="related")
     html = _card(_page(c, card), "2611.10011")
     bar = html[html.index('<div class="card-actions">'):html.index('<div id="transfer-')]
@@ -180,12 +204,12 @@ def test_connections_link_to_the_cards_in_this_project(c, card):
     side = html[html.index('<aside class="card-side">'):html.index("</aside>")]
     assert "Connections" in side
     assert f'Found because it cites: <ul class="conn-papers"><li><a href="/projects/{SLUG}?paper=2401.20001"' in side
-    assert f'Also cites from My Collection: <ul class="conn-papers"><li><a href="/projects/{SLUG}?paper=2401.20002"' in side
+    assert f'Also cites the following work from Collection: <ul class="conn-papers"><li><a href="/projects/{SLUG}?paper=2401.20002"' in side
     assert "Nora B also wrote:" in side
 
 
 def test_connections_list_papers_as_bullets_with_author_and_year_and_the_rest_unfolds(c, card):
-    """Five cited My Collection papers: three bullets ("title Li et al., 2024"), "2 more" opens the other two in
+    """Five cited Collection papers: three bullets ("title Li et al., 2024"), "2 more" opens the other two in
     place (before 2026-11-17: titles in one run-on line, the rest as "(+N)" with a tooltip)."""
     new, _ = card["add"]("2611.10014", title="Citing Paper", authors=json.dumps(["Nobody Known"]))
     for i, authors in enumerate([["Wei Li", "Ann Bo", "Cy Do"], ["Wei Li", "Ann Bo"], ["Wei Li"], ["X Y"], ["Z Q"]]):
@@ -201,7 +225,7 @@ def test_connections_list_papers_as_bullets_with_author_and_year_and_the_rest_un
 
 
 def test_authors_who_share_papers_make_one_line_and_the_rest_unfolds(c, card):
-    """Five authors of one My Collection paper: one line, three names, "and 2 more" opens to the other two
+    """Five authors of one Collection paper: one line, three names, "and 2 more" opens to the other two
     (before 2026-11-12: a line per author, the rest only in a tooltip)."""
     team = ["Sangmin Bae", "Adam Fisch", "Hrayr Harutyunyan", "Ziwei Ji", "Tal Schuster"]
     rrt, _ = card["add"]("2410.20672", tag="related", title="Relaxed Recursive Transformers", authors=json.dumps(team))

@@ -35,7 +35,7 @@ def _run(app, results_by_call):
              patch.object(nightly, "_setup_crawl_log"), \
              patch.object(nightly, "run_crawl", side_effect=fake_run_crawl), \
              patch.object(nightly, "backfill_missing_paper_metadata", return_value=0), \
-             patch.object(nightly, "_refresh_collection_citations"), \
+             patch.object(nightly, "_refresh_citations"), \
              patch.object(nightly, "send_notification") as notify, \
              patch.object(nightly, "send_carry_notification") as carry_notify, \
              patch.object(nightly.time, "sleep") as sleep, \

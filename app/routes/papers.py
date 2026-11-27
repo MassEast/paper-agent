@@ -48,7 +48,7 @@ def _moved_response(project_id, dest):
     redraw = [dest] + [sec for sec in paper_lists.SECTIONS if sec != dest and not s[sec]]
     resp = current_app.make_response(render_template("partials/counts_oob.html", **ctx) + "".join(
         render_template(f"partials/section_{sec}.html", **ctx) for sec in redraw))
-    resp.headers["HX-Trigger"] = "crawlSetupChanged"  # My Collection changed: the nightly-crawl checklist
+    resp.headers["HX-Trigger"] = "crawlSetupChanged"  # Collection changed: the nightly-crawl checklist
     return resp
 
 
@@ -59,7 +59,7 @@ def _card_response(pp, project):
     resp = current_app.make_response(
         render_template("partials/paper_card.html", pp=pp, project=project, show_curate=False)
         + render_template("partials/counts_oob.html", project=project, s=s, state=state))
-    resp.headers["HX-Trigger"] = "crawlSetupChanged"  # a tag can put a paper into My Collection
+    resp.headers["HX-Trigger"] = "crawlSetupChanged"  # a tag can put a paper into Collection
     return resp
 
 
@@ -113,7 +113,7 @@ def figure_file(name):
 @papers_bp.route("/paper/<arxiv_id>/tag", methods=["POST"])
 @login_required
 def tag_paper(arxiv_id):
-    """tag: one of MULTI_TAGS (toggle; collects the paper), "related" (Move to My Collection, no tag: since 2026-11-12 the paper is
+    """tag: one of MULTI_TAGS (toggle; collects the paper), "related" (Move to Collection, no tag: since 2026-11-12 the paper is
     shown there so its tags can be set)
     or "" (Move to New Papers). Tags are per person in per_person projects."""
     pp = _project_paper(arxiv_id)
@@ -398,7 +398,7 @@ def transfer_menu(arxiv_id):
 @papers_bp.route("/paper/<arxiv_id>/transfer", methods=["POST"])
 @login_required
 def transfer_paper(arxiv_id):
-    """Copy or move a paper into another project's My Collection. Tags, notes and the paper chat come
+    """Copy or move a paper into another project's Collection. Tags, notes and the paper chat come
     along (notes and chat only if the target has none). Move also puts the paper in this project's Trash, not
     a hard delete, so this project's crawls don't add it again. The target gets its own
     "why it's relevant" line in the background if it has none yet."""
@@ -625,6 +625,30 @@ def update_citation_count(arxiv_id):
     paper.citation_manual = True
     db.session.commit()
     return jsonify({"ok": True, "count": count, "as_of": datetime.utcnow().strftime("%b %Y")})
+
+
+@papers_bp.route("/project-paper/<int:pp_id>/code-url", methods=["POST"])
+@login_required
+def set_code_url(pp_id):
+    """A code link added by hand (the card's grayed-out Code button, for papers where none was found); its GitHub
+    stars are fetched right away. Answers with the redrawn card."""
+    from urllib.parse import urlparse
+    from app import github_stars
+    pp = ProjectPaper.query.get_or_404(pp_id)
+    url = (request.form.get("url") or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or len(url) > 500:
+        return jsonify({"ok": False, "error": "Not a link"}), 400
+    paper = pp.paper
+    paper.code_url = url.rstrip("/")
+    paper.github_stars, paper.github_checked_at = None, None
+    github_stars.fetch_one(paper)
+    db.session.commit()
+    resp = current_app.make_response(render_template(
+        "partials/paper_card.html", pp=pp, project=pp.project, show_curate=pp.manual_tag is None))
+    resp.headers["HX-Retarget"] = f'[data-pp-card="{pp.id}"]'
+    resp.headers["HX-Reswap"] = "outerHTML"
+    return resp
 
 
 @papers_bp.route("/project/<slug>/export.csv")

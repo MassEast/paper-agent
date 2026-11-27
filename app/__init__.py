@@ -134,7 +134,7 @@ def create_app():
             "ALTER TABLE papers ADD COLUMN citation_manual BOOLEAN DEFAULT 0",
             "ALTER TABLE project_papers ADD COLUMN notes_height INTEGER",
             "ALTER TABLE project_papers ADD COLUMN collected_at DATETIME",
-            # One-time backfill: added_at used to be overwritten on every move into My Collection,
+            # One-time backfill: added_at used to be overwritten on every move into Collection,
             # so for already-curated papers it currently holds the collection date, not the crawl date.
             "UPDATE project_papers SET collected_at = added_at WHERE manual_tag IS NOT NULL AND collected_at IS NULL",
             "ALTER TABLE papers ADD COLUMN web_enrich_attempts INTEGER DEFAULT 0",
@@ -170,6 +170,8 @@ def create_app():
             "ALTER TABLE papers ADD COLUMN corresponding_authors TEXT",
             "ALTER TABLE papers ADD COLUMN venue TEXT",
             "ALTER TABLE papers ADD COLUMN resources_checked_at DATETIME",
+            "ALTER TABLE papers ADD COLUMN github_stars INTEGER",
+            "ALTER TABLE papers ADD COLUMN github_checked_at DATETIME",
             "ALTER TABLE papers ADD COLUMN arxiv_version INTEGER",
             "ALTER TABLE papers ADD COLUMN arxiv_updated DATE",
             "ALTER TABLE papers ADD COLUMN arxiv_comment TEXT",

@@ -1,4 +1,4 @@
-"""The three paper sections of a project page (New Papers, My Collection, Trash), sorted and filtered on
+"""The three paper sections of a project page (New Papers, Collection, Trash), sorted and filtered on
 the server and sent a page at a time.
 
 A long project (several hundred cards, ~20 KB each) was one multi-MB page that phones struggled to render,
@@ -25,7 +25,7 @@ def list_state(values) -> dict:
     """Sort/filter state from request args/form (sent by the page with every htmx request)."""
     def _by(key):
         v = values.get(key)
-        return v if v in ("pub", "vote") and (v != "vote" or key == "col_by") else "added"
+        return v if v in ("pub", "vote", "cites", "stars") and (v != "vote" or key == "col_by") else "added"
 
     def _dir(key):
         return "asc" if values.get(key) == "asc" else "desc"
@@ -51,11 +51,22 @@ def _focus(ref):
 
 
 def added_key(pp):
-    """'Date added': for a My Collection paper, when it was collected (older links have no collected_at)."""
+    """'Date added': for a Collection paper, when it was collected (older links have no collected_at)."""
     return (pp.collected_at if pp.manual_tag and pp.collected_at else pp.added_at) or datetime.min
 
 
+# Citations (only once Semantic Scholar answered) and GitHub stars (only papers with a repo); papers without one
+# go last either way, newest added first
+_NUMBERS = {"cites": lambda p: p.citation_count if p.citation_fetched_at is not None else None,
+            "stars": lambda p: p.github_stars}
+
+
 def _date_sort(papers, by, direction):
+    if by in _NUMBERS:
+        val = _NUMBERS[by]
+        known = sorted((pp for pp in papers if val(pp.paper) is not None), key=lambda pp: val(pp.paper),
+                       reverse=direction == "desc")
+        return known + _date_sort([pp for pp in papers if val(pp.paper) is None], "added", "desc")
     if by == "vote":  # average vote of everyone (per_person projects); unvoted last either way
         from app.members import average_vote
         voted = sorted((pp for pp in papers if average_vote(pp) is not None), key=average_vote,

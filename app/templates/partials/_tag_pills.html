@@ -1,4 +1,4 @@
-{# My Collection tag counts; clicking one filters the list. Expects: s, state; oob for an out-of-band swap. #}
+{# Collection tag counts; clicking one filters the list. Expects: s, state; oob for an out-of-band swap. #}
 <span id="col-tag-pills" {% if oob %}hx-swap-oob="true"{% endif %} style="display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;">
     {% for tag, label, color in [('important', 'important', 'important'), ('to_read', 'to read', 'related'), ('to_discuss', 'to discuss', 'discuss')] %}
     {% set _on = tag in state.col_tags %}

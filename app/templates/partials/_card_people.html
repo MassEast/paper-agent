@@ -7,13 +7,13 @@
 <div class="moved-note" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-md); font-size: 0.8rem; color: var(--ink-2); background-color: color-mix(in oklch, {{ _by.color }} 10%, var(--paper-3)); border-left: 3px solid {{ _by.color }};">
     <span style="flex: 1; min-width: 12rem;">
         <strong style="color: {{ _by.color }};">{{ _by.name }}</strong>
-        {% if _shared == 'col' %}added this to My Collection{% elif _shared == 'trash' %}moved this to Trash{% else %}put this back into New Papers{% endif %}
+        {% if _shared == 'col' %}added this to Collection{% elif _shared == 'trash' %}moved this to Trash{% else %}put this back into New Papers{% endif %}
         <span style="color: var(--ink-4); margin-left: 6px;">{{ pp.moved_at | berlin_time('%b %d') }}</span>
     </span>
     {% if _shared == 'col' %}
     <button type="button" class="focus-ring rw-chip-btn" hx-post="/paper/{{ _aid }}/seen" hx-vals='{"project_id": {{ project.id }}}'
         hx-target="closest .paper-card" hx-swap="outerHTML" style="padding: 3px 10px; border-radius: var(--radius-md); font-size: 0.75rem;"
-        data-tip="Fine with me: the paper leaves your New Papers and stays in My Collection">Keep in My Collection</button>
+        data-tip="Fine with me: the paper leaves your New Papers and stays in Collection">Keep in Collection</button>
     {% elif _shared == 'trash' %}
     <button type="button" class="focus-ring rw-chip-btn" hx-post="/paper/{{ _aid }}/seen" hx-vals='{"project_id": {{ project.id }}}'
         hx-target="closest .paper-card" hx-swap="outerHTML" style="padding: 3px 10px; border-radius: var(--radius-md); font-size: 0.75rem;"

@@ -97,6 +97,23 @@ def test_sort_state_comes_from_the_request(c, big_project):
     assert _cards(html)[0] == f"2602-{N_NEW - 1:05d}"  # added longest ago first
 
 
+def test_sort_by_citations_and_stars_puts_papers_without_a_number_last(c, big_project, app):
+    with app.app_context():
+        when = datetime.utcnow()
+        for aid, cites, stars in (("2602.00003", 50, 10), ("2602.00007", 5, 900), ("2602.00009", 0, None)):
+            p = Paper.query.filter_by(arxiv_id=aid).one()
+            p.citation_count, p.citation_fetched_at, p.github_stars = cites, when, stars
+        Paper.query.filter_by(arxiv_id="2602.00001").one().citation_count = 99  # never answered: not known
+        db.session.commit()
+    html = c.get("/projects/pl-proj/papers/section?section=new&new_by=cites&new_dir=desc").data.decode()
+    assert _cards(html)[:4] == ["2602-00003", "2602-00007", "2602-00009", "2602-00000"]  # then newest added
+    html = c.get("/projects/pl-proj/papers/section?section=new&new_by=cites&new_dir=asc").data.decode()
+    assert _cards(html)[:4] == ["2602-00009", "2602-00007", "2602-00003", "2602-00000"]
+    html = c.get("/projects/pl-proj/papers/section?section=new&new_by=stars&new_dir=desc").data.decode()
+    assert _cards(html)[:3] == ["2602-00007", "2602-00003", "2602-00000"]
+    assert 'id="new-sort-stars"' in html and 'id="new-sort-cites"' in html
+
+
 def test_collection_tag_filter_and_grouping(c, big_project):
     html = c.get("/projects/pl-proj/papers/section?section=col").data.decode()
     assert _cards(html) == ["2603-00000", "2603-00001", "2603-00002"]  # collected most recently first
@@ -107,8 +124,8 @@ def test_collection_tag_filter_and_grouping(c, big_project):
     assert _cards(html) == ["2603-00001", "2603-00000", "2603-00002"]  # to read → important → untagged
 
 
-def test_collect_removes_card_and_redraws_only_my_collection(c, big_project):
-    """Collecting paper 15 (not on the first page): it goes to the top of My Collection right away,
+def test_collect_removes_card_and_redraws_only_collection(c, big_project):
+    """Collecting paper 15 (not on the first page): it goes to the top of Collection right away,
     New Papers is not re-sent (the reader keeps their place), and the counts update."""
     resp = c.post("/paper/2602.00015/tag", data={"project_id": big_project, "tag": "related"},
                   headers={"HX-Request": "true"})
@@ -184,14 +201,14 @@ def test_new_papers_carousel_steps_loads_more_and_collect_shows_next_on_a_phone(
     assert pos() == f"{PAGE_SIZE + 1} / {N_NEW}"
     assert shown().first.get_attribute("id").startswith(f"paper-card-2602-{PAGE_SIZE:05d}-")
 
-    shown().first.get_by_role("button", name="Move to My Collection").click()
+    shown().first.get_by_role("button", name="Move to Collection").click()
     pg.wait_for_function(f"() => !document.querySelector('#new-papers-list [id^=\"paper-card-2602-{PAGE_SIZE:05d}-\"]')")
     assert pg.locator("#curated-list > .paper-card").first.get_attribute("id").startswith(f"paper-card-2602-{PAGE_SIZE:05d}-")
     assert shown().count() == 1 and pos() == f"{PAGE_SIZE + 1} / {N_NEW - 1}"  # the next paper takes its place
     assert shown().first.get_attribute("id").startswith(f"paper-card-2602-{PAGE_SIZE + 1:05d}-")
     assert pg.locator("#new-count").inner_text() == f"{N_NEW - 1}"
 
-    # My Collection is a one-card carousel too, in its own tab
+    # Collection is a one-card carousel too, in its own tab
     pg.locator(".paper-tab[data-tab='col']").click()
     assert pg.locator("#curated-list > .paper-card:visible").count() == 1
     assert pg.locator("#col-section .new-carousel-pos").inner_text() == "1 / 4"
@@ -240,7 +257,7 @@ def test_inbox_title_list_and_keys_on_a_laptop(live_server, browser_session, big
     pg.keyboard.press("k")
     assert shown().startswith("paper-card-2602-00002-")
 
-    pg.keyboard.press("c")  # to My Collection, which opens with it; in New Papers the next paper takes its place
+    pg.keyboard.press("c")  # to Collection, which opens with it; in New Papers the next paper takes its place
     pg.wait_for_function("() => document.getElementById('paper-list').dataset.tab === 'col'")
     pg.locator(".paper-tab[data-tab='new']").click()
     assert shown().startswith("paper-card-2602-00003-") and pg.locator("#new-count").inner_text() == f"{N_NEW - 1}"
@@ -286,7 +303,7 @@ def test_nightly_crawl_off_banner_says_what_it_means(c, big_project):
     steps = re.findall(r'<li class="(done|)"><span class="crawl-step-mark">(.)</span>\s*<span><b>([^<]+)</b>( \(required\))?', banner)
     assert [(label, done == "done", bool(req)) for done, _, label, req in steps] == [
         ("Research interest", False, True), ("Search keywords", False, True),
-        ("A few papers in My Collection", True, False), ("An email address", False, False)]
+        ("A few papers in Collection", True, False), ("An email address", False, False)]
 
 
 @pytest.mark.slow
@@ -312,9 +329,9 @@ def test_a_title_list_that_does_not_fill_its_box_loads_more_by_itself(live_serve
 
 
 @pytest.mark.slow
-def test_a_collected_paper_is_shown_in_my_collection_and_new_papers_goes_on_after_it(live_server, browser_session,
+def test_a_collected_paper_is_shown_in_collection_and_new_papers_goes_on_after_it(live_server, browser_session,
                                                                                      big_project):
-    """C (or the button) on a New Papers card: My Collection opens with that paper shown (its tags can be set
+    """C (or the button) on a New Papers card: Collection opens with that paper shown (its tags can be set
     right away; none is set by itself); back in New Papers the paper that came after it is shown."""
     browser, state = browser_session
     context = browser.new_context(storage_state=state, viewport={"width": 1440, "height": 900})

@@ -1,5 +1,5 @@
 """
-Tests for the "Add to My Collection" bypass pipeline.
+Tests for the "Add to Collection" bypass pipeline.
 
 Unit tests: fast, no network. Use pytest directly.
 Live tests: hit real URLs. Marked slow — run with:

@@ -6,7 +6,7 @@ Where the paper's full text comes from, and what happens when a paper was screen
   the summary read the abstract page as "full text").
 - get_paper_content falls back to the PDF.
 - refresh_from_full_text (nightly): New Papers screened from the abstract are re-read once the full text
-  can be fetched; rejects go to Trash with a reason, My Collection is never touched.
+  can be fetched; rejects go to Trash with a reason, Collection is never touched.
 
 HTTP is a MockTransport; LLM calls are mocked.
 """
@@ -169,7 +169,7 @@ def test_new_papers_screened_from_the_abstract_are_reread(app, proj):
         assert _refresh(proj, {})[0]["total"] == 0
 
 
-def test_my_collection_full_text_and_unrecorded_papers_are_left_alone(app, proj):
+def test_collection_full_text_and_unrecorded_papers_are_left_alone(app, proj):
     with app.app_context():
         _link(proj, "2610.10011", "abstract", manual_tag="related")
         _link(proj, "2610.10012", "full_text")

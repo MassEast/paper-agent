@@ -24,7 +24,7 @@ class Project(db.Model):
     crawl_hour = db.Column(db.Integer)   # hour (1-4 UTC) when the nightly CronJob crawls this project
     use_biorxiv = db.Column(db.Boolean, default=False)  # nightly crawl also searches bioRxiv; Find Papers starts from it
     # Several people in one project (app/members.py): each has their own New Papers, tags, votes and chat;
-    # My Collection and Trash stay shared. Off: one shared view, as before.
+    # Collection and Trash stay shared. Off: one shared view, as before.
     per_person = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     trashed_at = db.Column(db.DateTime, nullable=True)
@@ -88,6 +88,9 @@ class Paper(db.Model):
     corresponding_authors = db.Column(db.Text)
     venue = db.Column(db.Text)
     resources_checked_at = db.Column(db.DateTime)  # when that was read (None: not yet, or again after a new version)
+    # Stars of code_url's GitHub repository (app/github_stars.py), refreshed weekly; None: no repo, not checked yet or gone
+    github_stars = db.Column(db.Integer)
+    github_checked_at = db.Column(db.DateTime)
     # From the arXiv API (app/arxiv_meta.py): latest version, when it came out, the authors' comment, journal ref
     arxiv_version = db.Column(db.Integer)
     arxiv_updated = db.Column(db.Date)
@@ -317,10 +320,10 @@ class ProjectPaper(db.Model):
     # For origin "crawl": JSON list of how the crawl found it, one entry per way: {"via": "keyword", "name": k}
     # (no name when no keyword appears literally in title/abstract), {"via": "recommended"} (Semantic Scholar
     # recommendations), {"via": "biorxiv", "name": k} (bioRxiv keyword search), {"via": "cites", "arxiv_id",
-    # "title"} (cites that My Collection paper). None: from
+    # "title"} (cites that Collection paper). None: from
     # before this was recorded
     found_via = db.Column(db.Text)
-    # When a crawl last asked Semantic Scholar which papers cite this My Collection paper (and got an answer):
+    # When a crawl last asked Semantic Scholar which papers cite this Collection paper (and got an answer):
     # the citations source checks the CITATION_MAX_SEEDS checked longest ago first (citation_seeds)
     citations_checked_at = db.Column(db.DateTime, nullable=True)
 
@@ -358,7 +361,7 @@ class ProjectPaper(db.Model):
 
     def found_via_text(self, full: bool = False) -> str:
         """How the crawl found the paper, for the card: keywords by name, the recommendation, cited
-        My Collection papers by title. Short form for the card line (first cited paper + "(+N)"), full
+        Collection papers by title. Short form for the card line (first cited paper + "(+N)"), full
         form (every cited paper) for its tooltip. "" when not recorded."""
         via = self.found_via_list
         names = [v["name"] for v in via if v["via"] == "keyword" and v.get("name")]
@@ -401,11 +404,11 @@ class ProjectPaper(db.Model):
             out.append(f"Its title or abstract contains your keyword{'s' if len(bio_names) > 1 else ''} "
                        f"{quote(bio_names)} (bioRxiv keyword search).")
         if any(v["via"] == "recommended" for v in via):
-            out.append("Semantic Scholar recommends it as similar to papers in My Collection.")
+            out.append("Semantic Scholar recommends it as similar to papers in Collection.")
         if len(cited) == 1:
-            out.append(f'It cites "{cited[0]}" from My Collection.')
+            out.append(f'It cites "{cited[0]}" from Collection.')
         elif cited:
-            out.append(f"It cites {len(cited)} papers from My Collection: " + "; ".join(f'"{t}"' for t in cited) + ".")
+            out.append(f"It cites {len(cited)} papers from Collection: " + "; ".join(f'"{t}"' for t in cited) + ".")
         return " ".join(out)
 
     @property
@@ -512,7 +515,7 @@ class LlmUsage(db.Model):
 class ScreenedPaper(db.Model):
     """Records every paper screened for a project + the context hash at screening time.
     Lets the crawl skip re-screening papers whose relevance was already determined with
-    the same research interest and My Collection contents."""
+    the same research interest and Collection contents."""
     __tablename__ = "screened_papers"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -532,7 +535,7 @@ class ScreenedPaper(db.Model):
 def compute_screening_hash(research_interest: str, collection_papers: list) -> str:
     """Stable 16-char hex hash of the project's screening context.
 
-    Hash is over research_interest + sorted titles of all non-trashed My Collection papers.
+    Hash is over research_interest + sorted titles of all non-trashed Collection papers.
     Changes when the user updates their research interest or adds/removes collection papers.
     """
     ri = (research_interest or "").strip()

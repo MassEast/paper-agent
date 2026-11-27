@@ -53,7 +53,7 @@ def index():
 
 
 def _list_stats(project) -> dict:
-    """One row of the project list: what is in New Papers and My Collection (as the project page's tabs count
+    """One row of the project list: what is in New Papers and Collection (as the project page's tabs count
     them, so per person in a per_person project), the latest crawl, and the people."""
     me = members.current(project)
     sections = [members.section_for(pp, me) for pp in project.papers]
@@ -218,7 +218,7 @@ def update_research_interest(slug):
 @projects_bp.route("/<slug>/collection-add", methods=["POST"])
 @login_required
 def add_to_collection(slug):
-    """Bypass-add a paper directly to My Collection (tagged important), or with to_new=1 to New Papers so
+    """Bypass-add a paper directly to Collection (tagged important), or with to_new=1 to New Papers so
     everyone in the project comes across it there. No LLM screening, full enrichment in background.
 
     Accepts arXiv URLs (full enrichment) and any other URL (web-paper enrichment, with
@@ -335,7 +335,7 @@ def generate_research_interest(slug):
         existing_text = (request.json.get("existing_text") or "").strip()
 
     if not collection_pps and not existing_text:
-        return jsonify({"error": "Add papers to My Collection or write a research interest first"}), 400
+        return jsonify({"error": "Add papers to Collection or write a research interest first"}), 400
 
     try:
         with counted(project.id, "research_interest"):
@@ -371,7 +371,7 @@ def arxiv_count(slug):
     task_id = uuid.uuid4().hex[:12]
     _arxiv_count_tasks[task_id] = {"status": "running"}
 
-    # My Collection (seeds for recommendations and citations) and existing paper IDs before the thread starts
+    # Collection (seeds for recommendations and citations) and existing paper IDs before the thread starts
     project_obj = Project.query.filter_by(slug=slug).first()
     seeds = []
     cite_seeds = []
@@ -480,7 +480,7 @@ def trigger_crawl(slug):
     ).first() is not None
 
     if not keywords_override and not project.research_interest and not has_collection:
-        error_msg = "Please set a research interest or add papers to My Collection first."
+        error_msg = "Please set a research interest or add papers to Collection first."
         if request.headers.get("HX-Request"):
             return f'<div class="mt-4 p-4 bg-red-900/30 border border-red-700 rounded-lg"><span class="text-red-400">Cannot crawl: {error_msg}</span></div>'
         return redirect(url_for("projects.detail", slug=slug, error=error_msg))
@@ -600,14 +600,14 @@ def papers_more(slug):
 @projects_bp.route("/<slug>/generate-keywords", methods=["POST"])
 @login_required
 def generate_keywords(slug):
-    """Generate search keywords via LLM from research interest + My Collection."""
+    """Generate search keywords via LLM from research interest + Collection."""
     project = Project.query.filter_by(slug=slug).first_or_404()
     collection_pps = ProjectPaper.query.filter_by(project_id=project.id).filter(
         ProjectPaper.manual_tag.isnot(None), ProjectPaper.trashed_at.is_(None)
     ).all()
 
     if not project.research_interest and not collection_pps:
-        return jsonify({"error": "Please set a research interest or add papers to My Collection first."}), 400
+        return jsonify({"error": "Please set a research interest or add papers to Collection first."}), 400
 
     try:
         with counted(project.id, "keywords"):

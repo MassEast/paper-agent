@@ -47,7 +47,7 @@ def _ticks(html):
 def test_banner_ticks_what_is_set_and_says_now_only_when_everything_is(c, app, proj):
     html = c.get("/projects/banner-proj/crawl-banner").data.decode()
     assert _ticks(html) == {"Research interest": True, "Search keywords": True,
-                            "A few papers in My Collection": False, "An email address": False}
+                            "A few papers in Collection": False, "An email address": False}
     assert "Now switch on" not in html
     with app.app_context():
         Project.query.get(proj["project"]).notification_emails = "someone@example.org"

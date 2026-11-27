@@ -175,7 +175,7 @@ def build_messages(pp, text: str, source: str, question) -> list[dict]:
         research_interest=(project.research_interest or "(not set)").strip(),
         keywords_line=f"\nSearch keywords of the project: {', '.join(project.saved_keywords_list)}\n"
         if project.saved_keywords_list else "",
-        notes_line=f"\nThe researcher's notes on this paper: {_notes.strip()}\n" if _notes.strip() else "",
+        notes_line=prompts.PAPER_CHAT_NOTES_LINE.format(notes=_notes.strip()) if _notes.strip() else "",
         relevance_line=f"Why this paper was flagged for the project: {pp.relevance_reason}\n" if pp.relevance_reason else "",
         title=paper.title,
         authors=", ".join(paper.authors_list) or "unknown",

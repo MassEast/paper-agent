@@ -107,7 +107,7 @@ def test_a_new_paper_opened_from_the_email_comes_first_and_pages_neither_skip_no
 def test_a_collected_or_trashed_paper_says_where_it_went(c, focus_project):
     _, slug, ids = focus_project
     html = c.get(f"/projects/{slug}?paper={ids['col']}").get_data(as_text=True)
-    assert "already in My Collection (since Nov 01), shown first there" in html
+    assert "already in Collection (since Nov 01), shown first there" in html
     # The tab switch is valid JS: the quotes around the tab name were HTML-escaped (a JS error) until 2026-11-03
     assert """showPaperTab("col" || 'new');""" in html
     html = c.get(f"/projects/{slug}?paper={ids['trash']}").get_data(as_text=True)

@@ -31,7 +31,7 @@ from app.utils import _ArxivLockCtx, arxiv_queue_depth, _http_client, _is_safe_e
 API_KEY = os.environ.get("LLM_API_KEY")
 SCHOLAR_API_KEY = os.environ.get("SCHOLAR_API_KEY")
 
-# How many My Collection papers to include as LLM reference/calibration context (keyword
+# How many Collection papers to include as LLM reference/calibration context (keyword
 # extraction + relevance screening) — see _select_reference_papers. This prefix is identical
 # across every candidate paper screened in a crawl, so with prefix caching on the inference
 # server it's paid once per crawl rather than recomputed per paper; it still adds to KV-cache
@@ -228,7 +228,7 @@ def _add_relevance_reason(project_id: int, paper, by: str, text: Optional[str] =
 
 
 def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, app) -> None:
-    """Background thread: fully enrich a paper that was just added directly to My Collection.
+    """Background thread: fully enrich a paper that was just added directly to Collection.
 
     The Paper row already exists with a placeholder title. This thread fills in abstract,
     authors, figure, institutions, citation count, and generates summary + contributions.
@@ -388,7 +388,7 @@ def start_collection_add_async(project_id: int, arxiv_id: str, paper_id: int, ap
 
 
 def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> None:
-    """Background thread: enrich a web paper added directly to My Collection.
+    """Background thread: enrich a web paper added directly to Collection.
 
     Pipeline:
     1. Fetch URL → extract title/abstract/detected-arXiv-links.
@@ -859,7 +859,7 @@ def _fill_from_doi_apis(result: dict, url: str) -> None:
 def generate_research_interest_from_collection(
     collection_pps: list, existing_text: str = ""
 ) -> str:
-    """Generate or improve the research interest from My Collection papers."""
+    """Generate or improve the research interest from Collection papers."""
     selected_pps = _select_reference_papers(collection_pps, limit=REFERENCE_PAPERS_LIMIT)
     papers_text = "\n\n".join(
         f"Paper {i+1}: {pp.paper.title}\nAbstract: {(pp.paper.abstract or '')[:500]}"
@@ -1738,7 +1738,7 @@ def _collection_tag_tier(pp) -> int:
 
 
 def _select_reference_papers(pps: list, limit: int) -> list:
-    """Pick up to `limit` My Collection papers to use as LLM reference/calibration context.
+    """Pick up to `limit` Collection papers to use as LLM reference/calibration context.
 
     Priority: important > to_discuss > to_read > related — fill from the top tier down.
     Within a tier that has more papers than the remaining slots, alternates newest/oldest
@@ -1774,7 +1774,7 @@ def _select_reference_papers(pps: list, limit: int) -> list:
 
 
 def _collection_context_text(collection_pps: list) -> str:
-    """Build a context string from My Collection (ProjectPaper objects) for keyword/RI generation.
+    """Build a context string from Collection (ProjectPaper objects) for keyword/RI generation.
 
     Uses stored abstracts — no arXiv fetches needed. See _select_reference_papers for selection order.
     """
@@ -1782,15 +1782,15 @@ def _collection_context_text(collection_pps: list) -> str:
     for pp in _select_reference_papers(collection_pps, limit=REFERENCE_PAPERS_LIMIT):
         abstract = (pp.paper.abstract or "")[:500]
         entries.append(f"- {pp.paper.title}" + (f": {abstract}" if abstract else ""))
-    return "\n".join(entries) if entries else "(none yet — add papers to My Collection to improve keyword extraction)"
+    return "\n".join(entries) if entries else "(none yet — add papers to Collection to improve keyword extraction)"
 
 
 def extract_keywords_with_usage(
     research_interest: str, collection_papers: list
 ) -> tuple[list[str], dict]:
-    """Extract search keywords from research interest + My Collection.
+    """Extract search keywords from research interest + Collection.
 
-    collection_papers: list of ProjectPaper ORM objects (My Collection papers).
+    collection_papers: list of ProjectPaper ORM objects (Collection papers).
     """
     collection_context = _collection_context_text(collection_papers)
 
@@ -2287,7 +2287,7 @@ def get_semantic_scholar_recommendations(arxiv_ids: list[str], limit: int = RECO
     return list(papers.values())
 
 
-# At most this many My Collection papers are checked for new citing papers per crawl, the ones checked longest
+# At most this many Collection papers are checked for new citing papers per crawl, the ones checked longest
 # ago first (citation_seeds), so a larger collection is covered in turn over a few nights. Semantic Scholar
 # answers many of these calls with 429s at night, so checking a large collection in one crawl took hours and
 # held up the projects scheduled after it.
@@ -2305,7 +2305,7 @@ def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: da
     checked (optional list) gets the id of every seed Semantic Scholar answered for (not one it gave up on
     with 429s), for mark_citations_checked."""
     if len(seeds) > CITATION_MAX_SEEDS:
-        _log.info("[citations] %d My Collection papers, checking the %d checked longest ago", len(seeds), CITATION_MAX_SEEDS)
+        _log.info("[citations] %d Collection papers, checking the %d checked longest ago", len(seeds), CITATION_MAX_SEEDS)
         seeds = seeds[:CITATION_MAX_SEEDS]
     found: dict[str, dict] = {}
     started = time.time()
@@ -2349,7 +2349,7 @@ def get_citing_papers(seeds: list[tuple[str, str]], date_from: date, date_to: da
             elapsed = time.time() - started
             _log.info("[citations] %d/%d seeds, %d citing papers so far, %.0fs (ETA %.0fs)",
                       i, len(seeds), len(found), elapsed, elapsed / i * (len(seeds) - i))
-    _log.info("[citations] %d papers in %s–%s cite %d My Collection papers", len(found), date_from, date_to, len(seeds))
+    _log.info("[citations] %d papers in %s–%s cite %d Collection papers", len(found), date_from, date_to, len(seeds))
     return list(found.values())
 
 
@@ -2363,7 +2363,7 @@ def _matched_keywords(paper: dict, keywords: list[str]) -> list[str]:
 
 
 def scholar_seed(paper) -> Optional[str]:
-    """How Semantic Scholar knows a My Collection paper, as a seed: its arXiv id; else "DOI:<doi>"; else the
+    """How Semantic Scholar knows a Collection paper, as a seed: its arXiv id; else "DOI:<doi>"; else the
     Semantic Scholar id found by title (resolve_scholar_ids); None if none of these (a blog post, say)."""
     if paper.is_arxiv:
         return base_arxiv_id(paper.arxiv_id)
@@ -2388,7 +2388,7 @@ def _arxiv_doi_ref(arxiv_id: str) -> str:
 def split_scholar_records(seeds: list[str]) -> dict[str, str]:
     """{arXiv seed: Semantic Scholar id of its second record} for the seeds Semantic Scholar keeps as two
     records: one found by the arXiv id, another by the arXiv DOI. Their citations can sit on either: for
-    2510.04871 the arXiv-id record had none, the DOI record 172 (checked 2026-10-29, 9 of 390 My Collection
+    2510.04871 the arXiv-id record had none, the DOI record 172 (checked 2026-10-29, 9 of 390 Collection
     papers split). One /paper/batch request; {} if it doesn't answer."""
     aids = [s for s in seeds if _scholar_ref(s).startswith("ArXiv:")]
     if not aids:
@@ -2413,7 +2413,7 @@ def split_scholar_records(seeds: list[str]) -> dict[str, str]:
 
 
 def resolve_scholar_ids(collection: list) -> None:
-    """Give the non-arXiv My Collection papers a seed for the Semantic Scholar sources: the DOI in their URL,
+    """Give the non-arXiv Collection papers a seed for the Semantic Scholar sources: the DOI in their URL,
     else a Semantic Scholar title match (checked with _titles_match). Each paper is looked up once
     (scholar_lookup_at); after a 429 it is left for the next crawl."""
     for pp in collection:
@@ -2443,7 +2443,7 @@ def resolve_scholar_ids(collection: list) -> None:
 
 
 def collection_seeds(collection: list) -> list[tuple[str, str]]:
-    """(seed, title) of the My Collection papers Semantic Scholar can know (scholar_seed): the seeds for
+    """(seed, title) of the Collection papers Semantic Scholar can know (scholar_seed): the seeds for
     recommendations and citations. collection: ProjectPaper links, best first (_collection_tag_tier)."""
     return [(seed, pp.paper.title) for pp in collection if pp.paper and (seed := scholar_seed(pp.paper))]
 
@@ -2457,7 +2457,7 @@ def citation_seeds(collection: list) -> list[tuple[str, str]]:
 
 
 def mark_citations_checked(project_id: int, arxiv_ids: list[str]) -> None:  # seeds, see collection_seeds
-    """Stamp the My Collection papers the citations source just got an answer for, so the next crawl starts
+    """Stamp the Collection papers the citations source just got an answer for, so the next crawl starts
     with the others (citation_seeds)."""
     if not arxiv_ids:
         return
@@ -2475,7 +2475,7 @@ def gather_candidates(keywords: list[str], seeds: list[tuple[str, str]], date_fr
                       status: Optional[dict] = None, cite_seeds: Optional[list[tuple[str, str]]] = None,
                       citations_checked: Optional[list[str]] = None, use_biorxiv: bool = False) -> list[dict]:
     """Candidates from the sources, in this order: arXiv keyword search, bioRxiv keyword search (off unless
-    asked for), Semantic Scholar recommendations (seeded with My Collection), papers citing My Collection.
+    asked for), Semantic Scholar recommendations (seeded with Collection), papers citing the Collection.
     A paper found more than once comes back once, and its "found_via" lists every way it was found.
     seeds: collection_seeds(), for the recommendations; cite_seeds: citation_seeds() for the citations
     (defaults to seeds). citations_checked: see get_citing_papers. status (optional dict) gets
@@ -2848,7 +2848,7 @@ def generate_summary_with_full_content(
 
 EMAIL_SOURCE_LABELS = [("keyword", "arXiv keyword search"), ("biorxiv", "bioRxiv keyword search"),
                        ("recommended", "Semantic Scholar recommendations"),
-                       ("cites", "Papers citing My Collection")]
+                       ("cites", "Papers citing the Collection")]
 
 
 def _email_source_rows(source_counts: Optional[dict]) -> list[tuple[str, str]]:
@@ -2903,7 +2903,7 @@ def _search_warning(failed: list[str]) -> str:
     days_back = int(os.environ.get("CRAWL_DAYS_BACK", "5"))
     return (f"arXiv did not answer tonight (rate limited or unavailable), so papers from the arXiv keyword search "
             f"({', '.join(failed)}) may be missing; the papers here come from Semantic Scholar (recommendations and "
-            f"papers citing My Collection). "
+            f"papers citing the Collection). "
             f"Each night searches the last {days_back} days, so the next nights cover these days again.")
 
 
@@ -2992,7 +2992,7 @@ def run_crawl(
         if not project:
             raise ValueError("Project not found")
 
-        # My Collection papers — used for keyword extraction, screening context, and Scholar seeds.
+        # Collection papers — used for keyword extraction, screening context, and Scholar seeds.
         # _collection_pps (full, tag-priority sorted) feeds the Scholar seed list — Scholar seeding wants
         # as many candidates as possible, not just the capped LLM-context selection below.
         _collection_pps = sorted(
@@ -3007,7 +3007,7 @@ def run_crawl(
 
         if not project.research_interest and not _collection_pps:
             raise ValueError(
-                "Cannot crawl: Please set a research interest or add papers to My Collection first."
+                "Cannot crawl: Please set a research interest or add papers to Collection first."
             )
 
         tokens_used = 0
@@ -3147,7 +3147,7 @@ def run_crawl(
         if not cancelled and papers_to_check_fresh:
             cancel_event = threading.Event()
             _research_interest = project.research_interest or ""
-            _ref_dicts = collection_ref_dicts  # My Collection papers as screening context
+            _ref_dicts = collection_ref_dicts  # Collection papers as screening context
             _crawl_log_id = crawl_log.id
 
             def _process_one(pd):
@@ -3708,7 +3708,7 @@ def refresh_from_full_text(project_id: int, limit: int = FULL_TEXT_REFRESH_PER_N
     "abstract", or "unknown" for papers marked from before this was recorded), newest first, at most
     `limit` per night. With the full text, a clear "not relevant" moves the paper to Trash with a
     reason; a relevant one gets a fresh relevance_reason, and its summary is rewritten if that was not
-    made from the full text either. My Collection and Trash are never touched. A paper whose full text
+    made from the full text either. Collection and Trash are never touched. A paper whose full text
     still can't be fetched (or whose check can't be parsed) is retried on later nights, at most
     MAX_FULL_TEXT_ATTEMPTS times."""
     research_interest, ref_dicts, context_hash, links = _screening_context(project_id)
@@ -4030,6 +4030,8 @@ def backfill_missing_paper_metadata() -> int:
     from app import connections
     updated += connections.fetch_references()
     updated += backfill_relevance_reasons()  # Pass 9
+    from app import github_stars
+    updated += github_stars.refresh()  # Pass 10
 
     return updated
 

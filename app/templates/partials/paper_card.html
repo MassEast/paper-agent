@@ -6,7 +6,7 @@
 {% set _mytags = my_tags(pp) %}
 <div class="paper-card" data-pp-card="{{ pp.id }}" data-paper-id="{{ pp.paper.id }}" data-paper-ref="{{ pp.paper.link_ref }}"
     id="paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
-    {# "Date added" sort key: in My Collection, when it was collected (older links have no collected_at) #}
+    {# "Date added" sort key: in Collection, when it was collected (older links have no collected_at) #}
     {% set _sort_added = (pp.collected_at if pp.manual_tag and pp.collected_at else pp.added_at) %}
     data-added-at="{{ _sort_added.isoformat() if _sort_added else '' }}"
     data-pub-date="{{ pp.paper.published_date.isoformat() if pp.paper.published_date else '' }}"
@@ -124,6 +124,15 @@
                 {% endif %}
                 {% if pp.paper.code_url %}
                 <a class="card-link" href="{{ pp.paper.code_url }}" target="_blank" rel="noopener" data-tip="{{ pp.paper.code_url }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-code"></use></svg>Code</a>
+                {% else %}
+                {# No code link found: grayed out; a click asks for one (set_code_url) #}
+                <button type="button" class="card-link card-link-missing focus-ring" data-tip="No code link found. Click to add one"
+                    onclick="this.hidden=true; var f=this.nextElementSibling; f.hidden=false; f.querySelector('input').focus()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-code"></use></svg>Code</button>
+                <form class="code-add" hidden hx-post="/project-paper/{{ pp.id }}/code-url" hx-swap="none">
+                    <input name="url" type="url" required placeholder="https://github.com/…" aria-label="Code link"
+                        onkeydown="if(event.key==='Escape'){this.form.hidden=true; this.form.previousElementSibling.hidden=false}">
+                    <button type="submit" class="focus-ring">Save</button>
+                </form>
                 {% endif %}
             </div>
             {% if _me %}{% include "partials/_card_vote.html" %}{% endif %}
@@ -175,8 +184,8 @@
     {% if pp.paper.abstract and (pp.paper.is_arxiv or pp.paper.source in ('biorxiv', 'journal')) %}
     <details class="card-fold">
         <summary class="focus-ring"><svg class="card-fold-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-chevron-right"></use></svg><span class="card-label">Abstract</span></summary>
-        <p
-            style="font-size: 0.75rem; color: var(--ink-2); line-height: 1.5; margin-top: 8px; border-left: 2px solid var(--border-default); padding-left: 12px;">
+        <p class="text-sm"
+            style="color: var(--ink-2); line-height: 1.5; margin-top: 8px; border-left: 2px solid var(--border-default); padding-left: 12px;">
             {{ pp.paper.abstract }}</p>
     </details>
     {% endif %}
@@ -259,6 +268,9 @@
             
             </dd>
             {% endif %}
+            {% if pp.paper.code_url and pp.paper.github_stars is not none %}
+            <dt>GitHub</dt><dd><a href="{{ pp.paper.code_url }}" target="_blank" rel="noopener" data-tip="{{ pp.paper.code_url }} (as of {{ pp.paper.github_checked_at.strftime('%b %-d, %Y') }})">{{ '{:,}'.format(pp.paper.github_stars) }} star{{ 's' if pp.paper.github_stars != 1 else '' }}</a></dd>
+            {% endif %}
             {% set insts = pp.paper.institutions_list %}
             {% if insts %}
             <dt>From</dt><dd>{{ insts | join(', ') }}</dd>
@@ -266,11 +278,11 @@
             {% if pp.added_at or pp.collected_at %}
             <dt>Added</dt><dd>
     {# How the paper came into this project (ProjectPaper.origin) and when it was collected; a paper added
-       straight into My Collection (by hand, copied, moved) doesn't repeat the same day as "Collected" #}
+       straight into Collection (by hand, copied, moved) doesn't repeat the same day as "Collected" #}
     {% set _src = pp.origin_project %}
     {% set _show_collected = pp.collected_at and not (pp.origin in ('manual', 'copied', 'moved') and pp.added_at
                                                       and pp.added_at.date() == pp.collected_at.date()) %}
-    <span data-tip="{% if pp.origin == 'crawl' %}Put into New Papers by a crawl (nightly or Find Papers) on {{ pp.added_at.strftime('%b %-d, %Y') }}.{% if pp.found_via %} {{ pp.found_via_tip() }}{% endif %}{% elif pp.origin == 'manual' %}Added by hand (pasted link) on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.origin in ('copied', 'moved') %}{{ pp.origin | capitalize }} here from the project {{ _src.name if _src else '(deleted)' }} on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.added_at %}Added to this project {{ pp.added_at.strftime('%b %-d, %Y') }} (how is not known: it came in before this was recorded){% endif %}{% if _show_collected %} | Moved to My Collection {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}">
+    <span data-tip="{% if pp.origin == 'crawl' %}Put into New Papers by a crawl (nightly or Find Papers) on {{ pp.added_at.strftime('%b %-d, %Y') }}.{% if pp.found_via %} {{ pp.found_via_tip() }}{% endif %}{% elif pp.origin == 'manual' %}Added by hand (pasted link) on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.origin in ('copied', 'moved') %}{{ pp.origin | capitalize }} here from the project {{ _src.name if _src else '(deleted)' }} on {{ pp.added_at.strftime('%b %-d, %Y') }}{% elif pp.added_at %}Added to this project {{ pp.added_at.strftime('%b %-d, %Y') }} (how is not known: it came in before this was recorded){% endif %}{% if _show_collected %} | Moved to Collection {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}">
         {% if pp.added_at %}{% if pp.origin == 'crawl' and pp.found_via %}Found via {{ pp.found_via_text() }},{% elif pp.origin == 'crawl' %}Found by crawl{% elif pp.origin == 'manual' %}Added by hand{% elif pp.origin in ('copied', 'moved') %}{{ pp.origin | capitalize }} from {{ _src.name if _src else 'another project' }}{% else %}Added{% endif %} {{ pp.added_at.strftime('%b %-d, %Y') }}{% endif %}{% if _show_collected %}{% if pp.added_at %} | {% endif %}Collected {{ pp.collected_at.strftime('%b %-d, %Y') }}{% endif %}
     </span>
             </dd>
@@ -293,7 +305,7 @@
             {% macro plink(p) %}{% if p.id is defined %}<a href="/projects/{{ project.slug }}?paper={{ p.link_ref }}" data-tip="{{ p.title }}">{{ p.title | truncate(80) }}</a>{% if p.short_cite %} <span class="conn-cite">{{ p.short_cite }}</span>{% endif %}{% else %}<span data-tip="{{ p.title }}">{{ p.title | truncate(80) }}</span>{% endif %}{% endmacro %}
             {% macro plist(ps) %}<ul class="conn-papers">{% for p in ps[:3] %}<li>{{ plink(p) }}</li>{% endfor %}</ul>{% if ps|length > 3 %}<details class="conn-more conn-rest"><summary>{{ ps|length - 3 }} more</summary><ul class="conn-papers">{% for p in ps[3:] %}<li>{{ plink(p) }}</li>{% endfor %}</ul></details>{% endif %}{% endmacro %}
             {% if _conn.found_via %}<li>Found because it cites: {{ plist(_conn.found_via) }}</li>{% endif %}
-            {% if _conn.also_cites %}<li>{% if _conn.found_via %}Also cites{% else %}Cites{% endif %} from My Collection: {{ plist(_conn.also_cites) }}</li>{% endif %}
+            {% if _conn.also_cites %}<li>{% if _conn.found_via %}Also cites{% else %}Cites{% endif %} the following work from Collection: {{ plist(_conn.also_cites) }}</li>{% endif %}
             {# Authors grouped by the papers they share; past 3 names, or past 3 such lines, the rest unfolds #}
             {% macro names(ns) %}{% if ns|length <= 3 %}{{ ns[:-1] | join(', ') }}{% if ns|length > 1 %} and {% endif %}{{ ns[-1] }}{% else %}{{ ns[:3] | join(', ') }} <details class="conn-more"><summary>and {{ ns|length - 3 }} more</summary>{{ ns[3:] | join(', ') }}</details>{% endif %}{% endmacro %}
             {% macro authors_line(ns, ps) %}<li>{{ names(ns) }} also wrote: {{ plist(ps) }}</li>{% endmacro %}
@@ -306,10 +318,10 @@
     </aside>
 
     <div class="card-bottom">
-    {# Action bar: the triage actions (with their keys) or My Collection's tags, Ask, the rest in the ⋯ menu #}
+    {# Action bar: the triage actions (with their keys) or Collection's tags, Ask, the rest in the ⋯ menu #}
     <div class="card-actions">
                 {% if not show_curate and not show_restore %}
-                {# My Collection: toggle tag buttons (highlighted when active) + move back #}
+                {# Collection: toggle tag buttons (highlighted when active) + move back #}
                 {% set _tags = _mytags %}
                 <button
                     style="height: 32px; padding: 0 10px; border-radius: 9999px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 6px; outline: none;
@@ -362,9 +374,9 @@
             hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
             hx-vals='{"project_id": {{ project.id }}, "tag": "related"}'
             hx-target="closest .paper-card" hx-swap="outerHTML"
-            data-tip="Moves the paper to My Collection, where you can tag it (key C)">
+            data-tip="Moves the paper to Collection, where you can tag it (key C)">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-star"></use></svg>
-            Move to My Collection <kbd>C</kbd>
+            Move to Collection <kbd>C</kbd>
         </button>
         {% endif %}
         {% if show_restore %}
@@ -395,7 +407,7 @@
             <div class="card-menu-panel">
                 {% if not show_restore %}
                 <button class="focus-ring card-menu-item"
-            data-tip="Copy or move this paper into the My Collection of another project"
+            data-tip="Copy or move this paper into the Collection of another project"
             hx-get="/paper/{{ pp.paper.arxiv_id }}/transfer-menu?project_id={{ project.id }}"
             hx-target="#transfer-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
             hx-swap="innerHTML">

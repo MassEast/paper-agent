@@ -1,5 +1,5 @@
 """
-Papers citing My Collection as a third crawl source (get_citing_papers, gather_candidates), and how the
+Papers citing the Collection as a third crawl source (get_citing_papers, gather_candidates), and how the
 crawl records and shows the ways a paper was found (ProjectPaper.found_via, the card's "Found via" line).
 
 Semantic Scholar is a mocked httpx transport; the arXiv search and the recommendations are patched.
@@ -220,7 +220,7 @@ def test_crawl_stores_how_it_found_the_paper_and_the_card_shows_it(app, proj, cl
         sess["logged_in"] = True
     html = client.get("/projects/citations-proj").get_data(as_text=True)
     assert 'Found via cites &#34;Seed Paper A&#34; (+1),' in html
-    assert 'It cites 2 papers from My Collection: &#34;Seed Paper A&#34;; &#34;Another Seed&#34;.' in html  # tooltip
+    assert 'It cites 2 papers from Collection: &#34;Seed Paper A&#34;; &#34;Another Seed&#34;.' in html  # tooltip
 
 
 def test_email_counts_each_source_with_how_many_were_added(app, proj):
@@ -244,9 +244,9 @@ def test_email_counts_each_source_with_how_many_were_added(app, proj):
     html = re.sub(r"\s+", " ", html)
     assert "arXiv keyword search 1 (1 added)" in html
     assert "Semantic Scholar recommendations 0 (0 added)" in html
-    assert "Papers citing My Collection 2 (2 added)" in html
+    assert "Papers citing the Collection 2 (2 added)" in html
     assert "Total found A paper found several ways counts in each row" in html and "nothing is screened twice" in html
-    assert "Papers citing My Collection: 2 (2 added)" in text and "Total found: 2" in text
+    assert "Papers citing the Collection: 2 (2 added)" in text and "Total found: 2" in text
 
 
 def test_found_via_text_names_keywords_and_the_recommendation():
@@ -267,13 +267,13 @@ def test_found_via_tip_says_in_words_how_each_source_found_it():
                                             {"via": "cites", "arxiv_id": "1", "title": "Seed Paper A"}]))
     assert pp.found_via_tip() == (
         'Its title or abstract contains your keywords "sparse attention" and "state space" (arXiv keyword search). '
-        "Semantic Scholar recommends it as similar to papers in My Collection. "
-        'It cites "Seed Paper A" from My Collection.')
+        "Semantic Scholar recommends it as similar to papers in Collection. "
+        'It cites "Seed Paper A" from Collection.')
     assert ProjectPaper(found_via='[{"via": "keyword"}]').found_via_tip() == "The arXiv keyword search found it."
 
 
 def test_the_citations_source_rotates_through_a_large_collection(app, proj, scholar, monkeypatch):
-    """Each crawl checks the CITATION_MAX_SEEDS My Collection papers checked longest ago."""
+    """Each crawl checks the CITATION_MAX_SEEDS Collection papers checked longest ago."""
     from tests.test_crawl import MockPatches
 
     pages, seen = scholar

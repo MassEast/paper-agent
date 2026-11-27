@@ -6,7 +6,7 @@ that person's own crawl email. The people are the project's notification address
 and colors are given automatically.
 
 What is shared and what is per person:
-- My Collection and Trash are shared. Who last moved a paper between sections, and when, is kept on the
+- Collection and Trash are shared. Who last moved a paper between sections, and when, is kept on the
   ProjectPaper (moved_by_id, moved_at).
 - New Papers is per person: a paper is in your New Papers while it is in the shared New Papers, or when
   someone else moved it (collected, trashed, restored) since you last acted on it (PaperMemberState.seen_at).

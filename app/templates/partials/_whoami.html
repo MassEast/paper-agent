@@ -9,7 +9,7 @@
             {% if me %}<button type="button" aria-label="Close" onclick="document.getElementById('whoami').hidden = true" style="color: var(--ink-3); font-size: 1.2rem;">&times;</button>{% endif %}
         </div>
         <p style="font-size: 0.8rem; color: var(--ink-3); margin-bottom: 14px;">In {{ project.name }}, everyone has their own New Papers, tags, votes and paper chat;
-            My Collection and Trash are shared. This browser remembers your choice.</p>
+            Collection and Trash are shared. This browser remembers your choice.</p>
         <div style="display: flex; flex-direction: column; gap: 8px;">
             {% for m in people %}
             <form method="POST" action="/projects/{{ project.slug }}/whoami">
