@@ -185,6 +185,12 @@ def test_no_single_key_shortcuts_on_the_project_page():
     assert "const ACT" not in page and "const NEXT" not in page and "<kbd>" not in page
 
 
+def test_project_name_in_the_nav_links_to_the_project(c, card):
+    """So Cmd+click on it opens the project in a new tab."""
+    html = _page(c, card)
+    assert f'<a href="/projects/{SLUG}" class="nav-project-link"' in html
+
+
 def test_collection_tags_move_into_the_action_bar(c, card):
     card["add"]("2611.10011", tag="related")
     html = _card(_page(c, card), "2611.10011")

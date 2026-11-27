@@ -2,7 +2,7 @@
 
 {% block nav_project %}
 <span style="color: var(--ink-4); flex-shrink: 0;">/</span>
-<span style="font-size: 0.9rem; font-weight: 600; color: var(--ink-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ project.name }}</span>
+<a href="/projects/{{ project.slug }}" class="nav-project-link" style="font-size: 0.9rem; font-weight: 600; color: var(--ink-1); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ project.name }}</a>
 <a href="/projects"
     style="color: var(--ink-3); text-decoration: none; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;"
     onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--ink-3)'">
