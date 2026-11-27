@@ -689,22 +689,35 @@ def set_code_url(pp_id):
 @papers_bp.route("/project/<slug>/export.csv")
 @login_required
 def export_csv(slug):
+    """Every paper of the project, Trash included, with its shared status (new / collected / trashed), tags and
+    notes, so what was decided and why can be looked at later."""
     project = Project.query.filter_by(slug=slug).first_or_404()
-    s = paper_lists.sections(project, paper_lists.list_state({}))
-    new_papers, curated_papers = s["new"], s["col"]
+    status = {"new": "new", "col": "collected", "trash": "trashed"}
+    order = {"col": 0, "new": 1, "trash": 2}
+    pps = sorted(ProjectPaper.query.filter_by(project_id=project.id).all(),
+                 key=lambda pp: (order[members.shared_section(pp)], pp.added_at or datetime.min))
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["title", "authors", "url", "code", "tag", "abstract"])
+    writer.writerow(["title", "authors", "url", "code", "status", "tags", "notes", "trashed_reason", "abstract"])
 
-    for pp in new_papers + curated_papers:
+    for pp in pps:
         p = pp.paper
         try:
             authors = "; ".join(json.loads(p.authors)) if p.authors else ""
         except (json.JSONDecodeError, TypeError):
             authors = p.authors or ""
+        if project.per_person:  # tags are per person: "Justus: important, to_read; Felix: to_discuss"
+            tags = "; ".join(f"{st.member.name}: {', '.join(json.loads(st.tags))}"
+                             for st in sorted(pp.member_states, key=lambda st: st.member_id)
+                             if st.tags and json.loads(st.tags))
+        else:
+            tags = ", ".join(pp.tags_list)
+        notes = "\n\n".join(
+            (f"{m.name}{f' ({day})' if day else ''}: " if m else "") + text for m, day, text in members.note_parts(pp))
         url = p.landing_url  # same link as the card title
-        writer.writerow([p.title or "", authors, url, p.code_url or "", pp.manual_tag or "untagged", p.abstract or ""])
+        writer.writerow([p.title or "", authors, url, p.code_url or "", status[members.shared_section(pp)], tags,
+                         notes, pp.trashed_reason or "", p.abstract or ""])
 
     csv_bytes = buf.getvalue().encode("utf-8")
     return Response(

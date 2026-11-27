@@ -5,6 +5,8 @@ else collected or trashed stays in your New Papers until you've acted on it (kep
 text whose runs remember their author. Each person gets their own email whose links say who they are."""
 
 import json
+import csv
+import io
 import re
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -435,3 +437,16 @@ def test_moving_to_collection_sets_no_tag(client, team, app):
         assert pp.manual_tag == "related" and pp.collected_at is not None
         assert members.tags_for(pp, db.session.get(ProjectMember, team["people"]["Justus"])) == []
         assert pp.tags_list == []
+
+
+def test_csv_export_names_who_tagged_and_who_wrote_what(client, team):
+    pid = team["id"]
+    ju, fe = team["people"]["Justus"], team["people"]["Felix"]
+    _post(_as(client, team, "Justus"), "/paper/2611.00000/tag", project_id=pid, tag="important")
+    _post(_as(client, team, "Felix"), "/paper/2611.00000/tag", project_id=pid, tag="to_discuss")
+    runs = [[ju, "Strong baseline. "], [fe, "Agreed."]]
+    assert client.post("/paper/2611.00000/notes-runs", data={"project_id": pid, "runs": json.dumps(runs)}).status_code == 204
+    rows = {r["title"]: r for r in csv.DictReader(io.StringIO(client.get(f"/project/{SLUG}/export.csv").get_data(as_text=True)))}
+    assert rows["Paper 0"]["status"] == "collected"
+    assert rows["Paper 0"]["tags"] == "Justus: important; Felix: to_discuss"
+    assert rows["Paper 0"]["notes"] == "Justus: Strong baseline.\n\nFelix: Agreed."

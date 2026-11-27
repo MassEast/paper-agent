@@ -179,7 +179,7 @@
                     hx-get="/projects/{{ project.slug }}/papers" hx-target="#paper-list"
                     hx-trigger="keyup changed delay:300ms" class="focus-ring">
                 <a href="/project/{{ project.slug }}/export.csv" download class="focus-ring inbox-csv"
-                    data-tip="New Papers and Collection (not Trash) as CSV: title, authors, link, code, tag, abstract">
+                    data-tip="All papers, Trash included, as CSV: title, authors, link, code, status (new / collected / trashed), tags, notes, why the app trashed it, abstract">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-download"></use></svg>
                     CSV
                 </a>

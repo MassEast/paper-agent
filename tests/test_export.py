@@ -49,12 +49,33 @@ def test_export_links_each_paper_like_its_card(client, export_project):
         "Old Style": "https://arxiv.org/abs/solv-int/9901001",
         "New Style": "https://arxiv.org/abs/2601.00042",
         "Web Paper": "https://aclanthology.org/x.pdf",
+        "Trashed": "https://arxiv.org/abs/2601.00043",
     }
     assert {t: r["code"] for t, r in rows.items()} == {
         "Old Style": "https://github.com/example/old-style",
         "New Style": "",
         "Web Paper": "",
+        "Trashed": "",
     }
+
+
+def test_export_has_every_section_with_status_tags_and_notes(client, app, export_project):
+    """Trashed papers and their notes are kept for later: the export lists them too, with why they were trashed."""
+    with app.app_context():
+        for pp in ProjectPaper.query.filter_by(project_id=export_project["project"]).all():
+            if pp.paper.title == "Old Style":
+                pp.manual_tag, pp.paper_tags = "related", '["important", "to_read"]'
+            if pp.paper.title == "Trashed":
+                pp.notes, pp.trashed_reason = "Off topic: about vision, not language.", "not relevant (full text)"
+        db.session.commit()
+    with client.session_transaction() as sess:
+        sess["logged_in"] = True
+    rows = list(csv.DictReader(io.StringIO(client.get("/project/ex-proj/export.csv").data.decode())))
+    by = {r["title"]: r for r in rows}
+    assert [r["status"] for r in rows] == ["collected", "new", "new", "trashed"]  # Collection first, Trash last
+    assert by["Old Style"]["tags"] == "important, to_read"
+    assert by["Trashed"]["notes"] == "Off topic: about vision, not language."
+    assert by["Trashed"]["trashed_reason"] == "not relevant (full text)"
 
 
 def test_html_responses_are_compressed(client, export_project):
