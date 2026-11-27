@@ -419,7 +419,7 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
             page_authors = info.get("authors") or []
             arxiv_links = info.get("page_arxiv_links") or []
             # full_text: stripped body content — richer than meta abstract, better for LLM
-            page_full_text = info.get("full_text") or page_abstract
+            page_full_text = page_text_for_summary(info)
 
             # Step 2: check if any in-page arXiv link corresponds to the same paper
             _set_step(paper_id, "web", "Looking for the paper on arXiv")
@@ -554,6 +554,9 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
             # Step 4: generate LLM summary from page content (best-effort)
             _set_step(paper_id, "web", "Writing the AI summary and main contributions")
             # Use full_text (stripped body) so blogs/articles get a real summary, not meta noise.
+            if not page_full_text:
+                _log.warning("[web-add] no text on %s (%d chars of page text): no summary", url,
+                             len(info.get("full_text") or ""))
             if page_full_text:
                 try:
                     summary_data, _, _, _ = generate_summary_with_full_content(
@@ -584,6 +587,9 @@ def start_web_paper_add_async(project_id: int, url: str, paper_id: int, app) -> 
                     _log.info("[web-add] summary generated for web paper %s", url)
                 except Exception as e:
                     _log.warning("[web-add] summary failed for %s: %s", url, e)
+                if page_full_text != page_abstract:  # code, project page, corresponding authors from the page
+                    resources.apply(paper, resources.extract_for(paper, page_full_text)[0])
+                    db.session.commit()
 
             _add_relevance_reason(project_id, paper, "web", page_full_text or "")
 
@@ -620,6 +626,19 @@ def _titles_match(t1: str, t2: str) -> bool:
     if not w1 or not w2:
         return False
     return len(w1 & w2) / max(len(w1), len(w2)) >= 0.6
+
+
+# A web page is read whole: LessWrong puts 1.2 MB of scripts before the post (2026-11-27, the old 100k cut left
+# only the title, and the summary was made up from it). Less page text than this is not enough for a summary.
+PAGE_HTML_CHARS = 5_000_000
+MIN_PAGE_TEXT_CHARS = 1500
+
+
+def page_text_for_summary(info: dict) -> str:
+    """What a web paper's summary is written from: the page text if there is enough of it, else the abstract
+    (may be empty: then no summary is written at all, rather than one made up from the title)."""
+    text = info.get("full_text") or ""
+    return text if len(text) >= MIN_PAGE_TEXT_CHARS else (info.get("abstract") or "")
 
 
 def extract_paper_info_from_url(url: str) -> dict:
@@ -714,7 +733,7 @@ def extract_paper_info_from_url(url: str) -> dict:
         with _http_client(public_only=True, timeout=15.0, follow_redirects=True) as http:
             resp = http.get(fetch_url)
         # A 403/404 body is a block or error page (ScienceDirect: Cloudflare), not the paper.
-        content = "" if resp.status_code >= 400 else resp.text[:100000]
+        content = "" if resp.status_code >= 400 else resp.text[:PAGE_HTML_CHARS]
 
         # <title> fallback
         title_match = re.search(r"<title[^>]*>([^<]+)</title>", content, re.IGNORECASE)
@@ -780,11 +799,17 @@ def extract_paper_info_from_url(url: str) -> dict:
         # Full-text extraction: strip scripts/styles/nav, then strip tags.
         # Used by the LLM for blog posts and pages without a citation_abstract.
         _body = re.sub(
-            r'<(script|style|nav|header|footer|svg)[^>]*>.*?</\1>', '', content,
+            r'<(head|script|style|nav|header|footer|svg)\b[^>]*>.*?</\1>', '', content,
             flags=re.IGNORECASE | re.DOTALL,
         )
+        # Keep where links point ("code (https://github.com/...)"), so resources.extract finds the code repo
+        _body = re.sub(
+            r'<a\b[^>]*?href\s*=\s*["\'](https?://[^"\']+)["\'][^>]*>(.*?)</a>',
+            lambda m: f"{m.group(2)} ({m.group(1)})" if m.group(1) not in m.group(2) else m.group(2),
+            _body, flags=re.IGNORECASE | re.DOTALL,
+        )
         _body = re.sub(r'<[^>]+>', ' ', _body)
-        _body = re.sub(r'\s+', ' ', _body).strip()
+        _body = html.unescape(re.sub(r'\s+', ' ', _body).strip())
         if _body:
             result["full_text"] = _body[:200000]
 
@@ -1075,6 +1100,9 @@ def _fetch_figure_html(figure_url: str, caption: Optional[str] = None) -> str:
         return ""
 
 
+_IMPORTANT_HEADERS = {"X-Priority": "1", "Importance": "high"}
+
+
 def send_notification(
     subject: str,
     message: str,
@@ -1083,8 +1111,10 @@ def send_notification(
     project_emails: Optional[str] = None,
     project_settings_url: Optional[str] = None,
     content_html: Optional[str] = None,
+    important: bool = False,
 ):
     """Send a notification email via the configured backend (NOTIFIER_TYPE: "resend" or "email"/SMTP).
+    important: marked high priority (X-Priority / Importance headers), shown as such by most mail apps.
 
     Builds a branded HTML email (content_html, if given, replaces the default message-based
     body) with an optional embedded figure. Returns True on success, False on any failure
@@ -1143,7 +1173,8 @@ def send_notification(
             resp = httpx.post(
                 "https://api.resend.com/emails",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"from": from_addr, "to": notify_emails, "subject": subject, "html": html_body},
+                json={"from": from_addr, "to": notify_emails, "subject": subject, "html": html_body,
+                      **({"headers": _IMPORTANT_HEADERS} if important else {})},
                 timeout=30,
             )
             if resp.status_code in (200, 201):
@@ -1174,6 +1205,8 @@ def send_notification(
             msg["From"] = smtp_user
             msg["To"] = ", ".join(notify_emails)
             msg["Subject"] = subject
+            for k, v in (_IMPORTANT_HEADERS.items() if important else ()):
+                msg[k] = v
             msg.attach(MIMEText(html_body, "html", "utf-8"))
             import socket as _socket
             smtp_ip = _socket.getaddrinfo(smtp_host, smtp_port, _socket.AF_INET)[0][4][0]
@@ -2743,9 +2776,10 @@ def upgrade_biorxiv_paper(paper) -> bool:
     return True
 
 
-def write_summary(paper, content: str) -> None:
+def write_summary(paper, content: str, web_page: bool = False) -> None:
     """Write (or rewrite) a paper's shared summary, badges and main contributions from content (the full text,
-    or the abstract if there is none). Used by Regenerate and the bioRxiv upgrade. Caller commits."""
+    or the abstract if there is none; web_page: the text of the page a web paper was added from). Used by
+    Regenerate and the bioRxiv upgrade. Caller commits."""
     abstract = paper.abstract or ""
     summary_data, model, elapsed, tokens = generate_summary_with_full_content(
         title=paper.title, abstract=abstract, paper_content=content)
@@ -2753,7 +2787,8 @@ def write_summary(paper, content: str) -> None:
         title=paper.title, paper_content=content, abstract=abstract)
     summary_data = summary_data if isinstance(summary_data, dict) else {}
     fields = dict(
-        content_source=summary_source(content, abstract),
+        content_source="web_page" if web_page and summary_source(content, abstract) == "full_text"
+        else summary_source(content, abstract),
         summary_text=summary_data.get("summary", ""),
         model_used=model,
         introduces_dataset=summary_data.get("introduces_dataset", False),

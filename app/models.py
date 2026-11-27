@@ -28,6 +28,10 @@ class Project(db.Model):
     per_person = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     trashed_at = db.Column(db.DateTime, nullable=True)
+    # Last request anyone made in this project (app/activity.py), and how many "still need the nightly
+    # crawl?" emails went out since (0, 1 after 30 days, 2 after 60; the crawl turns off after 90)
+    last_activity_at = db.Column(db.DateTime, default=datetime.utcnow)
+    inactivity_reminders = db.Column(db.Integer, default=0)
 
     papers = db.relationship("ProjectPaper", back_populates="project", cascade="all, delete-orphan")
     crawl_logs = db.relationship("CrawlLog", back_populates="project", cascade="all, delete-orphan",

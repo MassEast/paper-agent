@@ -1551,6 +1551,10 @@
                     {% endif %}
                     <span style="color: var(--ink-5);">&nbsp;(spread across 01–04 UTC)</span>
                 </p>
+                <p style="font-size: 0.7rem; color: var(--ink-5); margin: 4px 0 0 0;">
+                    If nobody opens the project for 30 days, the email addresses above are asked whether it is still
+                    needed (again after 60 days); after 90 days it turns off by itself.
+                </p>
                 <label data-tip="Also search bioRxiv in the nightly crawl, and have it ticked in Find Papers"
                     style="display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.75rem; color: var(--ink-3); cursor: pointer; user-select: none;">
                     <input type="checkbox" {% if project.use_biorxiv %}checked{% endif %}

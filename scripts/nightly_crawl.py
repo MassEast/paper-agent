@@ -28,6 +28,7 @@ from app.models import CrawlLog, Project, Paper, ProjectPaper
 from app.utils import nightly_marker
 from app.crawl import run_crawl, refresh_from_full_text, send_carry_notification, _search_warning, backfill_missing_paper_metadata, get_citation_counts, _arxiv_doi_ref, send_notification
 from app.utils import base_arxiv_id
+from app import activity
 
 _log = logging.getLogger(__name__)
 
@@ -135,6 +136,51 @@ def _notify_search_failed(project, tries):
     )
 
 
+def _inactivity_email(project, idle: int, off_on: datetime | None, turned_off: bool) -> bool:
+    project_url = f"{os.environ.get('SERVER_URL', 'http://localhost:5001')}/projects/{project.slug}"
+    link = f'<a href="{project_url}" style="color:#7c3aed;">{project_url}</a>'
+    p = '<p style="margin:0 0 10px 0;">'
+    if turned_off:
+        subject = f"[{project.name}] Nightly crawl turned off"
+        body = (f'{p}Nobody has used the project <strong>{project.name}</strong> for {idle} days, so its nightly '
+                f'crawl is now turned off, as announced in the last two emails.</p>'
+                f'{p}To turn it back on: open the project, Settings, Nightly crawl.</p>'
+                f'<p style="margin:0;">{link}</p>')
+    else:
+        subject = f"IMPORTANT [{project.name}] Do you still need the nightly crawl?"
+        body = (f'{p}Nobody has used the project <strong>{project.name}</strong> for {idle} days (opening it, '
+                f'reading or sorting papers, notes, anything), but its nightly crawl still runs every night.</p>'
+                f'{p}<strong>If you still want it, just open the project once:</strong> {link}</p>'
+                f'{p}If nobody uses it, the nightly crawl turns off by itself on '
+                f'<strong>{off_on.strftime("%B")} {off_on.day}, {off_on.year}</strong>. You can turn it back '
+                f'on any time in the project\'s Settings. No longer needed? Turn it off there now.</p>')
+    return send_notification(subject=subject, message="", project_emails=project.notification_emails,
+                             content_html=body, important=not turned_off)
+
+
+def _check_inactivity(project, now: datetime | None = None) -> bool:
+    """Nobody used the project for 30 or 60 days: ask by email whether the nightly crawl is still needed; after
+    90 days (and both emails) turn it off. Returns False when the crawl was turned off (skip it tonight)."""
+    now = now or datetime.utcnow()
+    idle = activity.days_idle(project, now)
+    sent = project.inactivity_reminders or 0
+    off_on = (project.last_activity_at or now) + timedelta(days=activity.OFF_DAYS)
+    if idle >= activity.OFF_DAYS and sent >= len(activity.REMIND_DAYS):
+        project.crawl_hour = None
+        db.session.commit()
+        _log.warning("[inactive] %s: nobody used it for %d days, nightly crawl turned off", project.name, idle)
+        _inactivity_email(project, idle, None, turned_off=True)
+        return False
+    due = sum(idle >= d for d in activity.REMIND_DAYS)
+    if due > sent:
+        ok = _inactivity_email(project, idle, off_on, turned_off=False)
+        project.inactivity_reminders = due
+        db.session.commit()
+        _log.warning("[inactive] %s: nobody used it for %d days, reminder %d/%d %s", project.name, idle, due,
+                     len(activity.REMIND_DAYS), "sent" if ok else "NOT sent (no address or send failed)")
+    return True
+
+
 def _log_arxiv_outcome(project, answered: bool, tries: int):
     """One machine-readable line per project and night: did arXiv's search answer, after how many tries.
     scripts/arxiv_misses.py counts these to decide whether the search API is still good enough."""
@@ -204,6 +250,8 @@ def _nightly_crawl():
         for idx, project in enumerate(projects, 1):
             keywords_override = project.saved_keywords_list if project.saved_keywords else None
             _log.info("[nightly] ── project %d/%d: %s ──────────────────────", idx, len(projects), project.name)
+            if not _check_inactivity(project):
+                continue
             if keywords_override:
                 _log.info("[nightly] using saved keywords (%d): %s", len(keywords_override), keywords_override)
             else:

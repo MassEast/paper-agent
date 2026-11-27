@@ -183,6 +183,10 @@ def create_app():
             # Who saved a per-person note last, and when (the legend under the note, 2026-11-16)
             "ALTER TABLE project_papers ADD COLUMN notes_edited_at DATETIME",
             "ALTER TABLE project_papers ADD COLUMN notes_edited_by INTEGER",
+            # Nightly crawl reminders when nobody uses a project (app/activity.py); counting starts at this deploy
+            "ALTER TABLE projects ADD COLUMN last_activity_at DATETIME",
+            "ALTER TABLE projects ADD COLUMN inactivity_reminders INTEGER DEFAULT 0",
+            "UPDATE projects SET last_activity_at = CURRENT_TIMESTAMP WHERE last_activity_at IS NULL",
         ]
         for _sql in _migrations:
             try:
@@ -224,6 +228,9 @@ def create_app():
     app.register_blueprint(auth_bp)
     app.register_blueprint(projects_bp)
     app.register_blueprint(papers_bp)
+
+    from app import activity
+    app.after_request(activity.record)
 
     app.jinja_env.globals["date"] = date
     app.jinja_env.globals["timedelta"] = timedelta

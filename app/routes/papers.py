@@ -27,6 +27,8 @@ from app.crawl import (
     generate_relevance_reason,
     get_paper_content,
     write_summary,
+    extract_paper_info_from_url,
+    page_text_for_summary,
 )
 from app.llm import LLMUnavailableError
 
@@ -504,11 +506,20 @@ def regenerate_paper(arxiv_id):
             except Exception as e:
                 _log.warning("[regenerate] arXiv data fetch failed for %s: %s", arxiv_id, e)
 
-        # Summary + main contributions, from the full text like a crawl (abstract if there is none)
-        full_text = get_paper_content(arxiv_id) if paper.is_arxiv else None
+        # Summary + main contributions, from the full text like a crawl (abstract if there is none); a paper added
+        # from a web page (not arXiv, no PDF of its own) reads that page again
+        web_page = not paper.is_arxiv and bool(paper.page_url) and paper.source == "web"
+        if paper.is_arxiv:
+            full_text = get_paper_content(arxiv_id)
+        elif web_page:
+            text = page_text_for_summary(extract_paper_info_from_url(paper.page_url))
+            full_text = text if text and text != (paper.abstract or "") else None
+        else:
+            full_text = None
         content = full_text or paper.abstract or ""
         try:
-            write_summary(paper, content)
+            if content:  # nothing to read: keep what is there rather than a summary made up from the title
+                write_summary(paper, content, web_page=web_page)
             if full_text:  # code, project page, corresponding authors, venue
                 resources.apply(paper, resources.extract_for(paper, full_text)[0])
         except LLMUnavailableError as e:
