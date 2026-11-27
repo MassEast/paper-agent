@@ -42,3 +42,33 @@ def test_page_without_text_gives_no_summary_source(monkeypatch):
     assert info["full_text"]  # a few words
     assert crawl.page_text_for_summary(info) == ""  # too little: no summary at all
     assert crawl.page_text_for_summary({**info, "abstract": "An abstract."}) == "An abstract."
+
+
+def test_regenerate_on_a_web_paper_reads_its_page_again(client, project):
+    from unittest.mock import patch
+    from app import db
+    from app.models import Paper, ProjectPaper
+    from app.routes import papers as routes
+    paper = Paper(arxiv_id="web:test123", title="Some Post", source="web", page_url=URL, pdf_url=URL, abstract="")
+    db.session.add(paper)
+    db.session.commit()
+    db.session.add(ProjectPaper(project_id=project.id, paper_id=paper.id))
+    db.session.commit()
+    with client.session_transaction() as sess:
+        sess["logged_in"] = True
+    text = "The post. " * 300
+    try:
+        with patch.object(routes, "extract_paper_info_from_url", return_value={"full_text": text}) as fetch, \
+             patch.object(routes, "write_summary") as write, \
+             patch.object(routes.resources, "extract_for", return_value=({}, 0)), \
+             patch.object(routes.resources, "apply"), \
+             patch.object(routes, "generate_relevance_reason", return_value="why"):
+            r = client.post("/paper/web:test123/regenerate", data={"project_id": project.id},
+                            headers={"HX-Request": "true"})
+        assert r.status_code == 200 and "Regenerate" in r.get_data(as_text=True)  # button on web cards too
+        fetch.assert_called_once_with(URL)
+        assert write.call_args.args[1] == text and write.call_args.kwargs["web_page"] is True
+    finally:
+        ProjectPaper.query.filter_by(paper_id=paper.id).delete()
+        db.session.delete(paper)
+        db.session.commit()

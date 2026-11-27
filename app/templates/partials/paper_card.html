@@ -425,7 +425,7 @@
             Notify
         </button>
                 {% endif %}
-        {% if pp.paper.is_arxiv %}
+        {# every paper: arXiv ones read the full text, web ones their page again, others the abstract #}
         <button
             hx-post="/paper/{{ pp.paper.arxiv_id }}/regenerate"
             hx-request='{"timeout": 180000}'
@@ -434,12 +434,11 @@
             hx-swap="outerHTML"
             hx-disabled-elt="this"
             class="focus-ring card-menu-item"
-            data-tip="Re-fetches the figure from arXiv and citation count from Semantic Scholar, then regenerates the AI summary and main contributions from the full paper text, and the &quot;Why it's relevant for this project&quot; line">
+            data-tip="{% if pp.paper.is_arxiv %}Re-fetches the figure from arXiv and citation count from Semantic Scholar, then regenerates the AI summary and main contributions from the full paper text{% elif pp.paper.source == 'web' and pp.paper.page_url %}Reads the web page again, then regenerates the AI summary, main contributions and links from it{% else %}Regenerates the AI summary and main contributions{% endif %}, and the &quot;Why it's relevant for this project&quot; line">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             <span class="htmx-request-hide">Regenerate</span>
             <span class="htmx-request-show" style="display:none;">Regenerating…</span>
         </button>
-        {% endif %}
         {% if pp.paper.summary and pp.paper.summary.elapsed_ms is not none %}
         <span class="card-menu-note"
             data-tip="Model: the model that wrote the AI summary and main contributions | Time: how long the model took to write them | Tokens: what the model read and wrote for them (the paper text in, the summary out), for the latest run; on older cards this may also count the relevance check or earlier runs. All of the project's LLM usage is under the crawl calendar">
