@@ -100,7 +100,7 @@ def test_a_paper_trashed_by_one_can_be_put_back_by_the_other(client, team):
     _post(c, "/paper/2611.00001/restore", project_id=pid)  # Put back into New Papers
     titles, html = _new_titles(_as(client, team, "Justus"))
     assert "Paper 1" in titles and "put this back into New Papers" in html
-    assert 'data-moved="Felix put this back"' in html
+    assert 'data-moved="Felix put this back into New Papers"' in html
     _post(c, "/paper/2611.00001/seen", project_id=pid)  # Justus: OK
     titles, html = _new_titles(c)
     assert "Paper 1" in titles and "put this back" not in html  # still a New Paper, the note is gone
