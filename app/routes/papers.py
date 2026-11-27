@@ -695,7 +695,7 @@ def export_csv(slug):
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["title", "authors", "url", "tag", "abstract"])
+    writer.writerow(["title", "authors", "url", "code", "tag", "abstract"])
 
     for pp in new_papers + curated_papers:
         p = pp.paper
@@ -704,7 +704,7 @@ def export_csv(slug):
         except (json.JSONDecodeError, TypeError):
             authors = p.authors or ""
         url = p.landing_url  # same link as the card title
-        writer.writerow([p.title or "", authors, url, pp.manual_tag or "untagged", p.abstract or ""])
+        writer.writerow([p.title or "", authors, url, p.code_url or "", pp.manual_tag or "untagged", p.abstract or ""])
 
     csv_bytes = buf.getvalue().encode("utf-8")
     return Response(
