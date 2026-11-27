@@ -377,10 +377,10 @@ def test_new_papers_card_has_its_actions_in_the_bar_and_the_rest_in_the_menu(app
         db.session.commit()
     html = logged_in.get("/projects/pa-source/papers").get_data(as_text=True)
     new_card = html[html.index('id="paper-card-2601-00001'):html.index('id="paper-card-2601-00002')]
-    # The two triage actions (with their keys) first, then the ⋯ menu with Copy / Move and Notify
+    # The two triage actions first, then the ⋯ menu with Copy / Move and Notify
     order = [new_card.index(s) for s in ("Move to Collection", '/trash"', 'class="card-menu"', "Copy / Move", "Notify")]
     assert order == sorted(order)
-    assert "<kbd>C</kbd>" in new_card and "<kbd>X</kbd>" in new_card
+    assert "<kbd>" not in new_card
     assert "Why it's relevant for this project" in new_card and "It uses sparse attention." in new_card
     # Not in the title row any more: it comes after the summary and the arXiv/PDF links
     assert new_card.index(">PDF</a>") < new_card.index("Move to Collection")

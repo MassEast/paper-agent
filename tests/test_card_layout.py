@@ -1,6 +1,6 @@
 """The paper card's layout since 2026-11-12 (mockup G2): header with title, authors (corresponding ones as mailto
 links), badges, link buttons (a button only for links we found) and the vote; reading column; fact sidebar with
-the paper's data, Figure 1 and connections; "Ask about this paper" in the action bar (key A)."""
+the paper's data, Figure 1 and connections; "Ask about this paper" in the action bar."""
 import json
 import re
 from datetime import date, datetime
@@ -175,14 +175,14 @@ def test_ask_button_is_in_the_action_bar_and_the_chat_slot_starts_empty(c, card)
     _, pp = card["add"]("2611.10010")
     html = _card(_page(c, card), "2611.10010")
     bar = html[html.index('<div class="card-actions">'):html.index('<div id="transfer-')]
-    assert 'data-act="ask"' in bar and f'hx-target="#chat-{pp.id}"' in bar and "Ask about this paper <kbd>A</kbd>" in bar
+    assert 'data-act="ask"' in bar and f'hx-target="#chat-{pp.id}"' in bar and "Ask about this paper" in bar and "<kbd>" not in bar
     assert re.search(rf'<div id="chat-{pp.id}">\s*</div>', html)
 
 
-def test_key_a_opens_the_chat_and_is_in_the_key_hint():
+def test_no_single_key_shortcuts_on_the_project_page():
+    """Removed 2026-11-27: single keys (J/K, C, X, R, A, /) only ever fired by accident."""
     page = Path(__file__).resolve().parent.parent.joinpath("app/templates/project_detail.html").read_text()
-    assert "const ACT = { c: 'keep', x: 'trash', r: 'restore', a: 'ask' };" in page
-    assert "<kbd>A</kbd> ask" in page
+    assert "const ACT" not in page and "const NEXT" not in page and "<kbd>" not in page
 
 
 def test_collection_tags_move_into_the_action_bar(c, card):

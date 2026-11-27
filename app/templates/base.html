@@ -141,7 +141,7 @@
             background-color: var(--paper-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); outline: none; }
         .inbox-csv { display: inline-flex; align-items: center; gap: 5px; height: 36px; padding: 0 10px; font-size: 0.75rem; font-weight: 600; color: var(--ink-3);
             border: 1px solid var(--border-default); border-radius: var(--radius-md); text-decoration: none; }
-        #inbox-list, .inbox-keys { display: none; }
+        #inbox-list { display: none; }
         .inbox-item { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; padding: 10px 12px 10px 11px; background: none;
             border: none; border-left: 3px solid transparent; border-bottom: 1px solid var(--border-subtle); cursor: pointer; }
         .inbox-item:hover { background-color: color-mix(in oklch, var(--paper-3) 60%, transparent); }
@@ -157,16 +157,11 @@
         .inbox-more, .inbox-empty { padding: 14px 12px; font-size: 0.75rem; color: var(--ink-4); text-align: center; }
         .inbox-more { display: block; width: 100%; border: none; background: none; cursor: pointer; }
         .inbox-more:hover { color: var(--accent); }
-        .inbox-keys { padding: 8px 4px 0; font-size: 0.7rem; color: var(--ink-4); line-height: 2; }
-        kbd { font-family: ui-monospace, monospace; font-size: 0.66rem; padding: 0 5px; margin: 0 2px; border: 1px solid var(--border-strong);
-            border-radius: 4px; color: var(--ink-3); background: transparent; }
-        .inbox-keys kbd:first-child { margin-left: 0; }
         @media (min-width: 1024px) {
             .inbox { grid-template-columns: 360px minmax(0, 1fr); }
             .inbox-side { position: sticky; top: 64px; height: calc(100vh - 80px); }
             body:has(#offline-banner:not([hidden])) .inbox-side { top: 100px; height: calc(100vh - 116px); }
             #inbox-list { display: block; flex: 1; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background-color: var(--paper-2); }
-            .inbox-keys { display: block; }
         }
         #inbox-tools .section-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
         #inbox-tools .section-toolbar[hidden] { display: none; }
@@ -189,7 +184,6 @@
         .card-act-keep:hover { border-color: var(--success); }
         .card-act-trash { color: var(--error); background-color: var(--error-bg); border: 1px solid color-mix(in oklch, var(--error) 50%, transparent); }
         .card-act-trash:hover { border-color: var(--error); }
-        .card-act kbd { color: inherit; border-color: currentColor; opacity: 0.6; }
         .card-menu { position: relative; }
         .card-menu > summary { list-style: none; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;
             border-radius: var(--radius-md); border: 1px solid var(--border-default); color: var(--ink-2); cursor: pointer; font-size: 1.1rem; }

@@ -186,7 +186,6 @@
             </div>
             <div id="inbox-tools"></div>
             <div id="inbox-list" role="listbox" aria-label="Papers"></div>
-            <div class="inbox-keys"><kbd>J</kbd><kbd>K</kbd> next / previous <kbd>C</kbd> to Collection <kbd>X</kbd> trash <kbd>A</kbd> ask <kbd>/</kbd> search</div>
         </div>
         <div class="inbox-main">
             <div id="paper-list">
@@ -1820,23 +1819,6 @@
             const list = document.getElementById(carousels[tab()].list);
             const more = list && list.querySelector(':scope > .list-more');
             if (more) htmx.trigger(more, 'loadmore');
-        });
-        const NEXT = { ArrowRight: 1, ArrowDown: 1, j: 1, ArrowLeft: -1, ArrowUp: -1, k: -1 };
-        const ACT = { c: 'keep', x: 'trash', r: 'restore', a: 'ask' };
-        document.addEventListener('keydown', function (e) {
-            if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-            if (document.body.classList.contains('drawer-open')) return;
-            const t = e.target;
-            if (t.closest('input, textarea, select, [contenteditable], .chat-panel')) return;
-            if (e.key === '/') {
-                e.preventDefault();
-                document.querySelector('.inbox-search input').focus();
-                return;
-            }
-            const name = tab();
-            if (!document.getElementById(carousels[name].list)) return;
-            if (NEXT[e.key]) { e.preventDefault(); step(name, NEXT[e.key]); }
-            else if (ACT[e.key]) { e.preventDefault(); inboxAct(ACT[e.key]); }
         });
         let sx = null, sy = null, sname = null;
         document.addEventListener('touchstart', function (e) {

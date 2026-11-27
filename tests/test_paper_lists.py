@@ -195,9 +195,9 @@ def test_new_papers_carousel_steps_loads_more_and_collect_shows_next_on_a_phone(
         pg.locator('#new-section [data-carousel="next"]').click()
     pg.wait_for_function(f"() => document.querySelectorAll('#new-papers-list > .paper-card').length > {PAGE_SIZE}")
     assert pos() == f"{PAGE_SIZE} / {N_NEW}" and shown().count() == 1
-    pg.keyboard.press("ArrowRight")
-    pg.keyboard.press("ArrowRight")
-    pg.keyboard.press("ArrowLeft")
+    pg.locator('#new-section [data-carousel="next"]').click()
+    pg.locator('#new-section [data-carousel="next"]').click()
+    pg.locator('#new-section [data-carousel="prev"]').click()
     assert pos() == f"{PAGE_SIZE + 1} / {N_NEW}"
     assert shown().first.get_attribute("id").startswith(f"paper-card-2602-{PAGE_SIZE:05d}-")
 
@@ -212,7 +212,7 @@ def test_new_papers_carousel_steps_loads_more_and_collect_shows_next_on_a_phone(
     pg.locator(".paper-tab[data-tab='col']").click()
     assert pg.locator("#curated-list > .paper-card:visible").count() == 1
     assert pg.locator("#col-section .new-carousel-pos").inner_text() == "1 / 4"
-    pg.keyboard.press("ArrowRight")
+    pg.locator('#col-section [data-carousel="next"]').click()
     assert pg.locator("#col-section .new-carousel-pos").inner_text() == "2 / 4"
     pg.locator(".paper-tab[data-tab='new']").click()
 
@@ -231,9 +231,9 @@ def test_new_papers_carousel_steps_loads_more_and_collect_shows_next_on_a_phone(
 
 
 @pytest.mark.slow
-def test_inbox_title_list_and_keys_on_a_laptop(live_server, browser_session, big_project):
-    """The title list on the left shows the loaded cards; a click or J / K picks the card, C collects it,
-    X trashes it, and in Trash R restores it."""
+def test_inbox_title_list_on_a_laptop(live_server, browser_session, big_project):
+    """The title list on the left shows the loaded cards; a click picks the card; the card's buttons collect,
+    trash and restore it. Single keys do nothing (removed 2026-11-27: they only ever fired by accident)."""
     browser, state = browser_session
     context = browser.new_context(storage_state=state, viewport={"width": 1440, "height": 900})
     pg = context.new_page()
@@ -251,24 +251,24 @@ def test_inbox_title_list_and_keys_on_a_laptop(live_server, browser_session, big
 
     items.nth(3).click()
     assert shown().startswith("paper-card-2602-00003-") and "is-current" in items.nth(3).get_attribute("class")
-    pg.keyboard.press("j")
-    assert shown().startswith("paper-card-2602-00004-")
-    pg.keyboard.press("k")
-    pg.keyboard.press("k")
-    assert shown().startswith("paper-card-2602-00002-")
+    for key in ("j", "k", "ArrowRight", "c", "x", "a"):
+        pg.keyboard.press(key)
+    assert shown().startswith("paper-card-2602-00003-") and pg.locator("#new-count").inner_text() == f"{N_NEW}"
+    assert not pg.locator(".chat-panel:visible").count()
+    card = lambda: pg.locator("#new-papers-list > .paper-card:visible").first
 
-    pg.keyboard.press("c")  # to Collection, which opens with it; in New Papers the next paper takes its place
+    card().get_by_role("button", name="Move to Collection").click()  # to Collection, which opens with it; in New Papers the next paper takes its place
     pg.wait_for_function("() => document.getElementById('paper-list').dataset.tab === 'col'")
     pg.locator(".paper-tab[data-tab='new']").click()
-    assert shown().startswith("paper-card-2602-00003-") and pg.locator("#new-count").inner_text() == f"{N_NEW - 1}"
-    pg.keyboard.press("x")  # trash
-    pg.wait_for_function("() => !document.querySelector('#new-papers-list [id^=\"paper-card-2602-00003-\"]')")
+    assert shown().startswith("paper-card-2602-00004-") and pg.locator("#new-count").inner_text() == f"{N_NEW - 1}"
+    card().get_by_role("button", name="Trash").click()
+    pg.wait_for_function("() => !document.querySelector('#new-papers-list [id^=\"paper-card-2602-00004-\"]')")
     assert pg.locator("#trash-count").inner_text() == "1"
 
     pg.locator(".paper-tab[data-tab='trash']").click()
     assert pg.locator("#inbox-list .inbox-item").count() == 1
     assert pg.locator("#inbox-list .inbox-why").first.inner_text().startswith("Trashed ")
-    pg.keyboard.press("r")  # restore
+    pg.locator("#trash-papers-list > .paper-card:visible").first.get_by_role("button", name="Restore").click()
     pg.wait_for_function("() => document.getElementById('trash-count').textContent.trim() === '0'")
 
     # Scrolling the title list to its end loads the next page of cards
@@ -276,12 +276,9 @@ def test_inbox_title_list_and_keys_on_a_laptop(live_server, browser_session, big
     pg.locator("#inbox-list").evaluate("el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); }")
     pg.wait_for_function(f"() => document.querySelectorAll('#inbox-list .inbox-item').length > {PAGE_SIZE - 1}")
 
-    # Find papers opens its side panel; keys don't act on cards while it is open
+    # Find papers opens its side panel; Escape closes it
     pg.get_by_role("button", name="Find papers").click()
     assert pg.locator("#drawer-find").is_visible() and pg.locator("#arxiv-search-btn").is_visible()
-    before = shown()
-    pg.keyboard.press("j")
-    assert shown() == before
     pg.keyboard.press("Escape")
     assert not pg.locator("#drawer-find").is_visible()
     # A side panel opens at the top, or at the top of the section a chip is about
@@ -331,7 +328,7 @@ def test_a_title_list_that_does_not_fill_its_box_loads_more_by_itself(live_serve
 @pytest.mark.slow
 def test_a_collected_paper_is_shown_in_collection_and_new_papers_goes_on_after_it(live_server, browser_session,
                                                                                      big_project):
-    """C (or the button) on a New Papers card: Collection opens with that paper shown (its tags can be set
+    """Move to Collection on a New Papers card: Collection opens with that paper shown (its tags can be set
     right away; none is set by itself); back in New Papers the paper that came after it is shown."""
     browser, state = browser_session
     context = browser.new_context(storage_state=state, viewport={"width": 1440, "height": 900})
@@ -341,7 +338,7 @@ def test_a_collected_paper_is_shown_in_collection_and_new_papers_goes_on_after_i
         visible = lambda lst: pg.locator(f"#{lst} > .paper-card:visible").first.get_attribute("id")
         pg.locator("#inbox-list .inbox-item").nth(2).click()
         assert visible("new-papers-list").startswith("paper-card-2602-00002-")
-        pg.keyboard.press("c")
+        pg.locator("#new-papers-list > .paper-card:visible").first.get_by_role("button", name="Move to Collection").click()
         pg.wait_for_function("() => document.getElementById('paper-list').dataset.tab === 'col'")
         assert visible("curated-list").startswith("paper-card-2602-00002-")
         card = pg.locator("#curated-list > .paper-card:visible").first

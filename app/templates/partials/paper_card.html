@@ -375,32 +375,32 @@
             hx-post="/paper/{{ pp.paper.arxiv_id }}/tag"
             hx-vals='{"project_id": {{ project.id }}, "tag": "related"}'
             hx-target="closest .paper-card" hx-swap="outerHTML"
-            data-tip="Moves the paper to Collection, where you can tag it (key C)">
+            data-tip="Moves the paper to Collection, where you can tag it">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-star"></use></svg>
-            Move to Collection <kbd>C</kbd>
+            Move to Collection
         </button>
         {% endif %}
         {% if show_restore %}
         <button class="focus-ring card-act card-act-keep" data-act="restore"
             hx-post="/paper/{{ pp.paper.arxiv_id }}/restore" hx-vals='{"project_id": {{ project.id }}}'
-            hx-target="closest .paper-card" hx-swap="outerHTML" data-tip="Back into New Papers (key R)">
+            hx-target="closest .paper-card" hx-swap="outerHTML" data-tip="Back into New Papers">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-rotate-ccw"></use></svg>
-            Restore <kbd>R</kbd>
+            Restore
         </button>
         {% else %}
-        <button class="focus-ring card-act card-act-trash" data-act="trash" data-tip="Move to Trash (key X)"
+        <button class="focus-ring card-act card-act-trash" data-act="trash" data-tip="Move to Trash"
             hx-post="/paper/{{ pp.paper.arxiv_id }}/trash" hx-vals='{"project_id": {{ project.id }}}'
             hx-target="closest .paper-card" hx-swap="outerHTML">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-trash-2"></use></svg>
-            Trash <kbd>X</kbd>
+            Trash
         </button>
         {% endif %}
         <button class="focus-ring card-act card-act-ask" data-act="ask"
             hx-get="/paper/{{ pp.paper.arxiv_id }}/chat?project_id={{ project.id }}"
             hx-target="#chat-{{ pp.id }}" hx-swap="innerHTML"
-            data-tip="Ask a model questions about this paper; it reads the full text where available. The chat is saved with the paper (key A)">
+            data-tip="Ask a model questions about this paper; it reads the full text where available. The chat is saved with the paper">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-bot"></use></svg>
-            Ask about this paper <kbd>A</kbd>
+            Ask about this paper
         </button>
         <span style="flex: 1;"></span>
         <details class="card-menu">
