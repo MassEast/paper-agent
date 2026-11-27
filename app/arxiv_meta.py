@@ -27,6 +27,7 @@ def from_result(r) -> dict:
         "arxiv_updated": updated.date() if updated and updated.year > 1 else None,
         "arxiv_comment": (getattr(r, "comment", None) or "").strip() or None,
         "journal_ref": (getattr(r, "journal_ref", None) or "").strip() or None,
+        "doi": (getattr(r, "doi", None) or "").strip() or None,  # the journal version's, when the authors gave one
     }
 
 
@@ -38,6 +39,10 @@ def apply(paper, meta: dict) -> None:
         paper.resources_checked_at = None
         paper.references_fetched_at = None  # its references may have changed too
         _log.info("[arxiv-meta] %s: new version v%d (was v%d)", paper.arxiv_id, meta["arxiv_version"], old)
+    meta = dict(meta)
+    doi = meta.pop("doi", None)
+    if doi and (not paper.doi or paper.doi.lower().startswith("10.48550/")):  # arXiv's own DOI is no publication
+        paper.doi = doi
     for k, v in meta.items():
         setattr(paper, k, v)
     paper.arxiv_meta_at = datetime.utcnow()

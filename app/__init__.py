@@ -74,6 +74,15 @@ ORIGIN_BACKFILL_SQL = (
 )
 
 
+# Summaries from before summary_version was recorded: made from the latest version when they are not older than
+# it (or there is only v1); otherwise left unknown, which the card shows as "from an earlier version"
+SUMMARY_VERSION_BACKFILL_SQL = (
+    "UPDATE paper_summaries SET summary_version = (SELECT arxiv_version FROM papers p WHERE p.id = paper_id) "
+    "WHERE summary_version IS NULL AND EXISTS (SELECT 1 FROM papers p WHERE p.id = paper_id "
+    "AND p.arxiv_version IS NOT NULL AND (p.arxiv_version = 1 OR date(generated_at) >= p.arxiv_updated))"
+)
+
+
 def create_app():
     app = Flask(__name__)
 
@@ -187,6 +196,13 @@ def create_app():
             "ALTER TABLE projects ADD COLUMN last_activity_at DATETIME",
             "ALTER TABLE projects ADD COLUMN inactivity_reminders INTEGER DEFAULT 0",
             "UPDATE projects SET last_activity_at = CURRENT_TIMESTAMP WHERE last_activity_at IS NULL",
+            # New arXiv versions (app/versions.py, 2026-11-27)
+            "ALTER TABLE paper_summaries ADD COLUMN summary_version INTEGER",
+            "ALTER TABLE paper_summaries ADD COLUMN version_changes TEXT",
+            "ALTER TABLE paper_summaries ADD COLUMN previous_summary TEXT",
+            "ALTER TABLE paper_member_states ADD COLUMN version_seen INTEGER",
+            "ALTER TABLE project_papers ADD COLUMN version_seen INTEGER",
+            SUMMARY_VERSION_BACKFILL_SQL,
         ]
         for _sql in _migrations:
             try:
@@ -242,11 +258,13 @@ def create_app():
     app.jinja_env.globals["card_connections"] = card_connections
     from app import chat
     chat.init_app(app)
-    from app import members as _members
+    from app import members as _members, versions as _versions
     app.jinja_env.globals.update(
         person=_members.current,
         card_section=lambda pp: _members.section_for(pp, _members.current(pp.project)),
         unseen_move=lambda pp: _members.unseen_move(pp, _members.current(pp.project)),
+        version_unseen=lambda pp: _versions.unseen(pp, _members.current(pp.project)),
+        summary_outdated=lambda paper: _versions.summary_outdated(paper),
         my_tags=lambda pp: _members.tags_for(pp, _members.current(pp.project)),
         my_state=lambda pp: _members.state(pp, _members.current(pp.project)),
         others_marks=lambda pp: _members.others(pp, _members.current(pp.project)),

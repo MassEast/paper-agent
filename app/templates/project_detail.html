@@ -1729,6 +1729,10 @@
                     m.style.color = card.dataset.movedColor;
                     item.appendChild(m);
                 }
+                if (card.dataset.newVersion) {  // a new arXiv version this person hasn't marked seen
+                    const v = el('span', 'inbox-version', '● New version: v' + card.dataset.newVersion);
+                    item.appendChild(v);
+                }
                 const tags = (card.dataset.tags || '').split(',').filter(Boolean);
                 if (name === 'col' && tags.length) {
                     const t = el('span', 'inbox-tags');

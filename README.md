@@ -125,6 +125,7 @@ Return JSON only: {"relevant": true} or {"relevant": false}
 | Code, project page, corresponding authors, venue              | [`PAPER_RESOURCES`](app/prompts.py#L139-L183)                                                              |
 | Pick featured paper                                            | [`FEATURED_PAPER_SELECTION`](app/prompts.py#L125-L137)                                                 |
 | Ask about a paper (chat on a card)                             | [`PAPER_CHAT_SYSTEM`](app/prompts.py#L217-L235)                                                        |
+| What changed in a new arXiv version (Update summary)           | [`VERSION_CHANGES`](app/prompts.py#L255-L270)                                                    |
 
 ## Quick start
 

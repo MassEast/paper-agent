@@ -57,9 +57,9 @@ def _add(pid, arxiv_id, title=None, authors=("A. Author",), tag=None, trashed=Fa
 def test_from_result_reads_version_date_comment_and_journal_ref():
     meta = arxiv_meta.from_result(_result("http://arxiv.org/abs/2611.00001v3", journal_ref="TMLR 2026"))
     assert meta == {"arxiv_version": 3, "arxiv_updated": date(2026, 11, 10),
-                    "arxiv_comment": "Accepted at ICLR 2026", "journal_ref": "TMLR 2026"}
+                    "arxiv_comment": "Accepted at ICLR 2026", "journal_ref": "TMLR 2026", "doi": None}
     empty = arxiv_meta.from_result(_result("http://arxiv.org/abs/2611.00001", updated=None, comment="", journal_ref=None))
-    assert empty == {"arxiv_version": None, "arxiv_updated": None, "arxiv_comment": None, "journal_ref": None}
+    assert empty == {"arxiv_version": None, "arxiv_updated": None, "arxiv_comment": None, "journal_ref": None, "doi": None}
 
 
 def test_a_new_version_has_links_and_references_read_again(app):

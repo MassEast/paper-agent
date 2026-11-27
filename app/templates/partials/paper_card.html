@@ -14,6 +14,8 @@
     data-title="{{ pp.paper.title }}"
     data-why="{{ (pp.relevance_reason or (pp.paper.summary.summary_text if pp.paper.summary else '') or '') | truncate(160) }}"
     {% if show_restore %}data-trashed="{{ pp.trashed_at | berlin_time('%b %d') if pp.trashed_at else '' }}{% if pp.trashed_reason %}, {{ pp.trashed_reason }}{% endif %}"{% endif %}
+    {% set _newv = version_unseen(pp) %}
+    {% if _newv %}data-new-version="{{ pp.paper.arxiv_version }}"{% endif %}
     {% if _me and _sec == 'new' and unseen_move(pp) %}data-moved="{{ pp.moved_by.name }} {{ 'trashed this' if pp.trashed_at else ('put this back into New Papers' if pp.manual_tag is none else 'collected this') }}" data-moved-color="{{ pp.moved_by.color }}"{% endif %}
     style="background-color: var(--paper-2); border-radius: var(--radius-lg); border: 1px solid var(--border-default); padding: var(--space-md);">
     {% set _step = enrich_step(pp.paper_id) %}
@@ -115,6 +117,9 @@
                 {% if pp.paper.is_arxiv %}
                 <a class="card-link" href="https://arxiv.org/abs/{{ pp.paper.arxiv_id }}" target="_blank">arXiv</a>
                 <a class="card-link" href="https://arxiv.org/pdf/{{ pp.paper.arxiv_id }}.pdf" target="_blank">PDF</a>
+                {% if pp.paper.doi and not pp.paper.doi.lower().startswith('10.48550/') %}
+                <a class="card-link" href="https://doi.org/{{ pp.paper.doi }}" target="_blank" rel="noopener" data-tip="The published version (doi.org/{{ pp.paper.doi }})">Published ↗</a>
+                {% endif %}
                 {% elif pp.paper.landing_url %}
                 <a class="card-link" href="{{ pp.paper.landing_url }}" target="_blank" data-tip="{{ pp.paper.landing_url }}">Source ↗</a>
                 {% if pp.paper.pdf_link %}<a class="card-link" href="{{ pp.paper.pdf_link }}" target="_blank" data-tip="{{ pp.paper.pdf_link }}">PDF</a>{% endif %}
@@ -142,6 +147,7 @@
     <div class="card-grid">
     <div class="card-main">
     {% if _me %}{% include "partials/_card_people.html" %}{% endif %}
+    {% include "partials/_card_version.html" %}
 
     {# While Regenerate (or an add) runs, the old texts are hidden; they stay in the DB until the new ones are written #}
     {% if pp.relevance_reason and not _step %}
@@ -179,6 +185,21 @@
             <li>{{ line.strip().lstrip('-•* ').strip() }}</li>
             {% endfor %}
         </ul>
+    </details>
+    {% endif %}
+
+    {% set _chg = pp.paper.summary.changes if pp.paper.summary else none %}
+    {% if _chg and not _step %}
+    <details class="card-fold card-changes"{% if _newv %} open{% endif %}>
+        <summary class="focus-ring"><svg class="card-fold-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-chevron-right"></use></svg><span class="card-label">What changed from v{{ _chg['from'] }} to v{{ _chg['to'] }}</span></summary>
+        <ul>
+            {% for b in _chg['bullets'] %}<li>{{ b }}</li>{% endfor %}
+        </ul>
+        {% set _prev = pp.paper.summary.previous %}
+        {% if _prev %}
+        <p class="card-label" style="margin-top: 8px;">Summary of v{{ _prev['version'] }}</p>
+        <p class="text-sm" style="color: var(--ink-3); line-height: 1.5; border-left: 2px solid var(--border-default); padding-left: 12px;">{{ _prev['summary'] }}</p>
+        {% endif %}
     </details>
     {% endif %}
 
@@ -236,10 +257,13 @@
             <dt>Published</dt><dd>{{ pp.paper.published_date.strftime('%b %-d, %Y') if pp.paper.published_date else pp.paper.year }}</dd>
             {% endif %}
             {% if pp.paper.arxiv_version %}
-            <dt>Version</dt><dd data-tip="The latest version on arXiv{% if pp.paper.arxiv_version > 1 %}: the authors revised the paper; the summary may be from an earlier version (Regenerate reads the latest){% endif %}">v{{ pp.paper.arxiv_version }}{% if pp.paper.arxiv_version > 1 and pp.paper.arxiv_updated %}, {{ pp.paper.arxiv_updated.strftime('%b %-d, %Y') }}{% endif %}</dd>
+            <dt>Version</dt><dd data-tip="The latest version on arXiv{% if pp.paper.arxiv_version > 1 %}: the authors revised the paper{% endif %}">v{{ pp.paper.arxiv_version }}{% if pp.paper.arxiv_version > 1 and pp.paper.arxiv_updated %}, {{ pp.paper.arxiv_updated.strftime('%b %-d, %Y') }}{% endif %}</dd>
             {% endif %}
             {% if pp.paper.venue %}
             <dt>Venue</dt><dd data-tip="Where the paper says it was accepted or published{% if pp.paper.arxiv_comment %} (arXiv comment: {{ pp.paper.arxiv_comment }}){% endif %}">{{ pp.paper.venue }}</dd>
+            {% endif %}
+            {% if pp.paper.journal_ref %}
+            <dt>Journal ref</dt><dd data-tip="The journal reference the authors gave on arXiv">{{ pp.paper.journal_ref }}</dd>
             {% endif %}
             {% if pp.paper.page_count %}
             <dt>Length</dt><dd>{{ pp.paper.page_count }} pages</dd>

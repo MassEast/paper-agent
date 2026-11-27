@@ -15,7 +15,7 @@ from app.auth import login_required
 from app.usage import counted
 from app.models import ChatMessage, Paper, ProjectPaper, Project
 from app import arxiv_meta, chat, resources
-from app import figures, members, note_locks, paper_lists
+from app import figures, members, note_locks, paper_lists, versions
 from app.routes import papers_bp
 from app.utils import base_arxiv_id
 from app.crawl import (
@@ -149,6 +149,16 @@ def seen_paper(arxiv_id):
     """Someone else moved this paper (collected or trashed it) and this person agrees: it leaves their
     New Papers for the section it is in."""
     return _act(_project_paper(arxiv_id), lambda me: None)
+
+
+@papers_bp.route("/paper/<arxiv_id>/version-seen", methods=["POST"])
+@login_required
+def version_seen(arxiv_id):
+    """This person has seen the paper's new arXiv version: the mark goes away for them only (app/versions.py)."""
+    pp = _project_paper(arxiv_id)
+    versions.mark_seen(pp, members.current(pp.project))
+    db.session.commit()
+    return _card_response(pp, pp.project)
 
 
 @papers_bp.route("/paper/<arxiv_id>/vote", methods=["POST"])
@@ -519,14 +529,19 @@ def _regenerate(app, paper_id: int, project_id: int | None) -> None:
                 except Exception as e:
                     _log.warning("[regenerate] institution enrich failed for %s: %s", arxiv_id, e)
 
-                # Version, comment and journal ref (the card's Version and Venue)
+            if paper.is_arxiv:
+                # Version, comment and journal ref (the card's Version and Venue), so the summary is of the latest
                 try:
-                    meta = arxiv_meta._fetch([paper.arxiv_id]).get(paper.arxiv_id)
+                    meta = arxiv_meta._fetch([arxiv_id]).get(base_arxiv_id(arxiv_id))
                     if meta:
                         arxiv_meta.apply(paper, meta)
                 except Exception as e:
                     _log.warning("[regenerate] arXiv data fetch failed for %s: %s", arxiv_id, e)
             db.session.commit()
+
+            # A newer version than the summary's: keep the old summary and say what changed (app/versions.py)
+            old_v = versions.old_version(paper) if versions.summary_outdated(paper) else None
+            previous = versions.snapshot(paper, old_v) if old_v else None
 
             web_page = not paper.is_arxiv and bool(paper.page_url) and paper.source == "web"
             if paper.is_arxiv:
@@ -543,6 +558,12 @@ def _regenerate(app, paper_id: int, project_id: int | None) -> None:
                 if content:  # nothing to read: keep what is there rather than a summary made up from the title
                     step("Writing the AI summary and main contributions")
                     write_summary(paper, content, web_page=web_page)
+                    db.session.commit()
+                if old_v and content:
+                    step(f"Comparing v{old_v} with v{paper.arxiv_version}")
+                    old_text = get_paper_content(f"{base_arxiv_id(arxiv_id)}v{old_v}")
+                    paper.summary.previous_summary = previous
+                    versions.store_changes(paper, old_v, versions.describe(paper, old_v, old_text, full_text))
                     db.session.commit()
                 if full_text:
                     step("Finding code, project page and corresponding authors")

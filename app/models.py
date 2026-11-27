@@ -4,6 +4,8 @@ import os
 import re
 from datetime import datetime
 
+from sqlalchemy import event, inspect
+
 from app import db
 
 # The research interest goes into every screening prompt, so its length is paid once per paper screened.
@@ -210,8 +212,36 @@ class PaperSummary(db.Model):
     # What the summary and main contributions were made from: "full_text" | "web_page" (a web paper's
     # landing-page text) | "abstract" (no full text could be fetched). None: made before this was recorded.
     content_source = db.Column(db.Text)
+    # The arXiv version the summary was made from (set on every write, below). None: unknown, made from an
+    # older version than the latest before this was recorded (2026-11-27), or not an arXiv paper.
+    summary_version = db.Column(db.Integer)
+    # After Update summary on a new version (app/versions.py): JSON {"from": 1, "to": 3, "bullets": [...]}, what
+    # changed between the version of the old summary and the new one, and the old summary itself
+    # {"version": 1, "summary": ..., "contributions": ...}
+    version_changes = db.Column(db.Text)
+    previous_summary = db.Column(db.Text)
 
     paper = db.relationship("Paper", back_populates="summary")
+
+    @property
+    def changes(self) -> dict | None:
+        return json.loads(self.version_changes) if self.version_changes else None
+
+    @property
+    def previous(self) -> dict | None:
+        return json.loads(self.previous_summary) if self.previous_summary else None
+
+
+@event.listens_for(PaperSummary, "before_insert")
+@event.listens_for(PaperSummary, "before_update")
+def _stamp_summary(mapper, connection, target):
+    """A new or rewritten summary records which arXiv version it was read from, and when. Papers are flushed
+    before their summaries, so a version stored in the same commit is already there."""
+    if inspect(target).attrs.summary_text.history.has_changes():
+        row = connection.execute(db.text("SELECT arxiv_version FROM papers WHERE id = :i"),
+                                 {"i": target.paper_id}).first()
+        target.summary_version = row[0] if row else None
+        target.generated_at = datetime.utcnow()
 
 
 class PaperReference(db.Model):
@@ -290,6 +320,8 @@ class PaperMemberState(db.Model):
     vote = db.Column(db.Integer)  # 1-5
     # When this person last acted on the paper; a move by someone else after this puts it back in their New Papers
     seen_at = db.Column(db.DateTime)
+    # The newest arXiv version this person has marked as seen (app/versions.py)
+    version_seen = db.Column(db.Integer)
 
     project_paper = db.relationship("ProjectPaper", back_populates="member_states")
     member = db.relationship("ProjectMember")
@@ -330,6 +362,8 @@ class ProjectPaper(db.Model):
     # When a crawl last asked Semantic Scholar which papers cite this Collection paper (and got an answer):
     # the citations source checks the CITATION_MAX_SEEDS checked longest ago first (citation_seeds)
     citations_checked_at = db.Column(db.DateTime, nullable=True)
+    # Projects without per-person mode: the newest arXiv version marked as seen (app/versions.py)
+    version_seen = db.Column(db.Integer)
 
     __table_args__ = (
         db.UniqueConstraint("project_id", "paper_id"),

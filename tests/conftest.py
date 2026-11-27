@@ -154,6 +154,7 @@ def _no_card_data_passes(monkeypatch):
     arXiv, Semantic Scholar and the model: off in every test; their own tests call the real functions
     (REAL_CARD_PASSES)."""
     monkeypatch.setattr("app.arxiv_meta.refresh", lambda *a, **k: 0)
+    monkeypatch.setattr("app.arxiv_meta._fetch", lambda ids: {})  # Regenerate asks arXiv for the latest version
     monkeypatch.setattr("app.crawl.backfill_resources", lambda *a, **k: 0)
     monkeypatch.setattr("app.connections.fetch_references", lambda *a, **k: 0)
     # a paper added by hand gets its why-relevant line from the model; tests/test_enrich_status.py uses the real one

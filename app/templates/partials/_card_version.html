@@ -1,0 +1,28 @@
+{# A new arXiv version (app/versions.py): in Collection marked for each person until they mark it seen; anywhere
+   but Trash, an offer to update a summary read from an older version. Part of paper_card.html (expects pp, project,
+   _newv, _step). #}
+{% set _old = summary_outdated(pp.paper) and not pp.trashed_at %}
+{% if (_newv or _old) and not _step %}
+{% set _p = pp.paper %}
+{% set _sv = _p.summary.summary_version %}
+<div class="version-note" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-md); font-size: 0.8rem; color: var(--ink-2); background-color: color-mix(in oklch, var(--error) 8%, var(--paper-3)); border-left: 3px solid var(--error);">
+    <span style="flex: 1; min-width: 12rem;">
+        <strong style="color: var(--error);">New version on arXiv: v{{ _p.arxiv_version }}</strong>
+        {% if _p.arxiv_updated %}<span style="color: var(--ink-4); margin-left: 4px;">{{ _p.arxiv_updated.strftime('%b %-d, %Y') }}</span>{% endif %}
+        {% if _p.arxiv_comment %}<br><span style="color: var(--ink-3);">Authors' comment: {{ _p.arxiv_comment }}</span>{% endif %}
+        {% if _old %}<br>The summary below is from {{ 'v%d' % _sv if _sv else 'an earlier version' }}.{% elif _p.summary.changes %}<br>What changed is under the summary.{% endif %}
+    </span>
+    {% if _old %}
+    <button type="button" class="focus-ring rw-chip-btn" hx-post="/paper/{{ _p.arxiv_id }}/regenerate" hx-vals='{"project_id": {{ project.id }}}'
+        hx-target="closest .paper-card" hx-swap="outerHTML" hx-disabled-elt="this"
+        style="padding: 3px 10px; border-radius: var(--radius-md); font-size: 0.75rem;"
+        data-tip="Reads v{{ _p.arxiv_version }}, writes the summary again and says what changed; the old summary is kept">Update summary</button>
+    {% endif %}
+    {% if _newv %}
+    <button type="button" class="focus-ring rw-chip-btn" hx-post="/paper/{{ _p.arxiv_id }}/version-seen" hx-vals='{"project_id": {{ project.id }}}'
+        hx-target="closest .paper-card" hx-swap="outerHTML"
+        style="padding: 3px 10px; border-radius: var(--radius-md); font-size: 0.75rem;"
+        data-tip="The mark goes away for you{% if project.per_person %}; the others still see it until they mark it seen too{% endif %}">Seen</button>
+    {% endif %}
+</div>
+{% endif %}

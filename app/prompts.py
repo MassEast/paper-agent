@@ -250,3 +250,21 @@ PAPER_CHAT_SOURCE_NOTES = {
     "abstract": "Only the abstract is available, not the full text. When a question cannot be "
                 "answered from the abstract alone, say so plainly instead of guessing:",
 }
+
+
+VERSION_CHANGES = """\
+The authors posted a new version of this paper on arXiv (v{old} -> v{new}). Tell researchers who read v{old} \
+what changed.
+
+Title: {title}
+Authors' arXiv comment on v{new} (may say what changed or where the paper was accepted): {comment}
+Journal reference: {journal_ref}
+
+Changed passages, sentences REMOVED from v{old} and ADDED in v{new} (rewordings show up as both; may be cut off):
+{diff}
+
+In 1-4 short bullet points, name the changes that matter to a reader: new or dropped experiments, results \
+that changed, new parts of the method, corrected errors, the venue it was accepted at. Skip rewording, typo, \
+formatting and reference changes. If nothing of substance changed, give one bullet that says so.
+
+Return JSON only: {{"bullets": ["...", "..."]}}"""
