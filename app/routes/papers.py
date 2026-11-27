@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import re
+import threading
 from datetime import datetime
 
 from flask import current_app, render_template, request, jsonify, Response, send_from_directory
@@ -450,99 +451,122 @@ def transfer_paper(arxiv_id):
 @papers_bp.route("/paper/<arxiv_id>/regenerate", methods=["POST"])
 @login_required
 def regenerate_paper(arxiv_id):
-    """Re-fetch figure + citations (arXiv) or citations + institutions (Scholar-only paper), then
-    regenerate the shared summary + main contributions (full text, like a crawl) and this project's
-    why-relevant line (abstract)."""
+    """Start Regenerate in the background and answer with the card at once: it shows the step (crawl._enriching,
+    like a freshly added paper, also after a reload) instead of the summary being rewritten. A second click while
+    it runs starts nothing."""
+    from app.crawl import enrich_step, _set_step
     paper = Paper.query.filter_by(arxiv_id=arxiv_id).first_or_404()
     project_id = request.form.get("project_id", type=int)
-    project = Project.query.get(project_id) if project_id else None
-
-    with counted(project_id, "regenerate"):
-        if paper.is_arxiv:
-            # Figure
-            try:
-                figure_url, figure_caption = get_paper_figure(arxiv_id)
-                if figure_url:
-                    paper.figure_url = figure_url
-                    paper.figure_caption = figure_caption
-            except Exception as e:
-                _log.warning("[regenerate] figure fetch failed for %s: %s", arxiv_id, e)
-
-            # Citations
-            try:
-                count = get_citation_count(arxiv_id)
-                if count is not None:
-                    if not paper.citation_manual or count >= paper.citation_count:
-                        paper.citation_count = count
-                        paper.citation_manual = False
-                    paper.citation_fetched_at = datetime.utcnow()
-            except Exception as e:
-                _log.warning("[regenerate] citation fetch failed for %s: %s", arxiv_id, e)
-
-        elif paper.semantic_scholar_id:
-            # Non-arXiv paper with a Scholar ID — fetch citations only
-            try:
-                count = get_citation_count_by_scholar_id(paper.semantic_scholar_id)
-                if count is not None:
-                    if not paper.citation_manual or count >= paper.citation_count:
-                        paper.citation_count = count
-                        paper.citation_manual = False
-                    paper.citation_fetched_at = datetime.utcnow()
-            except Exception as e:
-                _log.warning("[regenerate] citation fetch failed for scholar:%s: %s", paper.semantic_scholar_id, e)
-
-            # Institutions (batch function takes a list; skips if already set — force by clearing)
-            paper.institutions = None
-            try:
-                enrich_institutions_from_scholar([paper])
-            except Exception as e:
-                _log.warning("[regenerate] institution enrich failed for %s: %s", arxiv_id, e)
-
-            # Version, comment and journal ref (the card's Version and Venue)
-            try:
-                meta = arxiv_meta._fetch([paper.arxiv_id]).get(paper.arxiv_id)
-                if meta:
-                    arxiv_meta.apply(paper, meta)
-            except Exception as e:
-                _log.warning("[regenerate] arXiv data fetch failed for %s: %s", arxiv_id, e)
-
-        # Summary + main contributions, from the full text like a crawl (abstract if there is none); a paper added
-        # from a web page (not arXiv, no PDF of its own) reads that page again
-        web_page = not paper.is_arxiv and bool(paper.page_url) and paper.source == "web"
-        if paper.is_arxiv:
-            full_text = get_paper_content(arxiv_id)
-        elif web_page:
-            text = page_text_for_summary(extract_paper_info_from_url(paper.page_url))
-            full_text = text if text and text != (paper.abstract or "") else None
-        else:
-            full_text = None
-        content = full_text or paper.abstract or ""
-        try:
-            if content:  # nothing to read: keep what is there rather than a summary made up from the title
-                write_summary(paper, content, web_page=web_page)
-            if full_text:  # code, project page, corresponding authors, venue
-                resources.apply(paper, resources.extract_for(paper, full_text)[0])
-        except LLMUnavailableError as e:
-            _log.warning("[regenerate] LLM unavailable for %s: %s", arxiv_id, e)
-
-        # This project's why-relevant line (the summary above is shared by all projects)
-        pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first() if project_id else None
-        if pp and project and (project.research_interest or "").strip():
-            try:
-                why = generate_relevance_reason(paper.title, paper.abstract or "", project.research_interest, full_text)
-                if why:
-                    pp.relevance_reason = why
-            except LLMUnavailableError as e:
-                _log.warning("[regenerate] LLM unavailable for why-line of %s: %s", arxiv_id, e)
-
-        db.session.commit()
-
-    if request.headers.get("HX-Request") and project_id:
-        pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first()
-        if pp:
-            show_curate = pp.manual_tag is None
-            return render_template("partials/paper_card.html", pp=pp, project=project, show_curate=show_curate)
+    if enrich_step(paper.id) is None:
+        _set_step(paper.id, "regenerate", "Waiting to start")
+        _start_regenerate(current_app._get_current_object(), paper.id, project_id)
+    pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first() if project_id else None
+    if request.headers.get("HX-Request") and pp:
+        return render_template("partials/paper_card.html", pp=pp, project=pp.project, show_curate=pp.manual_tag is None)
     return ("", 204)
+
+
+def _start_regenerate(app, paper_id: int, project_id: int | None) -> None:
+    threading.Thread(target=_regenerate, args=(app, paper_id, project_id), daemon=True).start()
+
+
+def _regenerate(app, paper_id: int, project_id: int | None) -> None:
+    """Re-fetch figure + citations (arXiv) or citations + institutions (Scholar-only paper), then regenerate the
+    shared summary + main contributions (full text like a crawl; a paper added from a web page reads that page
+    again), the links, and this project's why-relevant line. The old summary stays until the new one is written."""
+    from app.crawl import _set_step, _end_steps
+    step = lambda text: _set_step(paper_id, "regenerate", text)  # noqa: E731
+    try:
+        with app.app_context(), counted(project_id, "regenerate"):
+            paper = db.session.get(Paper, paper_id)
+            arxiv_id = paper.arxiv_id
+            project = db.session.get(Project, project_id) if project_id else None
+            if paper.is_arxiv:
+                step("Fetching Figure 1 and the citation count")
+                try:
+                    figure_url, figure_caption = get_paper_figure(arxiv_id)
+                    if figure_url:
+                        paper.figure_url = figure_url
+                        paper.figure_caption = figure_caption
+                except Exception as e:
+                    _log.warning("[regenerate] figure fetch failed for %s: %s", arxiv_id, e)
+                try:
+                    count = get_citation_count(arxiv_id)
+                    if count is not None:
+                        if not paper.citation_manual or count >= paper.citation_count:
+                            paper.citation_count = count
+                            paper.citation_manual = False
+                        paper.citation_fetched_at = datetime.utcnow()
+                except Exception as e:
+                    _log.warning("[regenerate] citation fetch failed for %s: %s", arxiv_id, e)
+
+            elif paper.semantic_scholar_id:
+                step("Fetching citations and institutions")
+                try:
+                    count = get_citation_count_by_scholar_id(paper.semantic_scholar_id)
+                    if count is not None:
+                        if not paper.citation_manual or count >= paper.citation_count:
+                            paper.citation_count = count
+                            paper.citation_manual = False
+                        paper.citation_fetched_at = datetime.utcnow()
+                except Exception as e:
+                    _log.warning("[regenerate] citation fetch failed for scholar:%s: %s", paper.semantic_scholar_id, e)
+
+                # Institutions (batch function takes a list; skips if already set — force by clearing)
+                paper.institutions = None
+                try:
+                    enrich_institutions_from_scholar([paper])
+                except Exception as e:
+                    _log.warning("[regenerate] institution enrich failed for %s: %s", arxiv_id, e)
+
+                # Version, comment and journal ref (the card's Version and Venue)
+                try:
+                    meta = arxiv_meta._fetch([paper.arxiv_id]).get(paper.arxiv_id)
+                    if meta:
+                        arxiv_meta.apply(paper, meta)
+                except Exception as e:
+                    _log.warning("[regenerate] arXiv data fetch failed for %s: %s", arxiv_id, e)
+            db.session.commit()
+
+            web_page = not paper.is_arxiv and bool(paper.page_url) and paper.source == "web"
+            if paper.is_arxiv:
+                step("Reading the full text")
+                full_text = get_paper_content(arxiv_id)
+            elif web_page:
+                step("Reading the web page")
+                text = page_text_for_summary(extract_paper_info_from_url(paper.page_url))
+                full_text = text if text and text != (paper.abstract or "") else None
+            else:
+                full_text = None
+            content = full_text or paper.abstract or ""
+            try:
+                if content:  # nothing to read: keep what is there rather than a summary made up from the title
+                    step("Writing the AI summary and main contributions")
+                    write_summary(paper, content, web_page=web_page)
+                    db.session.commit()
+                if full_text:
+                    step("Finding code, project page and corresponding authors")
+                    resources.apply(paper, resources.extract_for(paper, full_text)[0])
+                    db.session.commit()
+            except LLMUnavailableError as e:
+                _log.warning("[regenerate] LLM unavailable for %s: %s", arxiv_id, e)
+
+            # This project's why-relevant line (the summary above is shared by all projects)
+            pp = ProjectPaper.query.filter_by(project_id=project_id, paper_id=paper.id).first() if project_id else None
+            if pp and project and (project.research_interest or "").strip():
+                step("Writing why it's relevant for this project")
+                try:
+                    why = generate_relevance_reason(paper.title, paper.abstract or "", project.research_interest, full_text)
+                    if why:
+                        pp.relevance_reason = why
+                except LLMUnavailableError as e:
+                    _log.warning("[regenerate] LLM unavailable for why-line of %s: %s", arxiv_id, e)
+            db.session.commit()
+            _log.info("[regenerate] done: %s", arxiv_id)
+    except Exception:
+        _log.exception("[regenerate] failed for paper %s", paper_id)
+    finally:
+        _end_steps(paper_id, "regenerate")
 
 
 @papers_bp.route("/paper/<arxiv_id>/retry-web-enrich", methods=["POST"])

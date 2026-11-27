@@ -167,3 +167,11 @@ import app.crawl as _crawl_mod  # noqa: E402
 REAL_CARD_PASSES = {"arxiv_meta.refresh": _arxiv_meta_mod.refresh, "crawl.backfill_resources": _crawl_mod.backfill_resources,
                     "connections.fetch_references": _connections_mod.fetch_references,
                     "crawl._add_relevance_reason": _crawl_mod._add_relevance_reason}
+
+
+@pytest.fixture(autouse=True)
+def _regenerate_inline(monkeypatch):
+    """Regenerate runs in a background thread in the app; in tests it runs inside the request, so its result can
+    be checked right after the POST (a test that wants it pending patches _start_regenerate itself)."""
+    from app.routes import papers
+    monkeypatch.setattr(papers, "_start_regenerate", lambda app, pid, prid: papers._regenerate(app, pid, prid))

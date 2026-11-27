@@ -64,10 +64,27 @@ def test_regenerate_on_a_web_paper_reads_its_page_again(client, project):
              patch.object(routes.resources, "apply"), \
              patch.object(routes, "generate_relevance_reason", return_value="why"):
             r = client.post("/paper/web:test123/regenerate", data={"project_id": project.id},
-                            headers={"HX-Request": "true"})
+                            headers={"HX-Request": "true"})  # runs inline in tests (conftest)
         assert r.status_code == 200 and "Regenerate" in r.get_data(as_text=True)  # button on web cards too
         fetch.assert_called_once_with(URL)
         assert write.call_args.args[1] == text and write.call_args.kwargs["web_page"] is True
+
+        # While it runs: the card shows the step, not the old summary, and a second click starts nothing
+        from app.crawl import _enriching
+        from app.models import PaperSummary
+        db.session.add(PaperSummary(paper_id=paper.id, summary_text="OLD SUMMARY", content_source="web_page"))
+        db.session.commit()
+        with patch.object(routes, "_start_regenerate") as start:
+            r = client.post("/paper/web:test123/regenerate", data={"project_id": project.id},
+                            headers={"HX-Request": "true"})
+            page = r.get_data(as_text=True)
+            assert start.call_count == 1
+            assert "Waiting to start" in page and "OLD SUMMARY" not in page and "Regenerating" not in page
+            client.post("/paper/web:test123/regenerate", data={"project_id": project.id},
+                        headers={"HX-Request": "true"})
+            assert start.call_count == 1
+        _enriching.pop(paper.id, None)
+        PaperSummary.query.filter_by(paper_id=paper.id).delete()
     finally:
         ProjectPaper.query.filter_by(paper_id=paper.id).delete()
         db.session.delete(paper)

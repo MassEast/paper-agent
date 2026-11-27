@@ -21,7 +21,7 @@
     {# Details still being fetched in the background (crawl._enriching): the card redraws itself when the step changes #}
     <div class="enrich-status" hx-get="/project-paper/{{ pp.id }}/card?step={{ _step | urlencode }}"
         hx-trigger="every 2s" hx-swap="outerHTML"
-        data-tip="This paper was just added; its details are being fetched in the background. The card fills in by itself, no need to reload.">
+        data-tip="Being worked on in the background (a paper just added, or Regenerate). The card fills in by itself, no need to reload.">
         <span class="enrich-spinner" aria-hidden="true"></span>{{ _step }}<span class="thinking-dots"></span>
     </div>
     {% endif %}
@@ -143,7 +143,8 @@
     <div class="card-main">
     {% if _me %}{% include "partials/_card_people.html" %}{% endif %}
 
-    {% if pp.relevance_reason %}
+    {# While Regenerate (or an add) runs, the old texts are hidden; they stay in the DB until the new ones are written #}
+    {% if pp.relevance_reason and not _step %}
     <div class="mb-3 border-l-2 relevance-reason" style="border-color: var(--warning); padding-left: 12px;">
         <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Why it's relevant for this project
             {%- if pp.screen_source == "abstract" %}
@@ -155,7 +156,7 @@
     </div>
     {% endif %}
 
-    {% if pp.paper.summary %}
+    {% if pp.paper.summary and not _step %}
     <div class="mb-3 border-l-2" style="border-color: var(--accent); padding-left: 12px;">
         {% set src = pp.paper.summary.content_source %}
         <p style="font-size: 0.7rem; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">AI Summary
@@ -170,7 +171,7 @@
     </div>
     {% endif %}
 
-    {% if pp.paper.summary and pp.paper.summary.main_contributions %}
+    {% if pp.paper.summary and pp.paper.summary.main_contributions and not _step %}
     <details class="card-fold card-contrib">
         <summary class="focus-ring"><svg class="card-fold-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="/static/icons.svg#icon-chevron-right"></use></svg><span class="card-label">Main contributions</span></summary>
         <ul>
@@ -426,9 +427,9 @@
         </button>
                 {% endif %}
         {# every paper: arXiv ones read the full text, web ones their page again, others the abstract #}
+        {% if not _step %}
         <button
             hx-post="/paper/{{ pp.paper.arxiv_id }}/regenerate"
-            hx-request='{"timeout": 180000}'
             hx-vals='{"project_id": {{ project.id }}}'
             hx-target="#paper-card-{{ pp.paper.arxiv_id | replace('.', '-') | replace('/', '-') | replace(':', '-') }}-{{ project.id }}"
             hx-swap="outerHTML"
@@ -439,6 +440,7 @@
             <span class="htmx-request-hide">Regenerate</span>
             <span class="htmx-request-show" style="display:none;">Regenerating…</span>
         </button>
+        {% endif %}
         {% if pp.paper.summary and pp.paper.summary.elapsed_ms is not none %}
         <span class="card-menu-note"
             data-tip="Model: the model that wrote the AI summary and main contributions | Time: how long the model took to write them | Tokens: what the model read and wrote for them (the paper text in, the summary out), for the latest run; on older cards this may also count the relevance check or earlier runs. All of the project's LLM usage is under the crawl calendar">
